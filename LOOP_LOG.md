@@ -130,3 +130,12 @@
 - 宿泊予定カレンダーとナレッジUI 3タブ拡張は未コミットドラフト依存のため確定設計を避けた。
 - コミット: TASKS.md／LOOP_LOG.md／`docs/spec/detailed-design/画面設計.md` を1コミット。
 - 次: API設計（エンドポイント一覧・リクエスト/レスポンス概要）に着手する。
+
+## [2026-08-16] 詳細設計3: API設計
+
+- DB物理設計・画面設計を踏まえ`docs/spec/detailed-design/API設計.md`を新規作成。9機能領域・
+  約35エンドポイントを一覧化し、街人登録承認・注文明細編集・AIコンシェルジュ質問応答・宿泊予約
+  Webhookの4件をOpenAPI風yamlで詳細化。
+- 宿泊予約WebhookはスキーマをQUESTIONS.md未回答（§9 #30）ゆえ「参考イメージ」に留め確定させていない。
+- コミット: TASKS.md／LOOP_LOG.md／`docs/spec/detailed-design/API設計.md` を1コミット。
+- 次: 外部連携設計（line-rag-bot、eumo等）に着手する。
