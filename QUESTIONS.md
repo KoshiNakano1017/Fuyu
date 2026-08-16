@@ -9,6 +9,30 @@
 
 ---
 
+## [2026-08-16] ナレッジ・RAG基盤：pgvector（浮遊街アプリ本体）とFirestore（line-rag-bot）の二重化疑義
+- ステータス: 未回答
+- 優先度: 最高（詳細設計（DB物理設計・API設計・画面設計のナレッジ関連部分）の前提そのものが変わりうる）
+- 背景: オーナー追加指示によるdetailed-design作成の一環で、`docs/spec/RAGシステム仕様.md`・v13・Master Indexが
+  前提とする「pgvector（Supabase内）」のRAG基盤設計と、別プロジェクト`line-rag-bot`側の設計書
+  （`C:\Users\user\Documents\MyVault\Myvault\Projects\line-rag-bot\docs\08-浮遊街RAG詳細設計.md`）を
+  突き合わせたところ、**line-rag-bot側は浮遊街を1テナントとして扱うFirestoreベースの独自RAG実装であり、
+  レシピ・道具マスタ／failure_patterns／エスカレーション機能が2026-08-15〜16時点で既に実装済み**である
+  ことが判明した。正本v13・RAGシステム仕様はこのline-rag-bot・Firestore実装の存在を明示的に位置づけて
+  おらず、両者が同じ役割（ナレッジ登録・RAG検索・エスカレーション）を別々の技術（pgvector vs Firestore）
+  で二重実装している可能性がある。line-rag-bot側docs/08 §9-5には「ナレッジ登録UIは最終的に浮遊街アプリ
+  本体の管理者権限UIに統合し、line-rag-bot側にREST APIを切り出す」という2026-08-14の方針決定が既に
+  記録されており、これに従うなら浮遊街アプリ本体は独自のpgvectorナレッジ基盤を持たず、line-rag-bot API
+  を呼び出すクライアントとして実装すべき、とも読める。一方、v13の記述だけを見ると自前のpgvector実装を
+  前提にしているようにも見え、確定的な判断ができなかった。詳細は
+  `docs/spec/detailed-design/外部連携設計.md` §1を参照。
+- 関連ファイル: `docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md` §5.7、`docs/spec/RAGシステム仕様.md`、
+  `docs/spec/detailed-design/外部連携設計.md`、`docs/spec/detailed-design/DB物理設計.md` §3-3、
+  line-rag-bot `docs/08-浮遊街RAG詳細設計.md`（特に§9-5・§1スコープ表）
+- 選択肢:
+  - A. 統合型：line-rag-botのFirestoreへ一本化し、浮遊街アプリ本体はline-rag-bot APIのクライアントとして実装する（自前のpgvectorナレッジテーブルは不要）
+  - B. 並存型：アプリ内チャット（浮遊街アプリ本体・pgvector）とLINEチャットボット（line-rag-bot・Firestore）を意図的に別データとして並存させる（役割分担を明確化した上で）
+  - C. 移行型：実態としてline-rag-botの実装が先行しているため、正本側の記述をline-rag-bot前提に書き換えて追認する
+
 ## [2026-08-15] 技術スタックは正式に承認されているか
 - ステータス: 回答済み（2026-08-15）
 - 回答: 正式承認済み（選択肢A）。Next.js(Vercel) / Supabase(PostgreSQL・Auth・Realtime・RLS) / Cloud Storage for Firebase / Claude API・Agent SDK / pgvector / MCP のスタックを確定として自律ループ（fuyuugai-appは仕様整理のみ、実装は別途基盤構築後）が前提にしてよい。テスト基盤（CI/単体・結合テスト方針）は依然未定のため、実装着手前に別途構築タスクが必要。

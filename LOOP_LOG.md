@@ -139,3 +139,18 @@
 - 宿泊予約WebhookはスキーマをQUESTIONS.md未回答（§9 #30）ゆえ「参考イメージ」に留め確定させていない。
 - コミット: TASKS.md／LOOP_LOG.md／`docs/spec/detailed-design/API設計.md` を1コミット。
 - 次: 外部連携設計（line-rag-bot、eumo等）に着手する。
+
+## [2026-08-16] 詳細設計4: 外部連携設計（重大な新規論点あり）
+
+- line-rag-bot `docs/08-浮遊街RAG詳細設計.md`（読解のみ・コード変更なし）を精読し、
+  `docs/spec/detailed-design/外部連携設計.md`を新規作成。
+- **重大発見**: line-rag-botは浮遊街をテナントとして扱うFirestoreベースの独自RAG実装であり、
+  レシピ・道具マスタ／failure_patterns／エスカレーションが既に実装済み。正本v13・RAGシステム仕様が
+  前提とする「pgvector（Supabase）」ベースの自前ナレッジ基盤と、役割が重複・二重化している疑義を発見。
+  DB物理設計.md・API設計.md・画面設計.mdのナレッジ関連部分（`knowledge_items`等）の前提が揺らぐ
+  重大な論点のため、独断で解決せずQUESTIONS.mdへ最高優先度の新規項目として追記した
+  （3つの解釈A/B/Cを提示し、判断はオーナーに委ねた）。
+- eumo連携（Phase2）・朝会音声のGemini直接連携も参考設計として記載。
+- コミット: TASKS.md／LOOP_LOG.md／QUESTIONS.md／`docs/spec/detailed-design/外部連携設計.md` を1コミット。
+- 次: 非機能要件詳細（性能・セキュリティ・可用性）に着手する（時間・コンテキスト予算次第。
+  オーナー指示により全部終わらなくても可）。
