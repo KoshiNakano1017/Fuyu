@@ -1,0 +1,212 @@
+#!/usr/bin/env bash
+#
+# 浮遊街アプリ pre-commit フック（CLAUDE.md §6.1）
+#
+# 方針: ここには「数秒で終わる」検査だけを置く。
+#       重いフルテストと Claude コードレビューは push 後の GitHub Actions に任せる（二段構え）。
+#
+# セットアップ: git config core.hooksPath .githooks
+# 緊急回避:     git commit --no-verify （回避理由を次のコミットメッセージに書くこと）
+
+set -uo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT" || exit 1
+
+RED=$'\033[31m'; YELLOW=$'\033[33m'; GREEN=$'\033[32m'; DIM=$'\033[2m'; RESET=$'\033[0m'
+FAILED=0
+
+fail() { printf '%s✗ %s%s\n' "$RED" "$1" "$RESET"; FAILED=1; }
+warn() { printf '%s! %s%s\n'  "$YELLOW" "$1" "$RESET"; }
+ok()   { printf '%s✓ %s%s\n'  "$GREEN" "$1" "$RESET"; }
+info() { printf '%s  %s%s\n'  "$DIM" "$1" "$RESET"; }
+
+# ステージされた「追加・変更」ファイル（削除は除く）
+#
+# core.quotePath=false は必須。既定では git が非ASCIIパスを
+# "docs/spec/\346\251\237..." のようにクォート＋8進エスケープして出力するため、
+# 日本語ファイル名がパターンマッチから漏れる。
+GIT_LS='git -c core.quotePath=false'
+
+STAGED_FILES="$($GIT_LS diff --cached --name-only --diff-filter=ACMR)"
+
+if [ -z "$STAGED_FILES" ]; then
+  echo "ステージされた変更がありません。"
+  exit 0
+fi
+
+echo "── pre-commit 検査 ─────────────────────────────"
+
+# ─────────────────────────────────────────────
+# 1. 個人情報・機密ファイルのパス名ガード（CLAUDE.md §3.1）
+# ─────────────────────────────────────────────
+FORBIDDEN_PATHS='(^|/)\.env($|\.)|会員データ/|会員リスト|members_.*\.csv$|_personal\.csv$|_dump\.sql$|service-account.*\.json$|credentials.*\.json$|\.(pem|p12|key)$'
+
+BLOCKED="$(printf '%s\n' "$STAGED_FILES" | grep -Ei "$FORBIDDEN_PATHS" | grep -v '\.env\.example$')"
+if [ -n "$BLOCKED" ]; then
+  fail "機密・個人情報にあたるファイルがステージされています"
+  printf '%s\n' "$BLOCKED" | sed 's/^/      /'
+  info "CLAUDE.md §3.1 を参照。git restore --staged <file> で外してください。"
+fi
+
+# ─────────────────────────────────────────────
+# 2. 秘密情報スキャン
+#    gitleaks があればそれを使い、無ければ組み込みのパターン検査にフォールバック
+# ─────────────────────────────────────────────
+if command -v gitleaks >/dev/null 2>&1; then
+  if gitleaks protect --staged --no-banner --redact >/dev/null 2>&1; then
+    ok "gitleaks: 秘密情報なし"
+  else
+    fail "gitleaks が秘密情報を検出しました"
+    gitleaks protect --staged --no-banner --redact 2>&1 | sed 's/^/      /' | head -40
+    info "検出されたキーは必ずローテーション（無効化・再発行）してください（CLAUDE.md §3.3）。"
+  fi
+else
+  warn "gitleaks 未導入 — 簡易パターン検査で代替します（CIでは全履歴をスキャンします）"
+
+  # 代表的なトークン書式 + 「変数への実値代入」を検出する。
+  # プレースホルダ（your-..., xxx, <...>, ${...}）は誤検出を避けるため後段で除外する。
+  SECRET_PATTERNS=(
+    'sk-ant-[A-Za-z0-9_-]{20,}'                        # Anthropic API key
+    'AIza[0-9A-Za-z_-]{35}'                            # Google API key
+    'eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}'        # JWT（Supabase service_role 等）
+    'ghp_[A-Za-z0-9]{36}'                              # GitHub PAT
+    '-----BEGIN [A-Z ]*PRIVATE KEY-----'               # 秘密鍵
+    '(SERVICE_ROLE|SECRET|PASSWORD|PRIVATE_KEY|ACCESS_TOKEN|CHANNEL_SECRET)[A-Z_]*[[:space:]]*[:=][[:space:]]*["'"'"']?[A-Za-z0-9/+_-]{16,}'
+  )
+
+  # プレースホルダ除外パターン。
+  # 注意: <...> は「山括弧で囲まれた記入例」を指す。GNU grep では \< \> が
+  # 単語境界を意味してしまい、ほぼ全ての行が除外される（＝検出漏れ）ため
+  # バックスラッシュを付けてはならない。
+  PLACEHOLDER_RE='your[-_]|example|placeholder|dummy|xxx+|<[a-z_]+>|\$\{|process\.env|REPLACE_ME'
+
+  # ファイル名に空白や日本語を含む場合に壊れないよう read で1行ずつ処理する
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    case "$f" in
+      *.env.example|*.md|*.lock|package-lock.json) continue ;;
+    esac
+    [ -f "$f" ] || continue
+
+    for pat in "${SECRET_PATTERNS[@]}"; do
+      # -e は必須。'-----BEGIN ...' のように - で始まるパターンを
+      # grep がオプションと誤認するのを防ぐ
+      HIT="$(git show ":$f" 2>/dev/null \
+        | grep -nE -e "$pat" \
+        | grep -viE -e "$PLACEHOLDER_RE" \
+        | head -3)"
+      if [ -n "$HIT" ]; then
+        fail "秘密情報の可能性: $f"
+        printf '%s\n' "$HIT" | cut -c1-100 | sed 's/^/      /'
+      fi
+    done
+  done <<EOF
+$STAGED_FILES
+EOF
+fi
+
+# ─────────────────────────────────────────────
+# 3. ドキュメント規約（CLAUDE.md §1.2 — 新規ドキュメントを作りすぎない）
+# ─────────────────────────────────────────────
+NEW_FILES="$($GIT_LS diff --cached --name-only --diff-filter=A)"
+
+if [ -n "$NEW_FILES" ]; then
+  # (a) 無条件に禁止するサフィックス（改訂コピーであることが明白なもの）
+  BAD_NAMES="$(printf '%s\n' "$NEW_FILES" \
+    | grep -Ei '_(new|final|fix|copy|改訂版|最新|コピー)\.md$|のまとめ\.md$|[( ]コピー[) ]?.*\.md$' \
+    | grep -v '/OLD/')"
+
+  # (b) `_v<数字>` は本プロジェクトでは「準拠する仕様の版」を示す正規の命名で、
+  #     正本 `浮遊街アプリ 総合要件定義・設計書_v13.md` 自身がこの形をとる。
+  #     したがって一律に禁止せず、「同じ主題のファイルが既に在る」場合だけ違反とする。
+  #     （これが §1.2 が本当に防ぎたい "同一主題の別ファイル" のシグナル）
+  while IFS= read -r nf; do
+    [ -n "$nf" ] || continue
+    case "$nf" in */OLD/*) continue ;; esac
+    printf '%s' "$nf" | grep -qEi '_v[0-9]+\.md$' || continue
+
+    dir="$(dirname "$nf")"
+    stem="$(basename "$nf" .md)"
+    subject="$(printf '%s' "$stem" | sed -E 's/_[vV][0-9]+$//')"
+
+    # 同じ主題の既存ファイル（自分自身は除く）を探す
+    siblings="$(find "$dir" -maxdepth 1 -name "${subject}.md" -o -maxdepth 1 -name "${subject}_v*.md" 2>/dev/null \
+      | grep -v "^${nf}$" || true)"
+    if [ -n "$siblings" ]; then
+      BAD_NAMES="$(printf '%s\n%s' "$BAD_NAMES" "$nf")"
+      info "「${subject}」の別版が既に存在します:"
+      printf '%s\n' "$siblings" | sed 's/^/        /'
+    fi
+  done <<EOF
+$NEW_FILES
+EOF
+
+  BAD_NAMES="$(printf '%s\n' "$BAD_NAMES" | grep -v '^$' || true)"
+  if [ -n "$BAD_NAMES" ]; then
+    fail "禁止されたドキュメント命名です（CLAUDE.md §1.2）"
+    printf '%s\n' "$BAD_NAMES" | sed 's/^/      /'
+    info "改訂は既存ファイルの版数を上げて行い、旧版は docs/spec/OLD/ へ移してください。"
+  fi
+
+  # docs/spec 配下への新規 .md には注意を促す（ブロックはしない）
+  NEW_SPECS="$(printf '%s\n' "$NEW_FILES" | grep -E '^docs/spec/.*\.md$' | grep -v '/OLD/' | grep -v '/background/')"
+  if [ -n "$NEW_SPECS" ]; then
+    warn "docs/spec/ に新規ドキュメントを追加しています（CLAUDE.md §1.2 の3条件を満たしていますか）"
+    printf '%s\n' "$NEW_SPECS" | sed 's/^/      /'
+    info "Master Index への登録を忘れずに。既存ファイルへの追記で済むなら、そちらを優先してください。"
+  fi
+fi
+
+# ─────────────────────────────────────────────
+# 4. Lint / 型チェック / 単体テスト（変更範囲のみ・実装が始まってから有効化される）
+# ─────────────────────────────────────────────
+STAGED_TS="$(printf '%s\n' "$STAGED_FILES" | grep -E '\.(ts|tsx|js|jsx)$' || true)"
+
+if [ -n "$STAGED_TS" ] && [ -f package.json ]; then
+  if [ ! -d node_modules ]; then
+    warn "node_modules が無いため Lint/型チェックをスキップしました（npm ci を実行してください）"
+  else
+    # ESLint: 変更ファイルのみ
+    if npx --no-install eslint --version >/dev/null 2>&1; then
+      # shellcheck disable=SC2086
+      if npx --no-install eslint $STAGED_TS --max-warnings=0; then
+        ok "ESLint"
+      else
+        fail "ESLint エラー"
+      fi
+    fi
+
+    # 型チェック: プロジェクト全体（tsc は部分チェックができないため）
+    if npx --no-install tsc --version >/dev/null 2>&1; then
+      if npx --no-install tsc --noEmit; then
+        ok "型チェック (tsc --noEmit)"
+      else
+        fail "型エラー"
+      fi
+    fi
+
+    # 単体テスト: 変更ファイルに関連するものだけ
+    if grep -q '"test"' package.json; then
+      # shellcheck disable=SC2086
+      if npm test --silent -- --findRelatedTests $STAGED_TS --passWithNoTests; then
+        ok "関連単体テスト"
+      else
+        fail "テスト失敗"
+      fi
+    fi
+  fi
+fi
+
+# ─────────────────────────────────────────────
+echo "────────────────────────────────────────────────"
+
+if [ "$FAILED" -ne 0 ]; then
+  printf '%sコミットを中止しました。%s\n' "$RED" "$RESET"
+  info "どうしても回避が必要な場合のみ: git commit --no-verify"
+  info "その場合は回避した理由を次のコミットメッセージに残してください（CLAUDE.md §6.1）。"
+  exit 1
+fi
+
+ok "pre-commit 検査を通過しました"
+exit 0

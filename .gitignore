@@ -1,0 +1,59 @@
+# === 機密情報（CLAUDE.md §3.1）===
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*_rsa
+service-account*.json
+gcp-*.json
+credentials*.json
+secrets/
+
+# === 個人情報 ===
+# 会員リスト・実データを含むエクスポートはリポジトリに置かない
+会員データ/
+会員リスト*
+members_*.csv
+*_personal.csv
+*_dump.sql
+*.bak
+
+# === Node / Next.js ===
+node_modules/
+.next/
+out/
+build/
+dist/
+coverage/
+*.tsbuildinfo
+.eslintcache
+
+# === Python ===
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# === Supabase ===
+.supabase/
+supabase/.temp/
+
+# === エディタ・OS ===
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# === Obsidian（このリポジトリはボルト内にあるため）===
+.obsidian/
+.trash/
+
+# === ログ ===
+*.log
+npm-debug.log*
+yarn-error.log*

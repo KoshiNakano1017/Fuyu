@@ -1,0 +1,129 @@
+name: CI
+
+# CLAUDE.md §6.2 — push/PR 時の重い検証はここで実行する（pre-commit は軽量チェックのみ）
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ───────────────────────────────────────────
+  # 機密情報スキャン（CLAUDE.md §3.3）
+  # 全履歴を対象にするため fetch-depth: 0
+  # ───────────────────────────────────────────
+  secret-scan:
+    name: 機密情報スキャン
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ───────────────────────────────────────────
+  # ドキュメント規約（CLAUDE.md §1.2 / §1.3）
+  # ───────────────────────────────────────────
+  docs-policy:
+    name: ドキュメント規約
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 禁止ファイル名の検出
+        run: |
+          # main との差分で追加されたファイルのみを対象にする
+          BASE="${{ github.event.pull_request.base.sha || github.event.before }}"
+          if [ -z "$BASE" ] || ! git cat-file -e "$BASE" 2>/dev/null; then
+            BASE="$(git rev-list --max-parents=0 HEAD | tail -1)"
+          fi
+
+          ADDED="$(git diff --name-only --diff-filter=A "$BASE" HEAD || true)"
+          [ -z "$ADDED" ] && { echo "新規ファイルなし"; exit 0; }
+
+          BAD="$(printf '%s\n' "$ADDED" \
+            | grep -Ei '_(new|final|fix|copy|改訂版|最新|コピー)\.md$|のまとめ\.md$' \
+            | grep -v '/OLD/' || true)"
+
+          if [ -n "$BAD" ]; then
+            echo "::error::CLAUDE.md §1.2 に反するドキュメント命名です"
+            printf '%s\n' "$BAD"
+            echo "改訂は既存ファイルの版数を上げて行い、旧版は docs/spec/OLD/ へ移してください。"
+            exit 1
+          fi
+          echo "ドキュメント規約 OK"
+
+      - name: 孤児ノート検出（警告のみ）
+        run: |
+          # docs/spec 直下の .md が Master Index から参照されているかを確認する
+          INDEX="docs/spec/浮遊街アプリ 統合ナレッジベース (Master Index).md"
+          [ -f "$INDEX" ] || { echo "Master Index が見つからないためスキップ"; exit 0; }
+
+          find docs/spec -maxdepth 2 -name '*.md' \
+            -not -path '*/OLD/*' -not -path '*/background/*' | while read -r f; do
+            name="$(basename "$f" .md)"
+            case "$name" in
+              *"Master Index"*|CONSOLIDATED_DECISIONS) continue ;;
+            esac
+            grep -qF "$name" "$INDEX" || echo "::warning file=$f::Master Index から参照されていません（CLAUDE.md §1.2）"
+          done
+
+  # ───────────────────────────────────────────
+  # Lint / 型チェック / テスト / ビルド
+  # package.json が存在する場合のみ実行（実装着手前は自動でスキップ）
+  # ───────────────────────────────────────────
+  build-and-test:
+    name: Lint・型・テスト・ビルド
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: package.json の有無を確認
+        id: check
+        run: |
+          if [ -f package.json ]; then echo "exists=true" >> "$GITHUB_OUTPUT";
+          else echo "exists=false" >> "$GITHUB_OUTPUT"; echo "実装未着手のためスキップします"; fi
+
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.exists == 'true'
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: 依存関係のインストール
+        if: steps.check.outputs.exists == 'true'
+        run: npm ci
+
+      - name: ESLint
+        if: steps.check.outputs.exists == 'true'
+        run: npm run lint -- --max-warnings=0
+
+      - name: 型チェック
+        if: steps.check.outputs.exists == 'true'
+        run: npx tsc --noEmit
+
+      - name: テスト（カバレッジ付き）
+        if: steps.check.outputs.exists == 'true'
+        run: npm test -- --coverage --passWithNoTests
+
+      - name: ビルド
+        if: steps.check.outputs.exists == 'true'
+        env:
+          # 本番の値ではなくビルド通過用のダミー。実値は Vercel 側の環境変数で注入する
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co' }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder' }}
+        run: npm run build

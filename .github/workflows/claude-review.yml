@@ -1,0 +1,81 @@
+name: Claude コードレビュー
+
+# CLAUDE.md §6.2 — PR に対して Claude がレビューを行う。
+# 観点は CLAUDE.md §3（機密情報）・§4（リーダブルコード）・§1（ドキュメント運用）。
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+  issue_comment:
+    types: [created]
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  id-token: write
+
+jobs:
+  review:
+    name: Claude によるレビュー
+    runs-on: ubuntu-latest
+    # PR、または PR コメントで @claude と呼ばれたときのみ実行する
+    if: >
+      github.event_name == 'pull_request' ||
+      (github.event.issue.pull_request != null && contains(github.event.comment.body, '@claude'))
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Claude Code Review
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: '--model claude-opus-5'
+          prompt: |
+            このリポジトリのルート `CLAUDE.md` が開発ルールの正本です。まず必ず全文を読んでから、
+            この Pull Request の差分をレビューし、日本語で指摘してください。
+
+            ## レビュー観点（優先度順）
+
+            1. **機密情報・個人情報の混入**（CLAUDE.md §3）— 最優先
+               - APIキー・トークン・シークレットのハードコード
+               - 会員の氏名・住所・電話番号・メールアドレスなど個人情報の混入
+               - ログ出力に個人情報やトークンが含まれていないか
+               - `service_role` キーがクライアントサイドへ渡っていないか
+
+            2. **バグ・正当性の問題**
+               - 認可判定の抜け（UI非表示のみで済ませていないか。サーバサイドのRLS/Edge Functionでの検証が必須）
+               - `member_type`（親方／街人／ゲスト）を認可判定に使っていないか。認可は `role` のみで行う
+               - 金額・宿泊券枚数などの計算誤り
+               - エラーハンドリングの欠落
+
+            3. **リーダブルコードへの適合**（CLAUDE.md §4）
+               - 命名が明確か（`tmp` `data` `info` のような汎用的すぎる名前を使っていないか）
+               - 単位・書式が名前に含まれているか（`expiryDurationSec` `fileSizeMb` 等）
+               - 真偽値が `is` / `has` / `can` / `should` で始まっているか
+               - ドメイン用語が §4.1 の対応表どおりの英語になっているか
+               - 1関数1責務が守られているか。ネストが深すぎないか
+               - コメントが「なぜ」を説明しているか（コードの同語反復になっていないか）
+               - 仕様由来の定数・分岐に正本の節番号（`v13 §5.11.2` 等）が根拠として書かれているか
+
+            4. **ドキュメント運用**（CLAUDE.md §1）
+               - `docs/spec/` に新規ファイルが追加されている場合、§1.2 の3条件を満たしているか
+               - Master Index への登録が漏れていないか
+               - 旧版が `OLD/` へ移されているか
+
+            5. **テスト**（CLAUDE.md §4.4）
+               - 認可・金額計算・個人情報の取り扱いに関わるロジックにテストがあるか
+               - テスト名が「何をテストしているか」読める文になっているか
+
+            ## 指摘の書き方
+
+            - 指摘は「該当ファイル:行番号」「何が問題か」「なぜ問題か」「どう直すか」の4点セットで書く
+            - 重要度を **[必須]** / **[推奨]** / **[任意]** の3段階で明示する
+            - 問題がなければ「問題なし」と明記する。無理に指摘を作らない
+            - 指摘は10件までに絞る。多い場合は重要度の高いものを優先する
