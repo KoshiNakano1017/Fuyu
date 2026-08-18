@@ -28,10 +28,35 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: gitleaks
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # gitleaks/gitleaks-action@v2 は使わない。
+      # push イベントの差分範囲でスキャンするため、初回 push（event.before が空）では
+      # 「0バイトをスキャンして失敗」または「何も見ずに成功」になり、
+      # 秘密情報の検出漏れに気づけない。バイナリを直接叩いて全履歴を確実に走査する。
+      - name: gitleaks をインストール
+        run: |
+          set -euo pipefail
+          VERSION="$(curl -sSfL https://api.github.com/repos/gitleaks/gitleaks/releases/latest \
+            | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')"
+          echo "gitleaks v${VERSION} を取得します"
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin gitleaks
+          gitleaks version
+
+      - name: 全履歴スキャン
+        run: |
+          set -euo pipefail
+          # v8.19+ は `gitleaks git`、それ以前は `gitleaks detect`。両対応にする。
+          if gitleaks git --help >/dev/null 2>&1; then
+            SCAN="gitleaks git ."
+          else
+            SCAN="gitleaks detect --source ."
+          fi
+          echo "実行: $SCAN"
+          # --redact: 検出値をログに出さない（Actions のログは public リポジトリでは誰でも読める）
+          $SCAN --redact --verbose --exit-code 1
+
+      - name: 作業ツリーもスキャン（未コミット分の取りこぼし防止）
+        run: gitleaks dir . --redact --verbose --exit-code 1
 
   # ───────────────────────────────────────────
   # ドキュメント規約（CLAUDE.md §1.2 / §1.3）
