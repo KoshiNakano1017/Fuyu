@@ -13,7 +13,8 @@ up: "[[浮遊街アプリ 総合要件定義・設計書_v13]]"
 > 実装・適用はオーナー承認後に別途行うこと。
 >
 > 本書は以下2つの既存資料を土台として最大限再利用している（ゼロから書き起こしていない）。
-> - `docs/spec/ER図_概念データモデル.md`（概念モデル。2026-08-16に本リポジトリへ取り込み済み）
+> - `docs/spec/basic-design/backend/ER図_概念データモデル.md`（概念モデル。2026-08-16に本リポジトリへ取り込み済み。
+>   2026-08-16に工程×領域の2軸フォルダ構成へ再配置）
 > - `C:\Users\user\Documents\MyVault\Myvault\Knowledge\浮遊街アプリ\migration\01_schema.sql`
 >   （会員まわりの物理スキーマ。**Vault側で実データ370名分の投入・検算まで完了済み**の高精度な既存設計。
 >   このリポジトリへは未コピー・未コミットであり、あくまで参照のみ）
@@ -220,95 +221,18 @@ CREATE INDEX ix_settlement_adj_stale ON settlement_adjustments (occurred_at) WHE
 > 確定していない。上記DDLは「誰が免除したかを記録できる」構造のみを用意しており、免除権限のRLS制御・
 > 自動処理バッチの仕様は別途確定後に設計する。
 
-### 3-3. ナレッジ・RAG（pgvector）（WBS §9）
+### 3-3. ナレッジ・RAG（2026-08-16改訂：line-rag-botへ統合、本リポジトリに新規テーブルなし）
 
-```sql
-CREATE EXTENSION IF NOT EXISTS vector;
-
-CREATE TABLE knowledge_items (
-  knowledge_id       uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  knowledge_format   text NOT NULL DEFAULT 'faq' CHECK (knowledge_format IN ('faq','manual')),
-  category_id        uuid REFERENCES work_categories(category_id),
-  agent_type         text,                         -- ホスピタリティ／ランド 等（Phase1は2系統のみ実装）
-  target_role        text NOT NULL CHECK (target_role IN ('guest','member','core_member')),
-  -- ▲ 単一値のアクセス制御キー（v13 §5.7.2・§5.7.5の確定仕様）。
-  --   複数ロール同時公開を許す配列化案は§9 #29として未決（保留中の未コミットドラフトのみに存在）。
-  --   正式決定が出るまで、本書は配列化を採用しない。
-  question           text,
-  answer             text,
-  body               text,
-  usage_scene        text[],
-  keywords           text[],
-  attachments        uuid[],                       -- メディアアセットID配列
-  review_status      text NOT NULL DEFAULT 'draft'
-                        CHECK (review_status IN ('draft','published','needs_review')),
-  source_type        text NOT NULL DEFAULT 'manual'
-                        CHECK (source_type IN ('manual','unanswered_log','morning_meeting','mobile_field')),
-  created_by         uuid REFERENCES members(member_id),
-  created_at         timestamptz NOT NULL DEFAULT now(),
-  updated_at         timestamptz NOT NULL DEFAULT now()
-);
-CREATE INDEX ix_knowledge_target_role ON knowledge_items (target_role);
-CREATE INDEX ix_knowledge_review_status ON knowledge_items (review_status);
-
--- チャンク単位のベクトル格納（1ナレッジが複数チャンクに分割される場合に対応）
-CREATE TABLE knowledge_embeddings (
-  embedding_id       uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  knowledge_id       uuid NOT NULL REFERENCES knowledge_items(knowledge_id) ON DELETE CASCADE,
-  chunk_index        integer NOT NULL DEFAULT 0,
-  chunk_text         text NOT NULL,
-  embedding          vector(768),   -- 次元数は採用モデルに依存。§4「pgvector関連設計」を参照（要確定）
-  created_at         timestamptz NOT NULL DEFAULT now()
-);
-CREATE INDEX ix_knowledge_embedding_knowledge ON knowledge_embeddings (knowledge_id);
--- ベクトル近似検索用インデックス（データ量が増えてから作成する運用でも可。詳細は§4）
--- CREATE INDEX ix_knowledge_embedding_ann ON knowledge_embeddings
---   USING hnsw (embedding vector_cosine_ops);
-
--- レシピ・道具マスタ（運営サポート機能）
-CREATE TABLE tools (
-  tool_id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  name                text NOT NULL,
-  category            text,                 -- 農機具／調理器具／建築工具 等
-  usage_steps         jsonb,                -- ステップ配列
-  required_consumables text,
-  safety_notes        text,
-  requires_certification boolean NOT NULL DEFAULT false,
-  safety_level        text CHECK (safety_level IN ('low','medium','high')),
-  storage_location    text,
-  maintenance_interval text,
-  created_at          timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE TABLE recipes (
-  recipe_id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  category             text CHECK (category IN ('調理','クエスト作業')),
-  title                text NOT NULL,
-  ingredients_tools    uuid[],               -- tools.tool_id 配列
-  steps                jsonb NOT NULL,       -- [{order, text}]
-  duration_minutes     integer,
-  tips                 text,
-  failure_patterns     jsonb,                -- [{symptom, cause, solution, condition}]
-  created_by           uuid REFERENCES members(member_id),
-  source_url           text,
-  created_at           timestamptz NOT NULL DEFAULT now()
-);
-
--- 未回答エスカレーション・ログ
-CREATE TABLE unanswered_escalations (
-  escalation_id       uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  question_text       text NOT NULL,
-  asked_by_role       text CHECK (asked_by_role IN ('guest','member','core_member')),
-  confidence_score    numeric,
-  escalated_at        timestamptz NOT NULL DEFAULT now(),
-  notified_line       boolean NOT NULL DEFAULT false,
-  resolved_knowledge_id uuid REFERENCES knowledge_items(knowledge_id),
-  resolved_at         timestamptz,
-  created_at          timestamptz NOT NULL DEFAULT now()
-);
-CREATE INDEX ix_escalation_unresolved ON unanswered_escalations (escalated_at)
-  WHERE resolved_knowledge_id IS NULL;
-```
+> [!success] 2026-08-16 確定（v13 §9 #31・外部連携設計.md §1）
+> ナレッジ・RAG基盤はline-rag-bot（Firestore）へ統合することが確定した。浮遊街アプリ本体は
+> `knowledge_items`/`knowledge_embeddings`/`tools`/`recipes`/`unanswered_escalations`に相当する
+> テーブルを**持たない**（line-rag-bot側に`recipes_{tenant_id}`/`tools_{tenant_id}`/`escalations`
+> として実装済みのものと重複するため）。浮遊街アプリ本体はエンドユーザー向けAIチャットUIも持たず、
+> 案内はLINE（line-rag-bot）に一本化する。**2026-08-16再確定：浮遊街アプリ本体とline-rag-botの間に
+> API連携は一切実装しない**（読み取り専用も含めて不採用）。浮遊街アプリ側はB9/C5画面に
+> 「line-rag-bot管理画面を開く」外部リンクを配置するのみで、ナレッジ登録・編集用のUI・API実装は
+> 行わない（詳細は外部連携設計.md §2参照）。当初提案したDDL（pgvector前提）は不採用となったが、
+> 経緯を追跡できるよう本書末尾の「§9 参考: 不採用となった設計案」に原文のまま残している。
 
 ### 3-4. 朝会・議事録データ（WBS §4）
 
@@ -370,16 +294,59 @@ COMMENT ON TABLE membership_applications IS
   ビュー（`v_current_room_assignments`に類似）で表現可能と見込まれる。表示粒度（§9 #30-⑤）が
   未確定のため、追加のUI専用テーブルが必要かは詳細UI確定後に判断する。
 
+### 3-7. メディアライブラリ（画面設計.md A10。2026-08-16新設・Phase2から前倒し）
+
+> [!success] Phase1へ前倒し（2026-08-16オーナー指示）
+> 従来は「Phase2: メディアストレージ」として`media_assets`を未設計のまま据え置いていた（旧§7表）。
+> 「動画・写真を用途別にAIソート＋キャプション自動生成する」新規要望に伴いPhase1へ前倒しする。
+> `work_logs.before/after_photo_media_id`等の既存UUID参照カラムは、本テーブルの`media_id`を
+> 指す想定で設計済みだったため、参照先が「未設計」から「実テーブル」に変わるだけで既存カラムの
+> 変更は不要。
+
+```sql
+CREATE TABLE media_assets (
+  media_id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  member_id               uuid NOT NULL REFERENCES members(member_id),  -- アップロード者（全ロール可）
+  media_type              text NOT NULL CHECK (media_type IN ('photo','video')),
+  storage_path             text NOT NULL,   -- Cloud Storage for Firebase（統一メディア基盤、署名付きURL方式）
+  thumbnail_path            text,            -- 動画のサムネイル（静止画は storage_path と同一で可）
+  purpose_tags              text[] NOT NULL DEFAULT '{}',  -- 例: ['instagram'], ['資料作成','ブログ']
+  ai_caption                text,            -- AI自動生成キャプション案（採用前は未編集の生成結果のまま）
+  ai_caption_edited         boolean NOT NULL DEFAULT false,  -- 利用者が編集済みか（生成結果の丸写しと区別）
+  ai_purpose_score          jsonb,           -- {"instagram": 0.82, "資料作成": 0.55} 用途タグ別の適合度
+  ai_processed_at           timestamptz,     -- AI解析完了時刻。NULLの間は「解析中」表示
+  ai_processing_status      text NOT NULL DEFAULT 'pending'
+                              CHECK (ai_processing_status IN ('pending','processing','done','failed')),
+  linked_quest_id            uuid REFERENCES quests(quest_id),      -- クエスト完了報告からの登録（任意）
+  linked_work_log_id         uuid REFERENCES work_logs(log_id),      -- 同上（Before/After写真からの導線）
+  created_at                 timestamptz NOT NULL DEFAULT now(),
+  updated_at                 timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX ix_media_member ON media_assets (member_id);
+CREATE INDEX ix_media_purpose_tags ON media_assets USING gin (purpose_tags);
+CREATE INDEX ix_media_processing_status ON media_assets (ai_processing_status)
+  WHERE ai_processing_status IN ('pending','processing');
+```
+
+- **AI処理は非同期**：アップロード直後は`ai_processing_status='pending'`で即座に一覧へ反映し、
+  Gemini（マルチモーダル、朝会音声処理と同一基盤）のバックグラウンド処理完了後に`done`へ更新する
+  （画面応答をブロックしない設計、システムアーキテクチャ.md非機能要件の朝会60秒SLA原則を踏襲）。
+- **`ai_purpose_score`はJSONBで柔軟に持つ**：用途タグはユーザーの自由入力を許容するため（マスタ化
+  しない）、固定カラムではなくキー可変のJSONBが適切（マスタ値のハードコード禁止の精神とは別軸の判断。
+  「用途」はマスタというより利用者ごとの自由記述に近いため）。
+- **削除・退会時の扱いは未確定**：`members`削除（存在しない想定だが将来の退会処理）時の
+  `media_assets`の扱い（カスケード削除か保持か）は§8オーナー確認事項へ追加。
+
 ---
 
-## 4. pgvector関連設計
+## 4. line-rag-bot連携（ナレッジ・RAG）
 
-| 項目 | 内容 |
-| --- | --- |
-| 拡張 | `CREATE EXTENSION IF NOT EXISTS vector;`（Supabaseは標準サポート） |
-| 埋め込みモデル | **未確定・本書での提案**：Claude APIには埋め込み専用エンドポイントが無いため、既にスタックに含まれる**Gemini API の `text-embedding-004`（768次元）**を暫定推奨する（朝会音声処理で既にGemini呼び出しがあり、追加のベンダー契約が不要なため）。代替案として、Anthropic公式が推奨する Voyage AI の埋め込みモデル（`voyage-3`系、1024次元）も選択肢になる。**コスト・精度要件を踏まえた最終選定はオーナー確認が望ましい**（次元数はテーブル定義に直結するため、着手前に確定すること） |
-| インデックス方式 | データ量が少ないPhase1初期は逐次スキャンでも許容範囲。件数が数千を超えた段階で `hnsw`（推奨）または `ivfflat` を追加する運用とする |
-| 検索フィルタ | `target_role` によるメタデータ事前フィルタを**必ずSQL側（WHERE句）で行う**。ベクトル類似検索の後段でアプリ側フィルタするのではなく、`WHERE target_role = :role AND review_status = 'published'` を先に絞り込んでから類似検索する（プロンプト指示に頼らない、という正本の不可侵ルールをDB設計でも担保） |
+> [!success] 2026-08-16確定：pgvectorは採用しない
+> §3-3で述べたとおり、ナレッジ・RAG基盤はline-rag-bot（Firestore）へ統合されたため、本書は
+> pgvector拡張・埋め込みモデル・ベクトルインデックスのいずれも設計しない。埋め込みモデル選定・
+> 検索フィルタ実装はline-rag-bot側の設計領域に移った（同リポジトリの `docs/06-マルチテナント設計.md`
+> 等を参照）。**2026-08-16再確定：浮遊街アプリ本体からのAPI呼び出しも行わない**（管理画面からの
+> 外部リンクのみ）。詳細は `docs/spec/detailed-design/外部連携設計.md` §2を参照。
 
 ---
 
@@ -411,11 +378,11 @@ COMMENT ON TABLE membership_applications IS
 | 6. 注文管理・店舗オペレーション | `orders`, `order_items` | **本書で新規提案**（未着手） |
 | 7. Uii会計・決済 | `uii_transactions`（定義のみ）、`orders.total_amount_uii`等 | 換算ロジック自体はテーブル不要（アプリ層で算出） |
 | 8. 顧客管理画面・会計調整 | `settlement_adjustments` | **本書で新規提案**（未着手。免除権限はQUESTIONS.md未回答でブロック） |
-| 9. FAQ・ナレッジ・RAG | `knowledge_items`, `knowledge_embeddings`, `tools`, `recipes`, `unanswered_escalations` | **本書で新規提案**（未着手。埋め込みモデル未確定） |
+| 9. FAQ・ナレッジ・RAG | なし（浮遊街アプリ側のテーブル・API実装なし） | **2026-08-16再確定：line-rag-bot（Firestore）へ統合、新規テーブル・API連携ともになし**（管理画面への外部リンクのみ。§3-3参照） |
 | 10. 既存街人データ移行・名寄せ | `members`等（既存） | 既存（Vault側で実データ検証済み。370名の最終承認はQUESTIONS.md未回答） |
 | 12. ゲスト→街人アップグレード導線 | `membership_applications` | **本書で新規提案**（未着手） |
 | 13. 管理者ダッシュボード | 専用テーブル不要（既存テーブルの集計ビュー） | ― |
-| Phase2: メディアストレージ | `media_assets`（未設計） | Phase1では`work_logs.before/after_photo_media_id`等がUUID参照のみ持つ想定。テーブル自体はPhase2着手時に設計 |
+| 14. メディアライブラリ（画面設計.md A10、2026-08-16新設） | `media_assets` | **本書で新規提案**（未着手）。旧「Phase2: メディアストレージ」から前倒し。§3-7参照 |
 | Phase2: 会員権失効 | `memberships.expires_on`, `expire_memberships()` | **既に用意済み**（Vault側スキーマに実装済み。§9 #21で確定した「後からカラムを足さない」方針を満たす） |
 
 ---
@@ -424,12 +391,114 @@ COMMENT ON TABLE membership_applications IS
 
 | # | 内容 | 関連QUESTIONS.md項目 |
 | --- | --- | --- |
-| 1 | 埋め込みモデルの最終選定（次元数がテーブル定義に直結） | （新規発見・本書独自の技術提案。QUESTIONS.md未登録） |
-| 2 | `settlement_adjustments`の免除権限範囲・90日滞留後の挙動 | 差額繰越（返金・免除運用）の詳細 |
-| 3 | 370名データの物理設計自体は実行可能な状態だが、最終承認は別軸 | 親方・街人リスト受領後の最終データレビューは完了しているか |
-| 4 | 宿泊予約フォーム連携（§3-6）のテーブル設計確定 | 宿泊予約フォーム連携の未確定事項5点（§9 #30） |
-| 5 | `knowledge_items.target_role`を配列化するか単一値のままとするか | ナレッジ登録UIのtarget_audience/target_role整合（§9 #29） |
-| 6 | Vault側の実データ（`01_schema.sql`/`03_seed_members.sql`）をこのリポジトリへ取り込むか、個人情報を含むため別管理とするか | （新規発見・本書独自の指摘） |
+| ~~1~~ | ~~埋め込みモデルの最終選定~~ | **移管済み（2026-08-16）**：line-rag-bot側の設計領域に移った。本リポジトリでは対応不要 |
+| 2 | `settlement_adjustments`の免除権限範囲・90日滞留後の挙動 | ✅解消済み（2026-08-16）：Phase1はコアメンバーにも免除許可、90日滞留はフラグのみ。詳細はCONSOLIDATED_DECISIONS.md §8参照 |
+| 3 | 370名データの物理設計自体は実行可能な状態だが、最終承認は別軸 | ✅解消済み（2026-08-16）：370名で最終承認済み |
+| 4 | 宿泊予約フォーム連携（§3-6）のテーブル設計確定 | ✅5/5点回答済み（2026-08-16）。§3-6は次回サイクルで正式DDL化予定 |
+| 5 | `knowledge_items.target_role`を配列化するか単一値のままとするか | **移管済み（2026-08-16）**：`knowledge_items`自体が不要になったため、line-rag-bot側Firestoreスキーマの論点に移った（v13 §9 #29は引き続き未決） |
+| 6 | Vault側の実データ（`01_schema.sql`/`03_seed_members.sql`）をこのリポジトリへ取り込むか、個人情報を含むため別管理とするか | （新規発見・本書独自の指摘。未回答のまま） |
+| 7 | `media_assets`：退会・アカウント削除時のカスケード削除 or 保持方針（§3-7参照） | 新規（2026-08-16、画面設計.md A10と連動） |
+| 8 | `media_assets`：AI解析（Gemini）のコスト・レイテンシ、動画サムネイル生成・保存容量の見積り、肖像権チェックの要否 | 新規（2026-08-16、画面設計.md §6 #5〜#7と同一論点） |
+
+---
+
+## 9. 参考: 不採用となった設計案（解釈B用参考）
+
+> [!note] 2026-08-16 移動
+> 以下は初版（同日）で提案した「浮遊街アプリ本体がpgvectorで独自ナレッジ基盤を持つ」案のDDLである。
+> 同日中のオーナー回答により解釈A（line-rag-botへ統合）で確定したため不採用となったが、
+> 決定の経緯を追跡できるよう原文のまま残す。**このセクションのDDLは実装対象ではない。**
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE knowledge_items (
+  knowledge_id       uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  knowledge_format   text NOT NULL DEFAULT 'faq' CHECK (knowledge_format IN ('faq','manual')),
+  category_id        uuid REFERENCES work_categories(category_id),
+  agent_type         text,                         -- ホスピタリティ／ランド 等（Phase1は2系統のみ実装）
+  target_role        text NOT NULL CHECK (target_role IN ('guest','member','core_member')),
+  -- ▲ 単一値のアクセス制御キー（v13 §5.7.2・§5.7.5の確定仕様）。
+  --   複数ロール同時公開を許す配列化案は§9 #29として未決（保留中の未コミットドラフトのみに存在）。
+  --   正式決定が出るまで、本書は配列化を採用しない。
+  question           text,
+  answer             text,
+  body               text,
+  usage_scene        text[],
+  keywords           text[],
+  attachments        uuid[],                       -- メディアアセットID配列
+  review_status      text NOT NULL DEFAULT 'draft'
+                        CHECK (review_status IN ('draft','published','needs_review')),
+  source_type        text NOT NULL DEFAULT 'manual'
+                        CHECK (source_type IN ('manual','unanswered_log','morning_meeting','mobile_field')),
+  created_by         uuid REFERENCES members(member_id),
+  created_at         timestamptz NOT NULL DEFAULT now(),
+  updated_at         timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX ix_knowledge_target_role ON knowledge_items (target_role);
+CREATE INDEX ix_knowledge_review_status ON knowledge_items (review_status);
+
+-- チャンク単位のベクトル格納（1ナレッジが複数チャンクに分割される場合に対応）
+CREATE TABLE knowledge_embeddings (
+  embedding_id       uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  knowledge_id       uuid NOT NULL REFERENCES knowledge_items(knowledge_id) ON DELETE CASCADE,
+  chunk_index        integer NOT NULL DEFAULT 0,
+  chunk_text         text NOT NULL,
+  embedding          vector(768),   -- 次元数は採用モデルに依存
+  created_at         timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX ix_knowledge_embedding_knowledge ON knowledge_embeddings (knowledge_id);
+-- CREATE INDEX ix_knowledge_embedding_ann ON knowledge_embeddings
+--   USING hnsw (embedding vector_cosine_ops);
+
+-- レシピ・道具マスタ（line-rag-bot側に recipes_{tenant_id}/tools_{tenant_id} として実装済みのため不要）
+CREATE TABLE tools (
+  tool_id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name                text NOT NULL,
+  category            text,
+  usage_steps         jsonb,
+  required_consumables text,
+  safety_notes        text,
+  requires_certification boolean NOT NULL DEFAULT false,
+  safety_level        text CHECK (safety_level IN ('low','medium','high')),
+  storage_location    text,
+  maintenance_interval text,
+  created_at          timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE recipes (
+  recipe_id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  category             text CHECK (category IN ('調理','クエスト作業')),
+  title                text NOT NULL,
+  ingredients_tools    uuid[],
+  steps                jsonb NOT NULL,
+  duration_minutes     integer,
+  tips                 text,
+  failure_patterns     jsonb,
+  created_by           uuid REFERENCES members(member_id),
+  source_url           text,
+  created_at           timestamptz NOT NULL DEFAULT now()
+);
+
+-- 未回答エスカレーション・ログ（line-rag-bot側に escalations コレクションとして実装済みのため不要）
+CREATE TABLE unanswered_escalations (
+  escalation_id       uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  question_text       text NOT NULL,
+  asked_by_role       text CHECK (asked_by_role IN ('guest','member','core_member')),
+  confidence_score    numeric,
+  escalated_at        timestamptz NOT NULL DEFAULT now(),
+  notified_line       boolean NOT NULL DEFAULT false,
+  resolved_knowledge_id uuid REFERENCES knowledge_items(knowledge_id),
+  resolved_at         timestamptz,
+  created_at          timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX ix_escalation_unresolved ON unanswered_escalations (escalated_at)
+  WHERE resolved_knowledge_id IS NULL;
+```
+
+（旧§4「pgvector関連設計」の内容：拡張`vector`、埋め込みモデルはGemini `text-embedding-004`
+またはVoyage AI `voyage-3`系を提案、インデックスは`hnsw`推奨、検索フィルタは`target_role`のSQL側
+事前フィルタ必須——という設計方針だったが、pgvector自体を採用しないため全体が不要となった。）
 
 ---
 
@@ -440,3 +509,14 @@ COMMENT ON TABLE membership_applications IS
 | 2026-08-16 | 初版作成。会員まわりはVault側の既存物理設計（実データ検証済み）を採用し、Phase1で未整備の
 7領域（クエスト／注文・会計調整／ナレッジ・RAG／朝会／街人登録申込／宿泊予約フォーム連携）を新規に
 物理設計として提案。埋め込みモデル未確定等の新規論点を発見しオーナー確認事項として整理。 |
+| 2026-08-16（追記） | オーナー回答（ナレッジ・RAG基盤をline-rag-botへ統合、アプリ内チャットUIなし）を
+反映。§3-3・§4のpgvector前提の設計（`knowledge_items`/`knowledge_embeddings`/`tools`/`recipes`/
+`unanswered_escalations`）を「不採用となった設計案」として§9へ移動し、本文は「line-rag-bot API連携
+のみ、新規テーブルなし」に差し替え。§7突合表・§8オーナー確認事項も合わせて更新。 |
+| 2026-08-16（再確定） | **API連携ゼロが最終確定**。§3-3・§4の「line-rag-bot APIへ送信」という記述を、
+「管理画面からline-rag-bot Streamlitへの外部リンクのみ、API連携なし」に修正。§7突合表の9行目を
+更新。読み取り専用APIも含めて浮遊街アプリ側にAPI実装が発生しない点を明記。 |
+| 2026-08-16（オーナー指示反映） | **§3-7「メディアライブラリ」を新設**：動画・写真をFirebaseへ格納し、
+用途（インスタグラム／資料作成等）入力→AI適合度ソート＋キャプション自動生成する`media_assets`
+テーブルを新規提案。旧「Phase2: メディアストレージ」（未設計のまま据え置き）からPhase1へ前倒し。
+§7突合表を14番として追加、§8オーナー確認事項に#7・#8を新設（削除方針・AIコスト等）。 |
