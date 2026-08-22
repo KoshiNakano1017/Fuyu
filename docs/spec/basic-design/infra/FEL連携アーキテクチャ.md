@@ -1,8 +1,12 @@
 ---
 title: FEL連携アーキテクチャ
+doc_type: 設計
+status: 運用中
+owner: プロジェクトオーナー
 date: 2026-08-08
-theme: 浮遊街アプリ・FELプロジェクト
+updated: 2026-08-22
 tags: ["浮遊街", "FEL", "連携", "要件定義"]
+theme: 浮遊街アプリ・FELプロジェクト
 ---
 
 # FEL連携アーキテクチャ

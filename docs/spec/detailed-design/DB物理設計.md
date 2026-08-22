@@ -1,7 +1,11 @@
 ---
 title: "詳細設計：DB物理設計（Phase 1）"
-date: "2026-08-16"
+doc_type: 設計
 status: "詳細設計ドラフト（要オーナーレビュー）"
+owner: プロジェクトオーナー
+date: "2026-08-16"
+updated: 2026-08-22
+tags: ["浮遊街アプリ"]
 up: "[[浮遊街アプリ 総合要件定義・設計書_v13]]"
 ---
 
@@ -141,15 +145,45 @@ CREATE TABLE work_logs (
   notes              text,
   issue_flag         boolean NOT NULL DEFAULT false,   -- トラブル・失敗発生フラグ（RAG failure_patterns連携の起点）
   issue_note         text,
-  approval_status    text NOT NULL DEFAULT '未承認'
-                        CHECK (approval_status IN ('未承認','承認','差戻し')),
-  approved_by        uuid REFERENCES members(member_id),
+  -- ▼ 二段階承認（v13 §5.3.2 ／ §9 #34。2026-08-20 追加）
+  approval_status    text NOT NULL DEFAULT '報告済み'
+                        CHECK (approval_status IN ('報告済み','コアメンバー確認済','承認完了','差戻し')),
+  reviewed_by        uuid REFERENCES members(member_id),  -- コアメンバー確認者（1人目の確認で遷移）
+  reviewed_at        timestamptz,
+  review_skipped     boolean NOT NULL DEFAULT false,      -- 管理者が確認を飛ばして直接承認した場合 true
+  approved_by        uuid REFERENCES members(member_id),  -- 最終承認者。adminのみ（RLSで制限）
   approved_at        timestamptz,
-  created_at         timestamptz NOT NULL DEFAULT now()
+  rejected_by        uuid REFERENCES members(member_id),
+  rejected_at        timestamptz,
+  rejection_reason   text,                                -- 差戻し理由。差戻し時は必須（アプリ層＋CHECKで担保）
+  created_at         timestamptz NOT NULL DEFAULT now(),
+  -- 差戻しには必ず理由を伴う
+  CONSTRAINT ck_worklog_rejection_reason
+    CHECK (approval_status <> '差戻し' OR rejection_reason IS NOT NULL)
 );
 CREATE INDEX ix_worklog_application ON work_logs (application_id);
 CREATE INDEX ix_worklog_issue ON work_logs (issue_flag) WHERE issue_flag = true;
+-- 承認待ち（コアメンバー確認前／管理者承認前）の抽出用
+CREATE INDEX ix_worklog_pending ON work_logs (approval_status)
+  WHERE approval_status IN ('報告済み','コアメンバー確認済');
+
+-- 2人目以降の確認ログ（1人目の確認でステータスは遷移するが、追加確認も記録する）
+CREATE TABLE work_log_reviews (
+  review_id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  log_id             uuid NOT NULL REFERENCES work_logs(log_id) ON DELETE CASCADE,
+  reviewer_id        uuid NOT NULL REFERENCES members(member_id),
+  reviewed_at        timestamptz NOT NULL DEFAULT now(),
+  comment            text,
+  UNIQUE (log_id, reviewer_id)   -- 同一人物の二重確認は記録しない
+);
+CREATE INDEX ix_worklog_review_log ON work_log_reviews (log_id);
 ```
+
+> [!important] 確認者（`reviewed_by`）と承認者（`approved_by`）を同一カラムに統合しないこと
+> 「誰が現場を確認し、誰が給付を確定したか」は別の事実です。1カラムに統合すると、後から
+> 「確認なしで承認されたのか、確認者と承認者が同じ人だったのか」を区別できなくなります。
+> **`review_skipped` も必ず記録**してください（管理者が単独で承認するのは仕様上許容されますが、
+> それが常態化しているかどうかは運用の健全性を測る指標になります／v13 §5.3.2）。
 
 > [!note] Phase2送りの機能は物理設計に含めない
 > クエストの反復実行・複数人按分・スキル連動報酬はPhase2送りで確定済み（QUESTIONS.md回答済み）。
@@ -168,6 +202,12 @@ CREATE TABLE orders (
   order_source       text NOT NULL DEFAULT 'cafe' CHECK (order_source IN ('cafe','shop')),
   status             text NOT NULL DEFAULT '未会計'
                         CHECK (status IN ('未会計','精算済み','取消')),
+  -- ▼ 提供ステータス（v13 §5.4.1 ／ §9 #39。2026-08-20 追加）
+  --   決済ステータス（status）とは独立した2軸。同一カラムへ統合してはならない。
+  serving_status     text NOT NULL DEFAULT '未提供'
+                        CHECK (serving_status IN ('未提供','提供済み')),
+  served_at          timestamptz,
+  served_by          uuid REFERENCES members(member_id),
   total_amount_yen   integer NOT NULL DEFAULT 0,
   total_amount_uii   integer NOT NULL DEFAULT 0,   -- floor(単価×0.8)を明細行ごとに丸めて合算（伝票合計への一括掛け算は禁止）
   settled_at         timestamptz,
@@ -178,6 +218,11 @@ CREATE TABLE orders (
 );
 CREATE INDEX ix_order_purchaser ON orders (purchaser_id);
 CREATE INDEX ix_order_status ON orders (status);
+-- 厨房の作業待ち行列（未提供のみ）
+CREATE INDEX ix_order_serving ON orders (serving_status) WHERE serving_status = '未提供';
+-- 「精算済みだが未提供」＝要注意状態の検出用（v13 §5.4.1 の2軸マトリクス）
+CREATE INDEX ix_order_paid_unserved ON orders (created_at)
+  WHERE status = '精算済み' AND serving_status = '未提供';
 
 CREATE TABLE order_items (
   item_id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -311,6 +356,16 @@ CREATE TABLE media_assets (
   storage_path             text NOT NULL,   -- Cloud Storage for Firebase（統一メディア基盤、署名付きURL方式）
   thumbnail_path            text,            -- 動画のサムネイル（静止画は storage_path と同一で可）
   purpose_tags              text[] NOT NULL DEFAULT '{}',  -- 例: ['instagram'], ['資料作成','ブログ']
+  place_id                  uuid,            -- 拠点タグ（カフェ／アースバッグ／畑 等）。FEL共通スキーマ側のためFK制約なし
+  taken_at                  timestamptz,     -- Exif由来の撮影日時（ユーザーに入力させない）
+  geo_location              text,            -- Exif由来の位置情報
+  -- ▼ 全ロール開放に伴う項目（v13 §5.11.7 ／ §9 #33。2026-08-20 追加）
+  visibility                text NOT NULL DEFAULT '公開'
+                              CHECK (visibility IN ('公開','運営のみ')),
+  deleted_at                timestamptz,     -- 論理削除。運営措置による非表示化も同経路
+  deleted_by                uuid REFERENCES members(member_id),
+  delete_reason             text,
+  -- ▼ Phase 2 で使用（Phase 1 は値を入れない。後から列を足すと全件の再解析が必要になるため先に用意する）
   ai_caption                text,            -- AI自動生成キャプション案（採用前は未編集の生成結果のまま）
   ai_caption_edited         boolean NOT NULL DEFAULT false,  -- 利用者が編集済みか（生成結果の丸写しと区別）
   ai_purpose_score          jsonb,           -- {"instagram": 0.82, "資料作成": 0.55} 用途タグ別の適合度
@@ -320,12 +375,17 @@ CREATE TABLE media_assets (
   linked_quest_id            uuid REFERENCES quests(quest_id),      -- クエスト完了報告からの登録（任意）
   linked_work_log_id         uuid REFERENCES work_logs(log_id),      -- 同上（Before/After写真からの導線）
   created_at                 timestamptz NOT NULL DEFAULT now(),
-  updated_at                 timestamptz NOT NULL DEFAULT now()
+  updated_at                 timestamptz NOT NULL DEFAULT now(),
+  -- 用途タグは最低1つ必須（Phase 2 の検索・推薦が成立しなくなるため／v13 §5.11.7）
+  CONSTRAINT ck_media_purpose_tags_required CHECK (cardinality(purpose_tags) >= 1)
 );
 CREATE INDEX ix_media_member ON media_assets (member_id);
 CREATE INDEX ix_media_purpose_tags ON media_assets USING gin (purpose_tags);
 CREATE INDEX ix_media_processing_status ON media_assets (ai_processing_status)
   WHERE ai_processing_status IN ('pending','processing');
+-- 一覧表示は削除済みを除外する（論理削除のため常に条件が付く）
+CREATE INDEX ix_media_active ON media_assets (created_at DESC) WHERE deleted_at IS NULL;
+CREATE INDEX ix_media_place ON media_assets (place_id) WHERE deleted_at IS NULL;
 ```
 
 - **AI処理は非同期**：アップロード直後は`ai_processing_status='pending'`で即座に一覧へ反映し、
@@ -336,6 +396,161 @@ CREATE INDEX ix_media_processing_status ON media_assets (ai_processing_status)
   「用途」はマスタというより利用者ごとの自由記述に近いため）。
 - **削除・退会時の扱いは未確定**：`members`削除（存在しない想定だが将来の退会処理）時の
   `media_assets`の扱い（カスケード削除か保持か）は§8オーナー確認事項へ追加。
+
+---
+
+### 3-8. Eumo給付の送付・受領追跡（v13 §5.3.1 ／ §9 #35。2026-08-20 新設）
+
+```sql
+CREATE TABLE eumo_grants (
+  grant_id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  member_id          uuid NOT NULL REFERENCES members(member_id),
+  quest_id           uuid REFERENCES quests(quest_id),
+  application_id     uuid REFERENCES quest_applications(application_id),
+  log_id             uuid REFERENCES work_logs(log_id),   -- 起票元の完了報告
+  amount_uii         integer NOT NULL CHECK (amount_uii > 0),
+  -- ▼ 「送付した」と「受け取られた」は別の事実。1カラムに統合しない（v13 §5.3.1）
+  status             text NOT NULL DEFAULT '未送付'
+                        CHECK (status IN ('未送付','送付済','受領確認済','送付失敗')),
+  eumo_url           text,
+  sent_to            text,                                 -- 送付先（メール／LINE ID）
+  sent_channel       text CHECK (sent_channel IN ('email','line','in_person')),
+  sent_by            uuid REFERENCES members(member_id),
+  sent_at            timestamptz,
+  received_confirmed_by uuid REFERENCES members(member_id),  -- Phase1は手動確認（EUMO API連携はPhase2）
+  received_confirmed_at timestamptz,
+  failure_reason     text,
+  created_at         timestamptz NOT NULL DEFAULT now(),
+  updated_at         timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX ix_eumo_grant_member ON eumo_grants (member_id);
+CREATE INDEX ix_eumo_grant_status ON eumo_grants (status);
+-- 「誰にいくら送るか」を確定表示するための未送付一覧
+CREATE INDEX ix_eumo_grant_unsent ON eumo_grants (created_at) WHERE status = '未送付';
+-- 送付済のまま14日超＝滞留の検出（v13 §5.3.1）
+CREATE INDEX ix_eumo_grant_stale ON eumo_grants (sent_at) WHERE status = '送付済';
+```
+
+> [!important] 給付予定は「最終承認」と同時に起票する
+> `work_logs.approval_status = '承認完了'` になった瞬間にのみ `eumo_grants` を作成してください。
+> **コアメンバー確認済の段階では起票しない**こと。確認だけで給付リストに載ると、最終承認前の作業に
+> 対して送付操作ができてしまいます（v13 §5.3.2 で最終承認を `admin` に限定した意味が失われる）。
+
+### 3-9. カフェメニューマスタ（v13 §5.4.2① ／ §9 #40。2026-08-20 新設）
+
+```sql
+CREATE TABLE menu_items (
+  menu_item_id       uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name               text NOT NULL,
+  category           text NOT NULL,          -- フード／ドリンク／直売所 等
+  unit_price_yen     integer NOT NULL CHECK (unit_price_yen >= 0),
+  -- ▲ Uii価格は保存しない。floor(unit_price_yen * 0.8) として都度算出する（v13 §5.5・§5.4.2①）
+  description        text,
+  image_media_id     uuid REFERENCES media_assets(media_id),
+  display_order      integer NOT NULL DEFAULT 0,
+  is_sold_out        boolean NOT NULL DEFAULT false,   -- SOLDOUTトグル（コアメンバーも操作可）
+  is_published       boolean NOT NULL DEFAULT true,
+  available_from     date,
+  available_until    date,                              -- 季節メニュー用
+  created_by         uuid REFERENCES members(member_id),
+  updated_by         uuid REFERENCES members(member_id),
+  created_at         timestamptz NOT NULL DEFAULT now(),
+  updated_at         timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX ix_menu_published ON menu_items (display_order) WHERE is_published = true;
+CREATE INDEX ix_menu_category ON menu_items (category) WHERE is_published = true;
+```
+
+### 3-10. 宿泊料金マスタ（v13 §5.4.2② ／ §9 #40。2026-08-20 新設）
+
+```sql
+CREATE TABLE accommodation_rates (
+  rate_id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  room_type          text NOT NULL
+                        CHECK (room_type IN ('コテージA','コテージB','アースバッグ',
+                                             'テント','車中泊','ゲストハウス','サロン')),
+  member_category    text NOT NULL DEFAULT 'member'
+                        CHECK (member_category IN ('member','non_member')),
+  price_per_night_yen integer NOT NULL CHECK (price_per_night_yen >= 0),
+  -- ▼ 料金改定は行の上書きではなく、適用期間を区切って新しい行を追加する（v13 §5.4.2②）
+  effective_from     date NOT NULL,
+  effective_until    date,                     -- NULL＝現行
+  note               text,
+  created_by         uuid REFERENCES members(member_id),
+  created_at         timestamptz NOT NULL DEFAULT now(),
+  updated_at         timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT ck_rate_period CHECK (effective_until IS NULL OR effective_until >= effective_from)
+);
+-- 同一（部屋タイプ×会員区分）で適用期間が重複しないことを保証する
+CREATE EXTENSION IF NOT EXISTS btree_gist;
+ALTER TABLE accommodation_rates ADD CONSTRAINT ex_rate_no_overlap
+  EXCLUDE USING gist (
+    room_type WITH =,
+    member_category WITH =,
+    daterange(effective_from, effective_until, '[]') WITH &&
+  );
+CREATE INDEX ix_rate_current ON accommodation_rates (room_type, member_category)
+  WHERE effective_until IS NULL;
+```
+
+> [!warning] マスタは「これから作る伝票の既定値」であり、過去伝票の参照先ではない
+> `menu_items.unit_price_yen` を変更しても、**既存の `order_items.unit_price_yen` は変わりません**
+> （注文時点の単価をコピー保持しているため）。この設計を崩して伝票がマスタを参照する形にすると、
+> 価格改定のたびに過去の伝票金額が書き換わり、§5.6.5 の遡及修正で差額が誤って算出されます。
+> 宿泊料金も同じ理由で**適用期間付きの履歴**とし、過去の予約を当時の料金で再計算できるようにします。
+
+### 3-11. 予約経路の記録（v13 §5.2.4 ／ §9 #36。2026-08-20 追加）
+
+既存の `check_ins`（Vault側 `01_schema.sql` で実装済み）に、以下のカラムを追加する。
+
+```sql
+ALTER TABLE check_ins
+  ADD COLUMN reservation_source text NOT NULL DEFAULT 'google_form'
+    CHECK (reservation_source IN ('google_form','in_app','staff_manual'));
+
+COMMENT ON COLUMN check_ins.reservation_source IS
+  '予約経路。google_form=外部フォーム（初回来訪者）／in_app=アプリ内予約（v13 §5.2.4）／staff_manual=運営代理登録。フォーム改修の効果測定とアプリ内予約の利用率評価に使う';
+
+CREATE INDEX ix_checkin_reservation_source ON check_ins (reservation_source);
+```
+
+> **入口は2本、正本は1本**：Googleフォーム経由もアプリ内予約も**同一の `check_ins` レコード**として
+> 作成し、`reservation_source` で経路だけを区別する。予約テーブルを経路ごとに分けると、
+> 宿泊予定カレンダー（§5.2.5②）や残枠算出（§5.2.5①）が経路ごとの UNION になり複雑化するため。
+
+### 3-12. 宿泊枠の残数算出（v13 §5.2.5① ／ §9 #37。2026-08-20 追加）
+
+**残枠は保存カラムを持たず、ビューで都度算出する**（加減算方式はダブルブッキングの温床／v13 §8）。
+
+```sql
+-- 日付 × 部屋タイプごとの残枠。予約画面・カレンダー・顧客管理から参照する
+CREATE VIEW v_room_availability AS
+SELECT
+  d.date,
+  r.room_type,
+  SUM(r.capacity)                                    AS total_capacity,
+  COUNT(ra.assignment_id)                            AS occupied,
+  SUM(r.capacity) - COUNT(ra.assignment_id)          AS available
+FROM generate_series(
+       current_date,
+       current_date + interval '180 days',
+       interval '1 day'
+     ) AS d(date)
+CROSS JOIN rooms r
+LEFT JOIN room_assignments ra
+  ON ra.room_id = r.room_id
+ AND ra.ended_at IS NULL
+ AND d.date >= ra.started_at::date
+ AND (ra.scheduled_end_at IS NULL OR d.date < ra.scheduled_end_at::date)
+WHERE r.status = '利用可'          -- メンテナンス中・利用停止は分母から除外（v13 §5.2.1）
+GROUP BY d.date, r.room_type;
+```
+
+- **`rooms.status = '利用可'` 以外は分母に含めない**。メンテナンス中の部屋を空きとして数えると、
+  予約できてしまい当日に部屋がない事態になる。
+- 予約が `cancelled_at IS NOT NULL` になった時点で `room_assignments` も終了する（§5.2.2）ため、
+  キャンセル分は自動的に空き枠へ戻る。本ビューに追加の条件は不要。
+- パフォーマンスが問題になる場合のみ、マテリアライズドビュー化を検討する（Phase 1 は素のビューで足りる想定）。
 
 ---
 
@@ -382,8 +597,15 @@ CREATE INDEX ix_media_processing_status ON media_assets (ai_processing_status)
 | 10. 既存街人データ移行・名寄せ | `members`等（既存） | 既存（Vault側で実データ検証済み。370名の最終承認はQUESTIONS.md未回答） |
 | 12. ゲスト→街人アップグレード導線 | `membership_applications` | **本書で新規提案**（未着手） |
 | 13. 管理者ダッシュボード | 専用テーブル不要（既存テーブルの集計ビュー） | ― |
-| 14. メディアライブラリ（画面設計.md A10、2026-08-16新設） | `media_assets` | **本書で新規提案**（未着手）。旧「Phase2: メディアストレージ」から前倒し。§3-7参照 |
+| 14. メディア（画像・動画）アップロード（v13 §5.11.7、2026-08-20 再確定） | `media_assets` | **本書で新規提案**（未着手）。**Phase 1 はアップロードのみ**（全ロール開放・用途タグ必須・論理削除）。**検索とAI推薦は Phase 2** のため `ai_*` 系カラムは用意するが値を入れない。§3-7参照 |
+| 15. Eumo給付の送付・受領追跡（v13 §5.3.1、2026-08-20 新設） | `eumo_grants` | **本書で新規提案**（未着手）。最終承認と同時に起票。`送付済` と `受領確認済` を別状態で保持。§3-8参照 |
+| 16. マスタ管理（カフェメニュー／宿泊料金）（v13 §5.4.2、2026-08-20 新設） | `menu_items`, `accommodation_rates` | **本書で新規提案**（未着手）。Uii価格は保存せず都度算出。宿泊料金は適用期間付きの履歴管理（`EXCLUDE` 制約で期間重複を防止）。§3-9・§3-10参照 |
+| 17. アプリ内からの宿泊予約（v13 §5.2.4、2026-08-20 新設） | `check_ins.reservation_source`（カラム追加） | **本書で新規提案**（未着手）。Googleフォーム経由と同一テーブルに格納し経路のみ区別。§3-11参照 |
+| 18. 宿泊枠の残数・カレンダー（v13 §5.2.5、2026-08-20 新設） | `v_room_availability`（ビュー） | **本書で新規提案**（未着手）。**保存カラムを持たず都度算出**（ダブルブッキング防止）。§3-12参照 |
+| 19. クエスト承認の二段階化（v13 §5.3.2、2026-08-20 新設） | `work_logs`（カラム追加）, `work_log_reviews` | **本書で新規提案**（未着手）。確認者と承認者を別カラムで保持。§3-1参照 |
+| 20. カフェ注文の提供ステータス（v13 §5.4.1、2026-08-20 新設） | `orders.serving_status` 他（カラム追加） | **本書で新規提案**（未着手）。決済ステータスと**独立した2軸**。§3-2参照 |
 | Phase2: 会員権失効 | `memberships.expires_on`, `expire_memberships()` | **既に用意済み**（Vault側スキーマに実装済み。§9 #21で確定した「後からカラムを足さない」方針を満たす） |
+| Phase2: メディアの検索・AI推薦 | `media_assets.ai_*`（カラムのみ先行用意） | **Phase 1 でスキーマだけ用意**。値の投入・検索実装は Phase 2（v13 §5.11.3） |
 
 ---
 
@@ -520,3 +742,4 @@ CREATE INDEX ix_escalation_unresolved ON unanswered_escalations (escalated_at)
 用途（インスタグラム／資料作成等）入力→AI適合度ソート＋キャプション自動生成する`media_assets`
 テーブルを新規提案。旧「Phase2: メディアストレージ」（未設計のまま据え置き）からPhase1へ前倒し。
 §7突合表を14番として追加、§8オーナー確認事項に#7・#8を新設（削除方針・AIコスト等）。 |
+| **2026-08-20（v13 v1.15.0 反映）** | **8/13レビュー未反映分の一括反映（v13 §9 #33〜#43）に伴うスキーマ改訂**。①**§3-1 二段階承認**：`work_logs.approval_status` を `報告済み/コアメンバー確認済/承認完了/差戻し` へ変更し、`reviewed_by`（確認者）と `approved_by`（最終承認者＝admin）を**別カラムで保持**。`review_skipped`・差戻し理由の CHECK 制約・`work_log_reviews`（2人目以降の確認ログ）を追加。②**§3-2 提供ステータス**：`orders.serving_status`（未提供／提供済み）・`served_at`・`served_by` を追加し、決済ステータスと独立した2軸に。「精算済みだが未提供」検出用の部分インデックスも新設。③**§3-7 メディア**：`visibility`（公開／運営のみ）・`deleted_at`（論理削除・運営措置）・`place_id`・`taken_at`・`geo_location` を追加。**用途タグ最低1つ必須**の CHECK 制約を新設（Phase 2 の検索精度を担保）。`ai_*` 系は Phase 2 用にカラムのみ用意。④**§3-8 `eumo_grants` を新設**：`未送付→送付済→受領確認済` を追跡。送付と受領を別状態で保持。⑤**§3-9 `menu_items` / §3-10 `accommodation_rates` を新設**：Uii価格は保存せず都度算出。宿泊料金は `EXCLUDE USING gist` で適用期間の重複を防止し、過去予約を当時の料金で再計算可能に。⑥**§3-11 `check_ins.reservation_source` を追加**：アプリ内予約とフォーム経由を同一テーブルで扱い経路のみ区別。⑦**§3-12 `v_room_availability` ビューを新設**：残枠を**保存せず都度算出**（ダブルブッキング防止）。§7突合表に15〜20番を追加。 |

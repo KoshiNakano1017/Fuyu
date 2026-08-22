@@ -1,9 +1,12 @@
 ---
 title: "浮遊街アプリ データモデル図（ER図）"
-doc_version: "1.0.0"
-date: "2026-08-17"
+doc_type: 設計
 status: "Draft"
+owner: プロジェクトオーナー
+date: "2026-08-17"
+updated: 2026-08-22
 tags: ["浮遊街アプリ", "ER図", "データモデル", "スキーマ設計", "Supabase"]
+doc_version: "1.0.0"
 ---
 
 # 浮遊街アプリ データモデル図（ER図）
@@ -158,10 +161,65 @@ erDiagram
         integer duration_minutes "作業時間（分）"
         string before_photo_url "Before写真URL"
         string after_photo_url "After写真URL"
-        string status "ステータス (submitted/approved/rejected)"
+        string status "ステータス ★二段階承認 (報告済み/コアメンバー確認済/承認完了/差戻し)"
+        uuid reviewed_by FK "コアメンバー確認者ID ★承認者とは別カラム"
+        timestamp reviewed_at "コアメンバー確認日時"
+        boolean review_skipped "管理者が確認を飛ばして直接承認したか"
+        uuid approved_by FK "最終承認者ID（adminのみ）"
+        timestamp approved_at "最終承認日時"
+        uuid rejected_by FK "差戻し実施者ID"
+        text rejection_reason "差戻し理由（差戻し時は必須）"
         text notes "備考"
         timestamp submitted_at "提出日時"
-        timestamp reviewed_at "審査日時"
+    }
+
+    WORK_LOG_REVIEWS {
+        uuid id PK "確認ログID"
+        uuid quest_completion_id FK "完了報告ID"
+        uuid reviewer_id FK "確認者ID"
+        timestamp reviewed_at "確認日時"
+        text comment "コメント"
+    }
+
+    EUMO_GRANTS {
+        uuid id PK "給付ID"
+        uuid user_id FK "対象会員ID"
+        uuid quest_id FK "対象クエストID"
+        uuid quest_completion_id FK "起票元の完了報告ID"
+        integer amount_uii "確定Uii額"
+        string status "★送付と受領は別状態 (未送付/送付済/受領確認済/送付失敗)"
+        string eumo_url "Eumo送付用URL"
+        string sent_to "送付先（メール／LINE）"
+        string sent_channel "送付経路 (email/line/in_person)"
+        uuid sent_by FK "送付者ID"
+        timestamp sent_at "送付日時"
+        uuid received_confirmed_by FK "受領確認者ID（Phase1は手動確認）"
+        timestamp received_confirmed_at "受領確認日時"
+        text failure_reason "送付失敗理由"
+    }
+
+    MENU_ITEMS {
+        uuid id PK "メニューID"
+        string name "商品名"
+        string category "カテゴリ（フード／ドリンク／直売所）"
+        decimal unit_price_jpy "単価（円）★Uii価格は保存せず都度算出"
+        text description "説明文"
+        uuid image_media_id FK "商品画像メディアID"
+        integer display_order "表示順"
+        boolean is_sold_out "SOLDOUTフラグ"
+        boolean is_published "公開フラグ（物理削除しない）"
+        date available_from "有効期間開始"
+        date available_until "有効期間終了"
+    }
+
+    ACCOMMODATION_RATES {
+        uuid id PK "料金ID"
+        string room_type "宿泊形態（6種）"
+        string member_category "会員区分 (member/non_member)"
+        decimal price_per_night_jpy "1泊あたり単価（円）"
+        date effective_from "適用開始日 ★改定は期間を区切って追加"
+        date effective_until "適用終了日（NULL＝現行）"
+        text note "備考"
     }
 
     ORDERS {
@@ -172,6 +230,9 @@ erDiagram
         decimal total_amount_jpy "合計金額（円）"
         integer total_amount_uii "合計金額（Uii）"
         string payment_status "決済ステータス (unpaid/paid/cancelled)"
+        string serving_status "提供ステータス (未提供/提供済み) ★決済と独立した2軸"
+        timestamp served_at "提供日時"
+        uuid served_by FK "提供操作者ID"
         string order_type "注文種別 (self/proxy)"
         string order_source "注文元 (cafe/shop/other)"
         timestamp ordered_at "注文日時"
@@ -359,9 +420,15 @@ erDiagram
 
     QUESTS ||--o{ QUEST_APPLICATIONS : "has"
     QUEST_APPLICATIONS ||--o{ QUEST_COMPLETIONS : "leads_to"
+    QUEST_COMPLETIONS ||--o{ WORK_LOG_REVIEWS : "reviewed_by_multiple"
+    QUEST_COMPLETIONS ||--o| EUMO_GRANTS : "grants_on_final_approval"
+    USERS ||--o{ EUMO_GRANTS : "receives"
 
     ORDERS ||--o{ ORDER_ITEMS : "contains"
     ORDERS ||--o{ SETTLEMENT_ADJUSTMENTS : "generates"
+    MENU_ITEMS ||--o{ ORDER_ITEMS : "priced_at_order_time"
+
+    ACCOMMODATION_RATES ||--o{ BOOKINGS : "priced_by_effective_period"
 
     MORNING_SESSIONS ||--o{ QUESTS : "suggests"
     MORNING_SESSIONS ||--o{ MEDIA_ITEMS : "includes_audio"
@@ -1083,8 +1150,22 @@ WHERE DATE(ms.session_date) = CURRENT_DATE
 
 ---
 
-Last Updated: 2026-08-17  
-Version: 1.0.0 (Draft)  
+Last Updated: 2026-08-20  
+Version: 1.1.0 (Draft)  
 Status: 実装前レビュー待ち
 
 **注記**: このER図は論理設計レベルです。物理実装時は、インデックス・パーティショニング・キャッシュ戦略等をDB物理設計に従って調整してください。
+
+---
+
+## 改訂履歴
+
+| 版 | 日付 | 内容 |
+| --- | --- | --- |
+| **1.1.0** | **2026-08-20** | **正本 v1.15.0（2026-08-13 レビュー未反映分の一括反映）を反映**。①`ORDERS` に **`serving_status`（未提供／提供済み）・`served_at`・`served_by`** を追加。**決済ステータスとは独立した2軸**であり、同一カラムへ統合しない（正本 §5.4.1／§9 #39）。②`QUEST_COMPLETIONS` を**二段階承認**へ変更：`status` を `報告済み/コアメンバー確認済/承認完了/差戻し` とし、**`reviewed_by`（コアメンバー確認者）と `approved_by`（最終承認者＝admin）を別カラムで保持**。`review_skipped`・`rejection_reason` も追加（正本 §5.3.2／§9 #34）。③**`WORK_LOG_REVIEWS` を新設**（2人目以降の確認ログ）。④**`EUMO_GRANTS` を新設**：`未送付→送付済→受領確認済` を追跡し、**送付と受領を別状態で保持**（正本 §5.3.1／§9 #35）。⑤**`MENU_ITEMS`・`ACCOMMODATION_RATES` を新設**：Uii価格は保存せず都度算出、宿泊料金は**適用期間付きの履歴管理**（正本 §5.4.2／§9 #40）。⑥リレーションに `QUEST_COMPLETIONS→EUMO_GRANTS`（最終承認時に起票）・`MENU_ITEMS→ORDER_ITEMS`（注文時点の単価をコピー）・`ACCOMMODATION_RATES→BOOKINGS`（適用期間で解決）を追加。 |
+| 1.0.0 | 2026-08-17 | 初版作成（論理設計レベル）。 |
+
+> [!important] 残枠は**エンティティを持たない**
+> 「ゲストハウス残り◯／アースバッグ残り◯」は保存カラム・専用テーブルを持たず、
+> **`ROOMS` × `ROOM_ASSIGNMENTS` から都度算出**する（DB物理設計.md §3-12 の `v_room_availability` ビュー）。
+> 加減算方式にするとダブルブッキングを招くため、残高カラムと同じ原則（正本 §9 #25）で明細を正本とする。
