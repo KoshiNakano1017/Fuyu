@@ -183,7 +183,8 @@ tags:
 
 ## 8. RAG / line-rag-bot（柱⑤）
 
-**浮遊街アプリ本体と line-rag-bot は API 連携しません。** 結合点は管理画面からの外部リンクのみです。
+**浮遊街アプリ本体と line-rag-bot は API 連携しません。** 結合点は管理画面からの外部リンク（と、Streamlit 側からの戻りリンク）のみです。
+ただし**デザイン（配色・書体・角丸）は 2026-08-23 に統一済み**で、リンクの前後で見た目は変わりません（[RAG基盤 概要](https://github.com/KoshiNakano1017/Fuyu/blob/main/docs/RAG基盤_line-rag-bot概要.md) §2-1）。
 
 | ドキュメント | 内容 |
 | --- | --- |
