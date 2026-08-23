@@ -1,8 +1,12 @@
 ---
 title: Uii経済圏とeumo連携
+doc_type: 要件
+status: 運用中
+owner: プロジェクトオーナー
 date: 2026-08-08
-theme: 浮遊街アプリ・FELプロジェクト
+updated: 2026-08-22
 tags: ["浮遊街", "Uii", "eumo", "地域通貨", "要件定義"]
+theme: 浮遊街アプリ・FELプロジェクト
 ---
 
 # Uii経済圏とeumo連携

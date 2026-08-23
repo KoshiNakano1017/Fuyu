@@ -1,9 +1,12 @@
 ---
 title: "浮遊街アプリ ユースケース図"
-doc_version: "1.0.0"
-date: "2026-08-17"
+doc_type: 設計
 status: "Draft"
+owner: プロジェクトオーナー
+date: "2026-08-17"
+updated: 2026-08-22
 tags: ["浮遊街アプリ", "ユースケース図", "UML", "システム設計"]
+doc_version: "1.0.0"
 ---
 
 # 浮遊街アプリ ユースケース図

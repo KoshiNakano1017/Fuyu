@@ -1,7 +1,11 @@
 ---
 title: "詳細設計：API設計（Phase 1）"
-date: "2026-08-16"
+doc_type: 設計
 status: "詳細設計ドラフト（要オーナーレビュー）"
+owner: プロジェクトオーナー
+date: "2026-08-16"
+updated: 2026-08-22
+tags: ["浮遊街アプリ"]
 up: "[[浮遊街アプリ 総合要件定義・設計書_v13]]"
 ---
 
@@ -47,7 +51,7 @@ up: "[[浮遊街アプリ 総合要件定義・設計書_v13]]"
 | POST | `/api/checkins/{id}/room-assignments` | 部屋割当 | core_member, admin | `room_assignments` |
 | PATCH | `/api/room-assignments/{id}/move` | 部屋移動（既存終了＋新規追加） | core_member, admin | `room_assignments` |
 | GET | `/api/rooms?status=available` | 空き部屋一覧 | core_member, admin | `rooms` |
-| GET | `/api/admin/stay-calendar` | 宿泊予定カレンダー（**ドラフト保留**） | core_member, admin | `check_ins`×`room_assignments`×`rooms` |
+| GET | `/api/admin/stay-calendar` | 宿泊予定カレンダー（**2026-08-20：ドラフト保留を解除**。§9 #30-⑤ 決着によりGoogleカレンダー同等の操作感で確定） | core_member, admin | `check_ins`×`room_assignments`×`rooms` |
 
 ### 2-3. 朝会・議事録・クエスト自動起案
 
@@ -66,7 +70,22 @@ up: "[[浮遊街アプリ 総合要件定義・設計書_v13]]"
 | POST | `/api/quests/{id}/applications` | 受注申請 | member, guest（`guest_allowed=true`のみ） | `quest_applications` |
 | PATCH | `/api/quest-applications/{id}/review` | 審査・実行指示 | admin, core_member | `quest_applications` |
 | POST | `/api/quest-applications/{id}/work-logs` | 完了報告（Before/After写真必須） | 申請者本人 | `work_logs` |
-| PATCH | `/api/work-logs/{id}/approve` | 日次承認／差戻し | admin, core_member | `work_logs`, `uii_transactions`(Phase2), `members.earned_xp` |
+| ~~PATCH~~ | ~~`/api/work-logs/{id}/approve`~~ | ~~日次承認／差戻し~~ | **2026-08-20：二段階化により分割**（下記2本＋差戻し） | ― |
+| PATCH | `/api/work-logs/{id}/review` | **コアメンバー確認**（`報告済み → コアメンバー確認済`）。1人目の確認で遷移し、2人目以降は `work_log_reviews` へ追加記録 | admin, core_member | `work_logs.reviewed_by/at`, `work_log_reviews` |
+| PATCH | `/api/work-logs/{id}/approve` | **最終承認**（`コアメンバー確認済 → 承認完了`）。確定Uii額を入力し、**同時に `eumo_grants` を起票**。`報告済み` から直接呼ぶことも可（その場合 `review_skipped=true`） | **admin のみ** | `work_logs.approved_by/at`, `eumo_grants`, `members.earned_xp` |
+| PATCH | `/api/work-logs/{id}/reject` | 差戻し（理由必須）。いずれのステージからも可 | admin, core_member | `work_logs.rejected_*` |
+
+### 2-4b. Eumo給付の送付・受領追跡（2026-08-20 新設 ／ v13 §5.3.1・§9 #35）
+
+| メソッド | パス | 概要 | 権限 | 主な対象テーブル |
+| --- | --- | --- | --- | --- |
+| GET | `/api/eumo-grants?status=未送付` | 給付一覧（「誰にいくら」を確定表示）。ステータス別タブ | admin, core_member | `eumo_grants` |
+| POST | `/api/eumo-grants/{id}/send` | 送付用リンクを発行し登録アドレスへ送付。**送付日時・送付者・送付先を記録** | admin, core_member | `eumo_grants`（`未送付 → 送付済`） |
+| PATCH | `/api/eumo-grants/{id}/confirm-receipt` | **受領確認（手動）**。EUMO API連携はPhase 2のため自動検知しない | admin, core_member | `eumo_grants`（`送付済 → 受領確認済`） |
+| GET | `/api/eumo-grants/stale` | `送付済` のまま14日超の滞留一覧 | admin, core_member | `eumo_grants` |
+
+> **`send` と `confirm-receipt` を1本のAPIにまとめないこと。** 送付と受領は別の事実であり、
+> 統合すると「送ったが届いていない」給付が検出できなくなる（v13 §5.3.1）。
 
 ### 2-5. 注文管理・会計
 
@@ -77,7 +96,28 @@ up: "[[浮遊街アプリ 総合要件定義・設計書_v13]]"
 | POST | `/api/orders/{id}/settlement-qr` | 精算QR発行（即時／一括） | 本人, admin, core_member | `orders.settlement_qr_token` |
 | POST | `/api/orders/{id}/settlement-adjustments` | 差額計上（追加請求/返金） | admin, core_member | `settlement_adjustments` |
 | PATCH | `/api/settlement-adjustments/{id}` | 精算／免除（**免除権限範囲は要確認**） | admin（core_memberの可否は未確認） | `settlement_adjustments` |
-| PATCH | `/api/checkout/{id}/toggle-soldout` | SOLDOUTトグル | core_member, admin | 商品マスタ（別途要定義） |
+| PATCH | `/api/orders/{id}/serving-status` | **提供ステータス切替**（未提供 ⇄ 提供済み）。**決済ステータスとは独立**。Realtime で客側へ即時反映（2026-08-20 新設／§9 #39） | core_member, admin | `orders.serving_status/served_at/served_by` |
+| GET | `/api/orders?serving_status=未提供` | 厨房の作業待ち行列（B1カンバン用） | core_member, admin | `orders` |
+| GET | `/api/orders/paid-unserved` | **「精算済みだが未提供」の要注意一覧**（2026-08-20 新設） | core_member, admin | `orders` |
+| PATCH | `/api/menu-items/{id}/toggle-soldout` | SOLDOUTトグル（**コアメンバーも可**） | core_member, admin | `menu_items.is_sold_out` |
+
+### 2-5b. マスタ管理（カフェメニュー／宿泊料金）（2026-08-20 新設 ／ v13 §5.4.2・§9 #40）
+
+| メソッド | パス | 概要 | 権限 | 主な対象テーブル |
+| --- | --- | --- | --- | --- |
+| GET | `/api/menu-items` | メニュー一覧（客用は `is_published=true` のみ） | 全員 | `menu_items` |
+| POST | `/api/menu-items` | メニュー登録。**Uii価格は受け取らない**（`floor(単価×0.8)` で都度算出） | **admin のみ** | `menu_items` |
+| PATCH | `/api/menu-items/{id}` | メニュー編集（価格・表示順・公開フラグ・有効期間） | **admin のみ** | `menu_items` |
+| GET | `/api/accommodation-rates?date=YYYY-MM-DD` | 指定日に適用される宿泊料金（6形態 × 会員区分） | 全員 | `accommodation_rates` |
+| POST | `/api/accommodation-rates` | 料金改定。**既存行を上書きせず適用期間を区切って追加**（期間重複は `EXCLUDE` 制約で拒否） | **admin のみ** | `accommodation_rates` |
+
+### 2-2b. アプリ内からの宿泊予約・残枠（2026-08-20 新設 ／ v13 §5.2.4・§5.2.5・§9 #36・#37）
+
+| メソッド | パス | 概要 | 権限 | 主な対象テーブル |
+| --- | --- | --- | --- | --- |
+| GET | `/api/availability?from=&to=&room_type=` | **宿泊枠の残数**（`v_room_availability` から都度算出。保存値ではない） | 全員 | `v_room_availability` |
+| POST | `/api/reservations` | **アプリ内予約**。氏名・連絡先・住所は会員マスタから自動補完。備考欄が空なら自動確定、記載があれば「要確認」 | `active` の全ロール | `check_ins`（`reservation_source='in_app'`） |
+| GET | `/api/me/stay-calendar` | **本人の宿泊予定・履歴カレンダー** | 本人 | `check_ins`×`room_assignments` |
 
 ### 2-6. FAQ・ナレッジ・RAG
 
