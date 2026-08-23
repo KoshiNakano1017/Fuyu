@@ -1,10 +1,17 @@
 name: CI
 
 # CLAUDE.md §6.2 — push/PR 時の重い検証はここで実行する（pre-commit は軽量チェックのみ）
+#
+# 2026-08-22（R2 オーナー回答「CIをコミット時に走らせる」）:
+#   push トリガを main 限定から **全ブランチ**へ広げた。
+#   §5.1 で main への直接 push は禁止しているため、branches: [main] のままでは
+#   feature ブランチのコミットが PR を作るまで一度も CI にかからない。
+#   全ブランチを対象にすることで「push した全コミットが検証される」状態にする。
+#   （ローカルの commit 時点では pre-commit の軽量チェックのみ。E2E はブラウザ起動を伴い
+#     数分かかるため、コミットのたびに回すと開発が止まる — 二段構えの方針は維持する）
 
 on:
   push:
-    branches: [main]
   pull_request:
     branches: [main]
 
@@ -152,3 +159,80 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co' }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder' }}
         run: npm run build
+
+      # ビルド成果物を E2E ジョブへ渡す。E2E 側で再ビルドすると同じ処理を2回走らせることになる
+      - name: ビルド成果物をアップロード
+        if: steps.check.outputs.exists == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: next-build
+          path: |
+            .next
+            !.next/cache
+          retention-days: 1
+
+  # ───────────────────────────────────────────
+  # E2E テスト（CLAUDE.md §6.2 — 2026-08-22 R2 回答で追加）
+  #
+  # 認可・金額計算・個人情報の3点は CLAUDE.md §4.4 が必ずテストを要求する領域であり、
+  # 単体テストだけでは «ログインした街人が他人の会計を見られないか» のような
+  # 画面をまたぐ検証ができない。そのため E2E を独立ジョブとして常設する。
+  # ───────────────────────────────────────────
+  e2e:
+    name: E2Eテスト
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: playwright 設定の有無を確認
+        id: check
+        run: |
+          # package.json と Playwright 設定の両方が揃ってから有効化する。
+          # 実装着手前・E2E 未整備の段階では黙ってスキップする（CI を赤くしない）
+          if [ -f package.json ] && ls playwright.config.* >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "Playwright 未設定のためスキップします（WBS 1-3 で整備予定）"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.exists == 'true'
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: 依存関係のインストール
+        if: steps.check.outputs.exists == 'true'
+        run: npm ci
+
+      - name: ビルド成果物をダウンロード
+        if: steps.check.outputs.exists == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: next-build
+          path: .next
+
+      - name: ブラウザのインストール
+        if: steps.check.outputs.exists == 'true'
+        # --with-deps でOS側の共有ライブラリも入れる。これが無いと ubuntu-latest 上で
+        # Chromium が起動時に落ちる
+        run: npx playwright install --with-deps chromium
+
+      - name: E2E 実行
+        if: steps.check.outputs.exists == 'true'
+        env:
+          # E2E は本番 Supabase を絶対に指さない。テスト用プロジェクトの値のみを使う
+          # （CLAUDE.md §3.1 — 実データを触らない）
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.E2E_SUPABASE_URL || 'https://placeholder.supabase.co' }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.E2E_SUPABASE_ANON_KEY || 'placeholder' }}
+        run: npx playwright test
+
+      - name: 失敗時のレポートを保存
+        if: steps.check.outputs.exists == 'true' && failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
