@@ -1,0 +1,20 @@
+{
+  "$comment": "テスト設計用。tests/ 配下のみ書き込み可。実装を見ずに仕様だけを見るため実装コードの編集を禁じる(設計 §3 #3)。",
+  "permissions": {
+    "allow": [
+      "Read", "Glob", "Grep",
+      "Write(tests/**)",
+      "Edit(tests/**)",
+      "Bash(npm run test:*)",
+      "Bash(npm run lint:*)",
+      "Bash(npx playwright:*)"
+    ],
+    "deny": [
+      "Write(docs/spec/**)",
+      "Edit(docs/spec/**)",
+      "Edit(app/**)",
+      "Edit(src/**)",
+      "Edit(supabase/migrations/**)"
+    ]
+  }
+}

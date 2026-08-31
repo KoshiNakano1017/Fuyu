@@ -1,0 +1,79 @@
+name: 自動化タスク
+description: 自律ループに流すタスク（仕様が確定しているものだけ）
+title: "[auto] "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 起票前チェック（設計 §10.1.3）
+
+        次の3条件を**すべて**満たすものだけ `auto` ラベルを付けてください。
+        1つでも欠けるなら `needs-spec` を付けて保留します。
+
+        - [ ] **節番号が引ける** — 正本 v13 の確定した節を指せる
+        - [ ] **ブロッカーが解けている** — 依存する `QUESTIONS.md` の項目がすべて回答済み
+        - [ ] **完了条件が検証可能** — 「〜が〜できる」で書け、テスト設計エージェントが受入テストへ変換できる
+
+        > 「根拠となる仕様」を書けない Issue は、実装タスクではなく**仕様策定タスク**です。
+        > `auto` を付けず `needs-spec` として別扱いにしてください。
+
+  - type: textarea
+    id: purpose
+    attributes:
+      label: 目的
+      description: 何のために作るか。1〜2文で。
+    validations:
+      required: true
+
+  - type: input
+    id: spec_ref
+    attributes:
+      label: 根拠となる仕様
+      description: "節番号で指定する。書けないなら仕様が未確定＝ループの対象外。"
+      placeholder: "v13 §5.10.2"
+    validations:
+      required: true
+
+  - type: textarea
+    id: done_criteria
+    attributes:
+      label: 完了条件
+      description: 「〜が〜できる」の形で、検証可能に箇条書きする。
+      placeholder: |
+        - 街人がクエスト一覧から詳細を開ける
+        - guest_allowed=false のクエストをゲストが受注できない
+    validations:
+      required: true
+
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: スコープ外
+      description: 今回やらないことを明示する。書かないとエージェントが広げる。
+    validations:
+      required: true
+
+  - type: dropdown
+    id: size
+    attributes:
+      label: 想定サイズ
+      description: L なら分割を検討してください。
+      options:
+        - S
+        - M
+        - L
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: risk_hints
+    attributes:
+      label: 該当する場合はチェック（リスク区分の判定材料・設計 §4.1）
+      description: 1つでも該当すれば高リスクとなり、承認が3回になります。
+      options:
+        - label: 認可・ロール判定に触れる
+        - label: 金額・Uii・宿泊券の計算に触れる
+        - label: 個人情報の入出力がある
+        - label: DB マイグレーションを伴う
+        - label: 外部連携（LINE / Supabase Auth / 決済）に触れる
