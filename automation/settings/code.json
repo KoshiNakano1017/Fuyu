@@ -1,0 +1,13 @@
+{
+  "$comment": "コーディング・修正用。実装コードは可。docs/spec/ は拒否(設計 §8.2 の差分検出ガードとの二重防御)。",
+  "permissions": {
+    "allow": ["Read", "Glob", "Grep", "Write", "Edit", "Bash"],
+    "deny": [
+      "Write(docs/spec/**)",
+      "Edit(docs/spec/**)",
+      "Read(../../Knowledge/**)",
+      "Bash(git push --force:*)",
+      "Bash(rm -rf:*)"
+    ]
+  }
+}

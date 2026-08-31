@@ -1,0 +1,23 @@
+{
+  "$comment": "PM(定義・段取り・報告)用。TASKS.md / LOOP_LOG.md / QUESTIONS.md と Issue コメントのみ。",
+  "permissions": {
+    "allow": [
+      "Read", "Glob", "Grep",
+      "Edit(TASKS.md)",
+      "Edit(LOOP_LOG.md)",
+      "Edit(QUESTIONS.md)",
+      "Bash(gh issue comment:*)",
+      "Bash(gh issue view:*)",
+      "Bash(gh issue edit:*)"
+    ],
+    "deny": [
+      "Write",
+      "NotebookEdit",
+      "Edit(docs/spec/**)",
+      "Edit(app/**)",
+      "Edit(src/**)",
+      "Edit(supabase/**)",
+      "Edit(tests/**)"
+    ]
+  }
+}
