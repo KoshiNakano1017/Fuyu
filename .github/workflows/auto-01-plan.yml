@@ -33,6 +33,9 @@ concurrency:
 permissions:
   contents: write
   issues: write
+  # claude-code-action は OIDC トークンでの認証を必要とする。無いと
+  # 「Could not fetch an OIDC token」で失敗する（claude-review.yml に既に同じ設定がある）。
+  id-token: write
 
 env:
   # モデルと effort は claude_args で Claude CLI へ直接渡す(設計 §3)。
