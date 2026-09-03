@@ -2,11 +2,21 @@
 #
 # トリガ : Issue に `auto` ラベルが付いた時
 # 担当   : PM(定義) → 調査 → PM(段取り)
-# ゲート : 1(タスク定義) と 2(段取り) の2つで停止する
+# ゲート : リスク区分により 0〜2 回停止する(設計 §4.1)
 # 設計   : docs/自律開発ループ設計.md §6.1
 #
 # このワークフローは **アプリのコードが1行も無い状態でも動く**。
 # 計画フェーズのエージェントは Issue にコメントするだけで、コードに触らないため。
+#
+# ── リスク区分とゲートの対応(設計 §4.1・試運転 3-1/3-2 の検証対象) ──
+#   高 : ゲート1 + ゲート2  (このワークフローで2回停止)
+#   中 : ゲート2のみ        (1回停止)
+#   低 : 停止なし + 30分の異議申立て窓
+#
+# ── 責務の分界 ──
+#   エージェント = Issue コメント / QUESTIONS.md / TASKS.md への記述と、末尾のマーカー出力
+#   ワークフロー = マーカーを読んだ**ラベル遷移とゲート制御**
+#   機械的に決まるものは機械が持つ。エージェントにラベル操作を任せると再現性が落ちるため。
 
 name: 自律ループ 01 計画
 
@@ -28,13 +38,17 @@ env:
   # モデルと effort は claude_args で Claude CLI へ直接渡す(設計 §3)。
   # effort: low | medium | high | xhigh | max
   MODEL: claude-opus-5
+  OWNER: KoshiNakano1017
 
 jobs:
-  # ── PM: Issue をタスク定義に落とす ───────────────────────
+  # ── PM: Issue をタスク定義に落とし、リスク区分を判定する ──────────
   define:
     if: github.event.label.name == 'auto'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      risk: ${{ steps.classify.outputs.risk }}
+      blocked: ${{ steps.classify.outputs.blocked }}
     steps:
       - uses: actions/checkout@v4
 
@@ -57,34 +71,102 @@ jobs:
             automation/prompts/pm-define.md を読み、その指示に従うこと。
             対象 Issue 番号: ${{ github.event.issue.number }}
 
-  # ── ゲート1: タスク定義の承認（ここで停止する）────────────
+      # エージェントが残したマーカーを読む(設計 §6.2 の <!--retry--> と同じ方式)。
+      # 判定を後続ジョブの if 条件へ渡すため、job outputs に落とす。
+      - name: 判定結果の読み取り
+        id: classify
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
+          ISSUE: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          BODIES="$(gh issue view "$ISSUE" --repo "$REPO" --json comments --jq '.comments[].body')"
+
+          if printf '%s' "$BODIES" | grep -q '<!--blocked-->'; then
+            echo "blocked=true" >> "$GITHUB_OUTPUT"
+            echo "risk=high"    >> "$GITHUB_OUTPUT"
+            echo "::warning::仕様が未確定のため停止します（設計 §0）"
+            exit 0
+          fi
+          echo "blocked=false" >> "$GITHUB_OUTPUT"
+
+          RISK="$(printf '%s' "$BODIES" \
+            | grep -oE '<!--risk:(high|mid|low)-->' \
+            | tail -1 | sed -E 's/.*risk:(.*)-->/\1/' || true)"
+
+          # マーカーが無い＝判定を読み取れない。安全側(高リスク)へ倒す。
+          # 「高リスクを低と誤判定する」のが唯一の致命的な失敗モードのため(設計 §4.1)。
+          if [ -z "$RISK" ]; then
+            echo "::warning::リスクマーカーが見つかりません。high として扱います"
+            RISK=high
+          fi
+          echo "リスク区分: ${RISK}"
+          echo "risk=${RISK}" >> "$GITHUB_OUTPUT"
+
+  # ── 停止: 仕様が未確定（タスク定義の段階で判明）─────────────────
+  blocked-at-define:
+    needs: define
+    if: needs.define.outputs.blocked == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: auto:blocked へ付け替えて通知
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
+          ISSUE: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          gh issue edit "$ISSUE" --repo "$REPO" \
+            --remove-label "auto:planning" --add-label "auto:blocked"
+          printf '%s\n\n%s\n' \
+            "@${OWNER} 仕様が未確定のため計画フェーズを停止しました。上のコメントの選択肢から1つ返信してください。" \
+            "実行: ${RUN_URL}" > notice.md
+          gh issue comment "$ISSUE" --repo "$REPO" --body-file notice.md
+
+  # ── ゲート1: タスク定義の承認（高リスクのみ・設計 §4.1）───────────
   approve-definition:
     needs: define
+    if: needs.define.outputs.blocked == 'false' && needs.define.outputs.risk == 'high'
     runs-on: ubuntu-latest
     environment: gate-task-definition
     steps:
-      - run: echo "タスク定義が承認されました"
+      - run: echo "タスク定義が承認されました（高リスク）"
 
-  # ── 調査 → PM: 段取り ────────────────────────────────────
+  # ── 調査 → PM: 段取り ─────────────────────────────────────────
   plan:
-    needs: approve-definition
+    needs: [define, approve-definition]
+    if: >-
+      always()
+      && needs.define.result == 'success'
+      && needs.define.outputs.blocked == 'false'
+      && !contains(fromJSON('["failure","cancelled"]'), needs.approve-definition.result)
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    outputs:
+      risk: ${{ steps.reclassify.outputs.risk }}
+      blocked: ${{ steps.reclassify.outputs.blocked }}
     steps:
       - uses: actions/checkout@v4
 
       # 読み取り専用。書き込み権限は settings で機械的に落とす(設計 §7.2)。
       # プロンプトに「読み取り専用です」と書くだけでは守られない。
+      #
+      # readonly.json ではなく research.json を使う。前者は Bash を全面拒否するため、
+      # 設計 §3 が調査の出力先として定める Issue コメントに到達できないため。
       - name: 調査エージェント（一次情報の取得）
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_args: '--model ${{ env.MODEL }} --effort high'
-          settings: automation/settings/readonly.json
+          settings: automation/settings/research.json
           prompt: |
             automation/prompts/research.md を読み、その指示に従うこと。
             対象 Issue 番号: ${{ github.event.issue.number }}
 
+      # 調査が曖昧さを見つけていた場合、QUESTIONS.md への起票はこちらが行う。
+      # 調査エージェントは読み取り専用で書けないため(設計 §3 の権限表)。
       - name: PMエージェント（段取り）
         uses: anthropics/claude-code-action@v1
         with:
@@ -95,17 +177,182 @@ jobs:
             automation/prompts/pm-plan.md を読み、その指示に従うこと。
             対象 Issue 番号: ${{ github.event.issue.number }}
 
-  # ── ゲート2: 段取りの承認（ここで停止する）────────────────
+      - name: 判定結果の再読み取り（リスクの繰り上げを反映）
+        id: reclassify
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
+          ISSUE: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+          RISK_BEFORE: ${{ needs.define.outputs.risk }}
+        run: |
+          set -euo pipefail
+          BODIES="$(gh issue view "$ISSUE" --repo "$REPO" --json comments --jq '.comments[].body')"
+
+          if printf '%s' "$BODIES" | grep -q '<!--blocked-->'; then
+            echo "blocked=true" >> "$GITHUB_OUTPUT"
+            echo "risk=high"    >> "$GITHUB_OUTPUT"
+            echo "::warning::調査で仕様の曖昧さが見つかったため停止します（設計 §3.2）"
+            exit 0
+          fi
+          echo "blocked=false" >> "$GITHUB_OUTPUT"
+
+          RISK_AFTER="$(printf '%s' "$BODIES" \
+            | grep -oE '<!--risk:(high|mid|low)-->' \
+            | tail -1 | sed -E 's/.*risk:(.*)-->/\1/' || true)"
+          [ -z "$RISK_AFTER" ] && RISK_AFTER="$RISK_BEFORE"
+
+          # 繰り上げ専用。段取りフェーズでリスクを下げることは許さない(設計 §3.2.1)。
+          rank() { case "$1" in low) echo 0 ;; mid) echo 1 ;; *) echo 2 ;; esac; }
+          if [ "$(rank "$RISK_AFTER")" -gt "$(rank "$RISK_BEFORE")" ]; then
+            RISK="$RISK_AFTER"
+            echo "::notice::リスク区分を ${RISK_BEFORE} → ${RISK} へ繰り上げました"
+          else
+            RISK="$RISK_BEFORE"
+          fi
+          echo "リスク区分: ${RISK}"
+          echo "risk=${RISK}" >> "$GITHUB_OUTPUT"
+
+  # ── 停止: 仕様が未確定（調査で判明）──────────────────────────
+  blocked-at-plan:
+    needs: plan
+    if: always() && needs.plan.outputs.blocked == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: auto:blocked へ付け替えて通知
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
+          ISSUE: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          gh issue edit "$ISSUE" --repo "$REPO" \
+            --remove-label "auto:planning" --add-label "auto:blocked"
+          printf '%s\n\n%s\n' \
+            "@${OWNER} 調査の結果、仕様が未確定のため停止しました。上のコメントの選択肢から1つ返信してください。" \
+            "実行: ${RUN_URL}" > notice.md
+          gh issue comment "$ISSUE" --repo "$REPO" --body-file notice.md
+
+  # ── ゲート2: 段取りの承認（高・中）─────────────────────────────
   approve-plan:
     needs: plan
+    if: >-
+      always()
+      && needs.plan.result == 'success'
+      && needs.plan.outputs.blocked == 'false'
+      && needs.plan.outputs.risk != 'low'
     runs-on: ubuntu-latest
     environment: gate-task-plan
     steps:
-      - run: echo "段取りが承認されました"
+      - run: echo "段取りが承認されました（リスク区分 ${{ needs.plan.outputs.risk }}）"
 
-  # ── 次フェーズへ引き渡し ──────────────────────────────────
+  # ── 低リスク: 異議申立ての通知（設計 §4.1）────────────────────
+  # 「異議申立ての窓を持たない自動通過は認めない」
+  low-risk-notice:
+    needs: plan
+    if: >-
+      always()
+      && needs.plan.result == 'success'
+      && needs.plan.outputs.blocked == 'false'
+      && needs.plan.outputs.risk == 'low'
+    runs-on: ubuntu-latest
+    steps:
+      - name: auto:low-risk を付けて判定理由つきで通知
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
+          ISSUE: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          gh issue edit "$ISSUE" --repo "$REPO" --add-label "auto:low-risk"
+          printf '%s\n\n%s\n\n%s\n' \
+            "@${OWNER} **低リスクと判定したため、承認なしで実装へ進みます。** 判定理由は上のタスク定義コメントを参照してください。" \
+            '異議がある場合は **30分以内に `auto:low-risk` ラベルを外してください。** 外すと中リスクへ降格し、段取りの承認（ゲート2）が必要になります。' \
+            "実行: ${RUN_URL}" > notice.md
+          gh issue comment "$ISSUE" --repo "$REPO" --body-file notice.md
+
+  # ── 低リスク: 30分の異議申立て窓 ───────────────────────────────
+  # Environment `gate-low-risk-objection` に **Wait timer 30分・レビュアーなし** を設定する。
+  # sleep で待たないのは、待機中に実行時間を消費しないため(承認待ちと同じ扱いになる)。
+  low-risk-window:
+    needs: low-risk-notice
+    runs-on: ubuntu-latest
+    environment: gate-low-risk-objection
+    steps:
+      - run: echo "異議申立ての窓が閉じました"
+
+  # ── 低リスク: 窓が閉じた後の判定 ───────────────────────────────
+  low-risk-verdict:
+    needs: low-risk-window
+    if: always() && needs.low-risk-window.result == 'success'
+    runs-on: ubuntu-latest
+    outputs:
+      demoted: ${{ steps.check.outputs.demoted }}
+    steps:
+      - name: auto:low-risk が残っているか確認
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
+          ISSUE: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          LABELS="$(gh issue view "$ISSUE" --repo "$REPO" --json labels --jq '.labels[].name')"
+          if printf '%s' "$LABELS" | grep -qx 'auto:low-risk'; then
+            echo "異議なし。自動通過します"
+            echo "demoted=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::auto:low-risk が外されました。中リスクへ降格しゲート2へ進みます"
+            echo "demoted=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ── ゲート2（降格時）: 異議申立てにより中リスクへ落ちた場合 ────────
+  approve-plan-after-objection:
+    needs: low-risk-verdict
+    if: always() && needs.low-risk-verdict.outputs.demoted == 'true'
+    runs-on: ubuntu-latest
+    environment: gate-task-plan
+    steps:
+      - run: echo "段取りが承認されました（異議申立てにより中リスクへ降格）"
+
+  # ── 却下: いずれかのゲートで Reject された ─────────────────────
+  rejected:
+    needs: [approve-definition, approve-plan, approve-plan-after-objection]
+    if: >-
+      always()
+      && (contains(fromJSON('["failure","cancelled"]'), needs.approve-definition.result)
+       || contains(fromJSON('["failure","cancelled"]'), needs.approve-plan.result)
+       || contains(fromJSON('["failure","cancelled"]'), needs.approve-plan-after-objection.result))
+    runs-on: ubuntu-latest
+    steps:
+      - name: auto:rejected へ付け替え
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
+          ISSUE: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh issue edit "$ISSUE" --repo "$REPO" \
+            --remove-label "auto:planning" --add-label "auto:rejected" || true
+          # 却下理由は Environment のコメントに書かれても Issue には流れない(設計 §10.10.1)。
+          # エージェントが読めるのは Issue のコメントだけなので、書き直しを促す。
+          printf '%s\n' \
+            'ゲートで却下されました。**却下理由を Issue にコメントしてください**（Environment のコメントはエージェントから読めません・設計 §10.10.1）。再開はラベルを `auto` に戻してください。' > notice.md
+          gh issue comment "$ISSUE" --repo "$REPO" --body-file notice.md
+
+  # ── 次フェーズへ引き渡し ──────────────────────────────────────
   handoff:
-    needs: approve-plan
+    needs: [plan, approve-plan, low-risk-verdict, approve-plan-after-objection]
+    if: >-
+      always()
+      && needs.plan.result == 'success'
+      && needs.plan.outputs.blocked == 'false'
+      && !contains(fromJSON('["failure","cancelled"]'), needs.approve-plan.result)
+      && !contains(fromJSON('["failure","cancelled"]'), needs.low-risk-verdict.result)
+      && !contains(fromJSON('["failure","cancelled"]'), needs.approve-plan-after-objection.result)
+      && (needs.approve-plan.result == 'success'
+       || needs.low-risk-verdict.result == 'success')
     runs-on: ubuntu-latest
     steps:
       - name: ラベルを auto:approved に付け替え
@@ -113,8 +360,10 @@ jobs:
           # PAT でないと次のワークフローが起動しない(設計 §8.1)。
           # GITHUB_TOKEN によるラベル変更は他のワークフローをトリガしない仕様のため。
           GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
+          ISSUE: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          gh issue edit "${{ github.event.issue.number }}" \
-            --repo "${{ github.repository }}" \
+          gh issue edit "$ISSUE" --repo "$REPO" \
             --remove-label "auto:planning" --add-label "auto:approved"
+          gh issue edit "$ISSUE" --repo "$REPO" --remove-label "auto:low-risk" || true

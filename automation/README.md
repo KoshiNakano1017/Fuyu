@@ -34,15 +34,27 @@
 
 | 区分 | ファイル | 状態 | 備考 |
 | --- | --- | --- | --- |
-| **権限設定** | `settings/readonly.json` | 🟡 未検証 | 記法の実機確認が必要（設計 §12 #5） |
+| **権限設定** | `settings/readonly.json` | 🟡 未検証 | レビュー 5a/5b/5c 用。記法の実機確認が必要（設計 §12 #5） |
+| | `settings/research.json` | 🟡 未検証 | **調査専用**。読み取り＋Issue コメントのみ（下記「調査の権限」参照） |
 | | `settings/pm.json` | 🟡 未検証 | 同上 |
 | | `settings/test.json` | 🟡 未検証 | 同上 |
 | | `settings/code.json` | 🟡 未検証 | 同上 |
-| **ワークフロー** | `.github/workflows/auto-01-plan.yml` | 🟢 骨子 | 計画フェーズ。**足場が無くても動く** |
+| **ワークフロー** | `.github/workflows/auto-01-plan.yml` | 🟢 完成 | 計画フェーズ。§4.1 のリスク分岐・停止・異議申立て窓まで実装。**足場が無くても動く** |
 | | `.github/workflows/auto-02-implement.yml` | 🔴 未着手 | 実装フェーズ |
 | | `.github/workflows/auto-03-review-merge.yml` | 🔴 未着手 | **最重量**（レビュー3並列＋修正ループ＋リトライ判定＋仕様書ガード） |
-| **プロンプト** | `prompts/*.md` | 🔴 未着手 | 10本。[書き方](prompts/README.md) |
+| **プロンプト** | `prompts/pm-define.md` | 🟢 完成 | タスク定義＋リスク区分の判定 |
+| | `prompts/research.md` | 🟢 完成 | 調査。§3.2 の6軸と質問形式を転記済み |
+| | `prompts/pm-plan.md` | 🟢 完成 | 段取り＋`QUESTIONS.md` への起票 |
+| | `prompts/` 残り7本 | 🔴 未着手 | 実装ループ用。足場が出来てから。[書き方](prompts/README.md) |
 | **Issue テンプレ** | `.github/ISSUE_TEMPLATE/auto-task.yml` | 🟢 完成 | 起票3条件を必須フィールド化 |
+
+> [!IMPORTANT] 調査の権限 — `readonly.json` を調査に使わない
+> `readonly.json` は `Bash` を全面拒否するため、これを調査エージェントに与えると
+> **設計 §3 が定める出力先（Issue コメント）に到達できず、調査メモが消える**。
+> 調査には `research.json`（読み取り＋`gh issue comment` のみ）を使う。
+>
+> `QUESTIONS.md` への起票とラベル操作は調査の権限外であり、**次に動く PM（段取り）が引き継ぐ**。
+> ラベル遷移はワークフローがマーカー（`<!--blocked-->` / `<!--risk:*-->`）を読んで行う。
 
 ---
 
@@ -51,15 +63,24 @@
 **計画ループ（`auto-01`）だけを先に完成させると、足場が無くても動き始める。**
 計画フェーズのエージェントは Issue にコメントするだけでコードに触らないため。
 
-| 順 | やること | 目安 | 前提 |
+| 順 | やること | 目安 | 状態 |
 | --- | --- | --- | --- |
-| 1 | GitHub の器（PAT・Environments・ラベル・通知） | 45分 | なし。**設計 §9 フェーズ1** |
-| 2 | `settings/readonly.json` `pm.json` の実機検証 | 1時間 | 1 |
-| 3 | `prompts/pm-define.md` | 1時間 | — |
-| 4 | **`prompts/research.md`** | 1.5時間 | — |
-| 5 | `prompts/pm-plan.md` | 1時間 | — |
-| 6 | `auto-01-plan.yml` の完成 | 1時間 | 2〜5 |
-| 7 | 試運転（設計 §9 フェーズ3 の 3-3 / 3-5 / 3-6） | 1時間 | 6 |
+| 1 | GitHub の器（PAT・Environments・ラベル・通知） | 45分 | ✅ 完了（設計 §9 フェーズ1） |
+| 2 | `settings/*.json` の実機検証 | 1時間 | ⬜ **試運転 3-3 で確認する**（設計 §12 #5） |
+| 3 | `prompts/pm-define.md` | 1時間 | ✅ 完了 |
+| 4 | **`prompts/research.md`** | 1.5時間 | ✅ 完了 |
+| 5 | `prompts/pm-plan.md` | 1時間 | ✅ 完了 |
+| 6 | `auto-01-plan.yml` の完成 | 1時間 | ✅ 完了 |
+| 7 | 試運転（設計 §9 フェーズ3 の 3-3 / 3-5 / 3-6） | 1時間 | ⬅ **次はここ** |
+
+> [!WARNING] 試運転の前に Environment を1つ追加する
+> 低リスクの**30分の異議申立て窓**（設計 §4.1）は、`sleep` ではなく
+> Environment の **Wait timer** で実現している（待機中に Actions の実行時間を消費しないため）。
+>
+> `Settings → Environments` に **`gate-low-risk-objection`** を作り、
+> **Wait timer = 30 分／Required reviewers なし**を設定する。
+> これが無いと低リスクの Issue が `low-risk-window` で失敗し、
+> **自動通過せずに止まる**（安全側には倒れるが、試運転 3-1 が再現しない）。
 
 **ここまでで「仕様の曖昧さが選択肢に変換されて返ってくる」状態になる。**
 実装ループ（`auto-02` / `auto-03` と残りプロンプト7本）は足場が出来てから。
