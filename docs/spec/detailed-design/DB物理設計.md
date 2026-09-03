@@ -4,7 +4,7 @@ doc_type: 設計
 status: "詳細設計ドラフト（要オーナーレビュー）"
 owner: プロジェクトオーナー
 date: "2026-08-16"
-updated: 2026-08-22
+updated: 2026-08-29
 tags: ["浮遊街アプリ"]
 up: "[[浮遊街アプリ 総合要件定義・設計書_v13]]"
 ---
@@ -322,22 +322,75 @@ COMMENT ON TABLE membership_applications IS
   '決済はアプリ外（QR経由）で完結するため、決済トランザクションそのものは保持しない（正本 §7）';
 ```
 
-### 3-6. 宿泊予約フォーム連携・宿泊予定カレンダー（WBS §3-5・3-6）
+### 3-6. ~~宿泊予約フォーム連携~~ → **公開予約ページ・事前予約注文**（2026-08-23 全面改訂 ／ v13 §9 #46・#48）
 
-> [!warning] このセクションはドラフト段階（v13 §5.2.3が未コミットのため）
-> v13 §5.2.3（宿泊予約フォーム連携のAS-IS/TO-BE）は本書作成時点でリポジトリに**未コミット**であり、
-> §9 #30として5点の未確定事項（部屋タイプ選択肢差分・宿泊法必須項目未収集・自動確定判定基準・
-> 自動返信メール発信主体・カレンダーUI粒度）が残っている。以下は現時点で読み取れる範囲での
-> **概念レベルの設計メモ**であり、正式なDDLとしての確定は避ける。
+> [!important] ~~中間テーブル `reservation_form_submissions` を設ける~~ → **撤回（2026-08-23）**
+> 旧ドラフトは「Googleフォームの生回答を保持する中間テーブルを設け、`check_ins` と 1:1 で紐付ける」設計を
+> 想定していたが、**フォームを廃止し公開予約ページ `/reserve` へ置き換える決定**（v13 §5.2.3）により、
+> **保持すべき「外部フォームの生回答」が存在しなくなった**ため撤回する。
+> 予約は最初から正規化された形で `check_ins` へ直接記録される。
 
-- Googleフォームの回答を受け取るための中間テーブル（例：`reservation_form_submissions`）を設け、
-  フォームの生回答（部屋タイプ・備考欄含む）をそのまま保持し、`check_ins`（`pre_registered`状態）と
-  1:1で紐付ける設計が考えられる。備考欄の空判定ロジック（§9 #30-③）が未確定のため、判定結果
-  （自動確定／要確認）を表すステータスカラムは`check_ins`側に追加する形が妥当と思われるが、
-  カラム名・値の確定は§9 #30の決着後に行う。
-- 「宿泊予定カレンダー」は独立テーブルを持たず、`check_ins` × `room_assignments` × `rooms` の
-  ビュー（`v_current_room_assignments`に類似）で表現可能と見込まれる。表示粒度（§9 #30-⑤）が
-  未確定のため、追加のUI専用テーブルが必要かは詳細UI確定後に判断する。
+**① 予約本体**
+
+`check_ins`（`pre_registered` 状態）へ直接記録する。経路は `reservation_source = 'web_public'`（§3-11）。
+同意記録として `consent_version`（同意した「浮遊街に宿泊される方へ」の版数）を保持する。
+
+**② カフェの事前予約注文（v13 §5.4.1b ／ §9 #48）**
+
+```sql
+CREATE TABLE meal_reservations (
+  meal_reservation_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  checkin_id          uuid NOT NULL REFERENCES check_ins(checkin_id) ON DELETE CASCADE,
+  served_on           date NOT NULL,                    -- 提供日。チェックイン当日を含む滞在日
+  meal_slot           text NOT NULL CHECK (meal_slot IN ('breakfast','lunch','dinner')),
+  menu_item_id        uuid NOT NULL REFERENCES menu_items(menu_item_id),
+  quantity            integer NOT NULL DEFAULT 1 CHECK (quantity > 0),
+  -- 提供操作で orders へ変換した際に、変換先の伝票を記録する（二重変換の防止）
+  converted_order_id  uuid REFERENCES orders(order_id),
+  converted_at        timestamptz,
+  cancelled_at        timestamptz,
+  created_at          timestamptz NOT NULL DEFAULT now(),
+  updated_at          timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (checkin_id, served_on, meal_slot, menu_item_id)
+);
+
+CREATE INDEX ix_meal_res_date ON meal_reservations (served_on, meal_slot)
+  WHERE cancelled_at IS NULL AND converted_at IS NULL;   -- 日別食数サマリー（仕込み数量）の算出用
+
+COMMENT ON TABLE meal_reservations IS
+  '宿泊予約時のカフェ事前予約注文。目的は仕込み数量の把握であり、予約時点では orders を作らない。提供操作時に orders へ変換する（v13 §5.4.1b）';
+COMMENT ON COLUMN meal_reservations.converted_order_id IS
+  '提供時に変換した伝票。NULL のまま滞在が終わった行は「予約されたが提供されなかった食事」として運用で検知できる';
+```
+
+> [!warning] 事前予約の時点で `orders` を作らない
+> 予約時に伝票を起票すると、**まだ来訪も提供もしていない金額が未会計請求（v13 §5.6）へ前倒しで載り**、
+> 顧客管理画面の「未会計額」が実態とズレる。v13 §5.4.1 が分離した「会計ステータス × 提供ステータス」の2軸にも、
+> **存在しない第3の状態（予約済・未来訪）**が混ざる。
+> `meal_reservations` を独立に持ち、**提供操作の時点で `orders` へ変換する**こと。
+
+**③ 公開予約ページの OTP（v13 §5.2.3② ／ §5.8.3 の本人確認要件）**
+
+```sql
+CREATE TABLE reservation_otps (
+  otp_id        uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  email         text NOT NULL,
+  code_hash     text NOT NULL,                 -- 平文のコードは保存しない
+  expires_at    timestamptz NOT NULL,          -- 短命（数分）
+  attempt_count integer NOT NULL DEFAULT 0,    -- 総当たり防止。上限超過で無効化する
+  consumed_at   timestamptz,
+  created_at    timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX ix_reservation_otps_email ON reservation_otps (email, created_at DESC);
+```
+
+- **平文コードを保存しない**（`code_hash` のみ）。ログにも出力しない（`CLAUDE.md` §3.2）。
+- 期限切れ・消費済みの行は定期的に削除する。**メールアドレスは個人情報**であり、不要な保持期間を作らない。
+
+**④ 宿泊予定カレンダー**
+
+独立テーブルを持たず、`check_ins` × `room_assignments` × `rooms` × `meal_reservations` のビューで表現する。
+表示粒度は v13 §9 #30-⑤（Googleカレンダー同等の操作感）で確定済み。日別の食数サマリーを併記する（§5.4.1b）。
 
 ### 3-7. メディアライブラリ（画面設計.md A10。2026-08-16新設・Phase2から前倒し）
 
@@ -389,7 +442,7 @@ CREATE INDEX ix_media_place ON media_assets (place_id) WHERE deleted_at IS NULL;
 ```
 
 - **AI処理は非同期**：アップロード直後は`ai_processing_status='pending'`で即座に一覧へ反映し、
-  Gemini（マルチモーダル、朝会音声処理と同一基盤）のバックグラウンド処理完了後に`done`へ更新する
+  ~~Gemini（マルチモーダル、朝会音声処理と同一基盤）~~ → **Claude（マルチモーダル。2026-08-29 オーナー決定／v13 §9 #56）** のバックグラウンド処理完了後に`done`へ更新する
   （画面応答をブロックしない設計、システムアーキテクチャ.md非機能要件の朝会60秒SLA原則を踏襲）。
 - **`ai_purpose_score`はJSONBで柔軟に持つ**：用途タグはユーザーの自由入力を許容するため（マスタ化
   しない）、固定カラムではなくキー可変のJSONBが適切（マスタ値のハードコード禁止の精神とは別軸の判断。
@@ -442,7 +495,7 @@ CREATE INDEX ix_eumo_grant_stale ON eumo_grants (sent_at) WHERE status = '送付
 CREATE TABLE menu_items (
   menu_item_id       uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name               text NOT NULL,
-  category           text NOT NULL,          -- フード／ドリンク／直売所 等
+  category           text NOT NULL,          -- フード／ドリンク／直売所／送迎・オプション（v13 §5.4.2③）
   unit_price_yen     integer NOT NULL CHECK (unit_price_yen >= 0),
   -- ▲ Uii価格は保存しない。floor(unit_price_yen * 0.8) として都度算出する（v13 §5.5・§5.4.2①）
   description        text,
@@ -452,6 +505,9 @@ CREATE TABLE menu_items (
   is_published       boolean NOT NULL DEFAULT true,
   available_from     date,
   available_until    date,                              -- 季節メニュー用
+  -- ▼ 宿泊予約時の事前予約注文（v13 §5.4.1b ／ §9 #48。2026-08-23 追加）
+  is_pre_orderable   boolean NOT NULL DEFAULT false,   -- 宿泊予約画面の選択肢に出すか
+  meal_slot          text CHECK (meal_slot IN ('breakfast','lunch','dinner')),  -- 朝／昼／夜。NULL = 時間帯を問わない
   created_by         uuid REFERENCES members(member_id),
   updated_by         uuid REFERENCES members(member_id),
   created_at         timestamptz NOT NULL DEFAULT now(),
@@ -459,6 +515,12 @@ CREATE TABLE menu_items (
 );
 CREATE INDEX ix_menu_published ON menu_items (display_order) WHERE is_published = true;
 CREATE INDEX ix_menu_category ON menu_items (category) WHERE is_published = true;
+CREATE INDEX ix_menu_pre_orderable ON menu_items (meal_slot) WHERE is_pre_orderable = true AND is_published = true;
+
+COMMENT ON COLUMN menu_items.is_pre_orderable IS
+  '宿泊予約時に事前予約できる商品か（朝ごはん・昼・夜のプレートごはん）。v13 §5.4.1b';
+COMMENT ON COLUMN menu_items.category IS
+  '送迎は専用マスタを作らず本テーブルのカテゴリ「送迎・オプション」として登録する。単価1,900円＝1,520Uii・片道。SOLDOUTトグルで対応不可時間帯を表現できるため（v13 §5.4.2③）';
 ```
 
 ### 3-10. 宿泊料金マスタ（v13 §5.4.2② ／ §9 #40。2026-08-20 新設）
@@ -504,12 +566,14 @@ CREATE INDEX ix_rate_current ON accommodation_rates (room_type, member_category)
 既存の `check_ins`（Vault側 `01_schema.sql` で実装済み）に、以下のカラムを追加する。
 
 ```sql
+-- 2026-08-23 改訂（v13 §9 #46）：Googleフォーム廃止に伴い 'web_public' を追加し、既定値を変更。
+-- 'google_form' は過去データの経路を表す値として残す（削除すると既存行が CHECK 違反になるため）
 ALTER TABLE check_ins
-  ADD COLUMN reservation_source text NOT NULL DEFAULT 'google_form'
-    CHECK (reservation_source IN ('google_form','in_app','staff_manual'));
+  ADD COLUMN reservation_source text NOT NULL DEFAULT 'web_public'
+    CHECK (reservation_source IN ('web_public','in_app','staff_manual','google_form'));
 
 COMMENT ON COLUMN check_ins.reservation_source IS
-  '予約経路。google_form=外部フォーム（初回来訪者）／in_app=アプリ内予約（v13 §5.2.4）／staff_manual=運営代理登録。フォーム改修の効果測定とアプリ内予約の利用率評価に使う';
+  '予約経路。web_public=公開予約ページ（未ログイン。v13 §5.2.3）／in_app=ログイン済のアプリ内予約（§5.2.4）／staff_manual=運営代理登録／google_form=【廃止】旧Googleフォーム経由の過去データ。web_public と in_app を分けるのは、未ログイン予約がどれだけ会員登録へ転換したかを評価するため';
 
 CREATE INDEX ix_checkin_reservation_source ON check_ins (reservation_source);
 ```
@@ -518,39 +582,106 @@ CREATE INDEX ix_checkin_reservation_source ON check_ins (reservation_source);
 > 作成し、`reservation_source` で経路だけを区別する。予約テーブルを経路ごとに分けると、
 > 宿泊予定カレンダー（§5.2.5②）や残枠算出（§5.2.5①）が経路ごとの UNION になり複雑化するため。
 
-### 3-12. 宿泊枠の残数算出（v13 §5.2.5① ／ §9 #37。2026-08-20 追加）
+### 3-12. 宿泊枠の残数算出（v13 §5.2.5① ／ §9 #37。2026-08-20 追加 ／ **2026-08-23 算出元を全面改訂・§9 #47**）
 
-**残枠は保存カラムを持たず、ビューで都度算出する**（加減算方式はダブルブッキングの温床／v13 §8）。
+**残枠は保存カラムを持たず、ビューで都度算出する**（加減算方式はダブルブッキングの温床／v13 §8）。この原則は変更しない。
+**変わったのは「何から数えるか」である。**
+
+> [!important] 算出元を `room_assignments` → `check_ins` へ変更した理由
+> 旧ビューは `room_assignments`（部屋番号の割当）の件数から残枠を算出していた。
+> しかし v13 §5.2.3 は**備考欄が空の予約をシステムが自動確定する**と定めており、
+> 自動確定では部屋割当が作られない（部屋割当の権限は管理者・コアメンバーのみ／v13 §6）。
+> つまり**自動確定した予約は残枠を1つも減らさず**、担当者が手で部屋を割り当てるまで
+> 画面が「空いている」と表示し続けた。**「人手の転記をなくす」という目的が、そのままダブルブッキングの原因**になっていた。
+>
+> `rooms` / `room_assignments` は**部屋番号の割当という役割に限定**し、残枠計算からは切り離す。
+
+> [!warning] ★ 占有量の数え方は形態によって2通りある
+> **人数で数える形態と、棟で数える形態が混在している。一律の式では必ず破綻する。**
+>
+> - **人数枠型（`per_person`）**：ドミトリー(16)／キャンプサイト(10)／車中泊(30) → 残枠 = 定員 − **予約人数の合計**
+> - **棟貸型（`per_unit`）**：コテージ(3棟)／アースバッグ(1棟)／サロン(1室) → 残枠 = **棟数 − 占有棟数**（1予約が最低1棟を占有）
+>
+> コテージを人数で数えると、**1名の予約が3件入った時点で実際は3棟すべて埋まっているのに「残り3名」と表示**される。
+> 逆にドミトリーを件数で数えると、16床あるのに数件で満室扱いになり枠を使い切れない。
 
 ```sql
--- 日付 × 部屋タイプごとの残枠。予約画面・カレンダー・顧客管理から参照する
-CREATE VIEW v_room_availability AS
-SELECT
-  d.date,
-  r.room_type,
-  SUM(r.capacity)                                    AS total_capacity,
-  COUNT(ra.assignment_id)                            AS occupied,
-  SUM(r.capacity) - COUNT(ra.assignment_id)          AS available
-FROM generate_series(
-       current_date,
-       current_date + interval '180 days',
-       interval '1 day'
-     ) AS d(date)
-CROSS JOIN rooms r
-LEFT JOIN room_assignments ra
-  ON ra.room_id = r.room_id
- AND ra.ended_at IS NULL
- AND d.date >= ra.started_at::date
- AND (ra.scheduled_end_at IS NULL OR d.date < ra.scheduled_end_at::date)
-WHERE r.status = '利用可'          -- メンテナンス中・利用停止は分母から除外（v13 §5.2.1）
-GROUP BY d.date, r.room_type;
+-- 宿泊形態マスタ（占有量の数え方を保持する。v13 §5.4.2・§9 #47）
+-- ▲ 収容枠も数え方も「コードに直書きしない」ためにマスタ化する（v13 §5.4.2 実装上の注意）
+CREATE TABLE accommodation_types (
+  room_type       text PRIMARY KEY,        -- dormitory / cottage / campsite / car / earthbag / salon
+  display_name    text NOT NULL,           -- ドミトリー／コテージ／キャンプサイト／車中泊／アースバッグ／サロン
+  allocation_mode text NOT NULL CHECK (allocation_mode IN ('per_person','per_unit')),
+  display_order   integer NOT NULL DEFAULT 0
+);
 ```
 
-- **`rooms.status = '利用可'` 以外は分母に含めない**。メンテナンス中の部屋を空きとして数えると、
-  予約できてしまい当日に部屋がない事態になる。
-- 予約が `cancelled_at IS NOT NULL` になった時点で `room_assignments` も終了する（§5.2.2）ため、
-  キャンセル分は自動的に空き枠へ戻る。本ビューに追加の条件は不要。
+```sql
+-- 日付 × 宿泊形態ごとの残枠。公開予約ページ・アプリ内予約・カレンダー・顧客管理から参照する
+CREATE VIEW v_room_availability AS
+WITH cal AS (
+  SELECT d::date AS date
+  FROM generate_series(current_date, current_date + interval '180 days', interval '1 day') AS d
+),
+cap AS (
+  SELECT
+    r.room_type,
+    SUM(r.capacity) AS total_capacity,   -- 人数枠型の分母
+    COUNT(*)        AS total_units,      -- 棟貸型の分母
+    MAX(r.capacity) AS unit_capacity     -- 棟貸型の1棟あたり定員（コテージ等は2）
+  FROM rooms r
+  WHERE r.status = '利用可'              -- メンテナンス中・利用停止は分母から除外（v13 §5.2.1）
+  GROUP BY r.room_type
+),
+booked AS (
+  SELECT
+    ci.room_type,
+    cal.date,
+    SUM(ci.adults_count + ci.children_count) AS booked_persons,
+    SUM(CEIL((ci.adults_count + ci.children_count)::numeric
+             / NULLIF(cap.unit_capacity, 0)))  AS booked_units   -- 定員超過分は複数棟を消費する
+  FROM check_ins ci
+  JOIN cap ON cap.room_type = ci.room_type
+  JOIN cal ON cal.date >= ci.check_in_date
+          AND cal.date <  ci.check_out_date          -- チェックアウト日は専有しない
+  WHERE ci.cancelled_at IS NULL                      -- キャンセル・ノーショーは専有しない（v13 §5.2.2）
+    AND ci.status IN ('pre_registered','confirmed','staying')
+  GROUP BY ci.room_type, cal.date
+)
+SELECT
+  cal.date,
+  t.room_type,
+  t.allocation_mode,
+  CASE t.allocation_mode
+    WHEN 'per_person' THEN cap.total_capacity
+    ELSE cap.total_units
+  END AS total,
+  CASE t.allocation_mode
+    WHEN 'per_person' THEN COALESCE(b.booked_persons, 0)
+    ELSE COALESCE(b.booked_units, 0)
+  END AS occupied,
+  GREATEST(
+    CASE t.allocation_mode
+      WHEN 'per_person' THEN cap.total_capacity - COALESCE(b.booked_persons, 0)
+      ELSE cap.total_units - COALESCE(b.booked_units, 0)
+    END, 0) AS available
+FROM cal
+CROSS JOIN accommodation_types t
+JOIN cap ON cap.room_type = t.room_type
+LEFT JOIN booked b ON b.room_type = t.room_type AND b.date = cal.date;
+```
+
+- **`rooms.status = '利用可'` 以外は分母に含めない**。メンテナンス中の部屋を空きとして数えると、予約できてしまい当日に部屋がない事態になる。
+- **チェックアウト日は専有しない**（`cal.date < check_out_date`）。ここを `<=` にすると、退去日と次の到着日が重なる予約が入らなくなり、稼働率が落ちる。
+- キャンセル分は `cancelled_at IS NULL` の条件で自然に除外される。**`room_assignments` の終了処理に依存しない**のが旧ビューとの差である。
 - パフォーマンスが問題になる場合のみ、マテリアライズドビュー化を検討する（Phase 1 は素のビューで足りる想定）。
+
+> [!note] 列名は既存スキーマとの突合が必要
+> `check_ins` は Vault 側 `01_schema.sql` で実装済みであり、本書は列名を
+> `room_type` / `check_in_date` / `check_out_date` / `adults_count` / `children_count` / `status` / `cancelled_at` と仮定している。
+> **実装着手時に実スキーマと突合すること。** 差異があれば本ビューの定義を実スキーマ側へ合わせる
+> （データモデル図_ER_Diagram.md では予約が `BOOKINGS` という別エンティティとして描かれており、
+> `check_ins` との関係が図とテキストで食い違っている。この整合も同時に取る必要がある）。
 
 ---
 
@@ -620,7 +751,7 @@ GROUP BY d.date, r.room_type;
 | 5 | `knowledge_items.target_role`を配列化するか単一値のままとするか | **移管済み（2026-08-16）**：`knowledge_items`自体が不要になったため、line-rag-bot側Firestoreスキーマの論点に移った（v13 §9 #29は引き続き未決） |
 | 6 | Vault側の実データ（`01_schema.sql`/`03_seed_members.sql`）をこのリポジトリへ取り込むか、個人情報を含むため別管理とするか | （新規発見・本書独自の指摘。未回答のまま） |
 | 7 | `media_assets`：退会・アカウント削除時のカスケード削除 or 保持方針（§3-7参照） | 新規（2026-08-16、画面設計.md A10と連動） |
-| 8 | `media_assets`：AI解析（Gemini）のコスト・レイテンシ、動画サムネイル生成・保存容量の見積り、肖像権チェックの要否 | 新規（2026-08-16、画面設計.md §6 #5〜#7と同一論点） |
+| 8 | `media_assets`：AI解析（~~Gemini~~ → **Claude**／2026-08-29変更）のコスト・レイテンシ、動画サムネイル生成・保存容量の見積り、肖像権チェックの要否。※ 写真AI判定（収穫可否・設備点検・献立提案）は **2026-08-29 に LINE（`line-rag-bot`）側での実装（A案）へ確定**したため、**本テーブルの解析コストには含まれない**（v13 §9 #56） | 新規（2026-08-16、画面設計.md §6 #5〜#7と同一論点） |
 
 ---
 
@@ -742,4 +873,5 @@ CREATE INDEX ix_escalation_unresolved ON unanswered_escalations (escalated_at)
 用途（インスタグラム／資料作成等）入力→AI適合度ソート＋キャプション自動生成する`media_assets`
 テーブルを新規提案。旧「Phase2: メディアストレージ」（未設計のまま据え置き）からPhase1へ前倒し。
 §7突合表を14番として追加、§8オーナー確認事項に#7・#8を新設（削除方針・AIコスト等）。 |
+| **2026-08-23** | **Googleフォーム廃止・公開予約ページ化に伴うスキーマ改訂（v13 §9 #46〜#49）**。①**§3-6 を全面改訂**：中間テーブル `reservation_form_submissions` の構想を**撤回**（外部フォームの生回答が存在しなくなったため）。代わりに **`meal_reservations`**（カフェ事前予約注文。提供時に `orders` へ変換し、予約時点では伝票を作らない）と **`reservation_otps`**（公開予約ページの本人確認。平文コードを保存せずハッシュのみ）を新設。②**§3-11 `reservation_source` に `web_public` を追加**し既定値を変更。`google_form` は過去データ用に残す。③**§3-12 残枠ビューを全面改訂**：算出元を `room_assignments` → **`check_ins`（宿泊形態単位）**へ変更し、**`accommodation_types.allocation_mode`（`per_person` / `per_unit`）による2モード算出**を導入（コテージを人数で数えると1名予約3件で実質満室なのに「残り3名」と表示される問題を解消）。④**`menu_items` に `is_pre_orderable` / `meal_slot` を追加**し、カテゴリに「送迎・オプション」を追加（送迎 1,900円＝1,520Uii・片道は専用マスタを作らず本テーブルで扱う）。 |
 | **2026-08-20（v13 v1.15.0 反映）** | **8/13レビュー未反映分の一括反映（v13 §9 #33〜#43）に伴うスキーマ改訂**。①**§3-1 二段階承認**：`work_logs.approval_status` を `報告済み/コアメンバー確認済/承認完了/差戻し` へ変更し、`reviewed_by`（確認者）と `approved_by`（最終承認者＝admin）を**別カラムで保持**。`review_skipped`・差戻し理由の CHECK 制約・`work_log_reviews`（2人目以降の確認ログ）を追加。②**§3-2 提供ステータス**：`orders.serving_status`（未提供／提供済み）・`served_at`・`served_by` を追加し、決済ステータスと独立した2軸に。「精算済みだが未提供」検出用の部分インデックスも新設。③**§3-7 メディア**：`visibility`（公開／運営のみ）・`deleted_at`（論理削除・運営措置）・`place_id`・`taken_at`・`geo_location` を追加。**用途タグ最低1つ必須**の CHECK 制約を新設（Phase 2 の検索精度を担保）。`ai_*` 系は Phase 2 用にカラムのみ用意。④**§3-8 `eumo_grants` を新設**：`未送付→送付済→受領確認済` を追跡。送付と受領を別状態で保持。⑤**§3-9 `menu_items` / §3-10 `accommodation_rates` を新設**：Uii価格は保存せず都度算出。宿泊料金は `EXCLUDE USING gist` で適用期間の重複を防止し、過去予約を当時の料金で再計算可能に。⑥**§3-11 `check_ins.reservation_source` を追加**：アプリ内予約とフォーム経由を同一テーブルで扱い経路のみ区別。⑦**§3-12 `v_room_availability` ビューを新設**：残枠を**保存せず都度算出**（ダブルブッキング防止）。§7突合表に15〜20番を追加。 |
