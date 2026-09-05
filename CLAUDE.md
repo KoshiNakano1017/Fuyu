@@ -111,18 +111,19 @@ docs/spec/OLD/2026-08-18_旧ファイル名_OLD.md   # OLDへ移した日付を�
 
 #### 1.5.1 8層の分類（MECE）
 
-すべてのドキュメントは、役割によって次の**8層のどれか1つ**に属する。重複させない。
+すべてのドキュメントは、役割によって次の**9層のどれか1つ**に属する。重複させない。
 
 | 層 | 役割 | 置き場所 |
 | --- | --- | --- |
 | **A. 入口** | 案内・索引 | `docs/SITEMAP.md`、`docs/オンボーディング資料_*.md`、`docs/spec/*(Master Index)*` |
 | **B. 規範** | ルールと正本 | `CLAUDE.md`、`docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md` |
 | **C. 要件** | What（何を作る） | `docs/spec/requirements/` |
-| **D. 設計** | How（どう作る） | `docs/spec/basic-design/`、`docs/spec/detailed-design/` |
+| **D. 設計** | How（どう作る） | `docs/spec/basic-design/`、`docs/spec/detailed-design/`、**`docs/design/`（HTMLモックの実体／2026-08-24 新設）** |
 | **E. 計画・進捗** | When / Who | `docs/spec/WBS_Phase1.md`、`TASKS.md`、`LOOP_LOG.md` |
 | **F. 決定・未決** | Why | `docs/spec/CONSOLIDATED_DECISIONS.md`、`QUESTIONS.md` |
 | **G. 一次資料** | 出典（**読むだけ**） | `docs/spec/background/` |
 | **H. アーカイブ** | 廃棄済み（**参照専用**） | `docs/spec/OLD/` |
+| **I. 運用** | 現場の手順書（**Phase 1 の納品物**） | `docs/operations/`（2026-08-23 新設 ／ v13 §9 #44） |
 
 **新しいドキュメントの置き場所に迷ったら、まずこの表のどの層かを決める。**
 どの層にも収まらないなら、それは新規作成すべきでない可能性が高い（§1.2 を再読すること）。

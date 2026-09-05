@@ -5,7 +5,7 @@ doc_type: 索引
 status: 運用中
 owner: プロジェクトオーナー
 date: 2026-08-22
-updated: 2026-08-22
+updated: 2026-08-26
 tags:
   - 浮遊街アプリ
   - line-rag-bot
@@ -42,6 +42,7 @@ tags:
 | **まだ決まっていないことを知りたい** | [QUESTIONS.md](https://github.com/KoshiNakano1017/Fuyu/blob/main/QUESTIONS.md) |
 | **自分のタスクを探したい** | [WBS_Phase1](https://github.com/KoshiNakano1017/Fuyu/blob/main/docs/spec/WBS_Phase1.md) / [TASKS.md](https://github.com/KoshiNakano1017/Fuyu/blob/main/TASKS.md) |
 | **RAG / LINEボットを触りたい** | [RAG基盤 / line-rag-bot 概要](https://github.com/KoshiNakano1017/Fuyu/blob/main/docs/RAG基盤_line-rag-bot概要.md) |
+| **運営としてアプリをどう回すか知りたい** | [現場運用マニュアル（運営スタッフ向け）](https://github.com/KoshiNakano1017/Fuyu/blob/main/docs/operations/現場運用マニュアル_運営スタッフ向け.md) ⚠️ **ドラフト・現場配布不可** |
 
 ### 新規メンバーの読む順番
 
@@ -55,7 +56,7 @@ tags:
 
 ## 1. ドキュメントの分類（この体系の読み方）
 
-すべてのドキュメントは、**役割**によって次の8層のどれか1つに属します。重複はありません。
+すべてのドキュメントは、**役割**によって次の9層のどれか1つに属します。重複はありません。
 
 | 層 | 役割 | 答える問い |
 | --- | --- | --- |
@@ -67,6 +68,7 @@ tags:
 | **F. 決定・未決** | Why | なぜそう決めた？何が未決？ |
 | **G. 一次資料** | 出典 | 元ネタは？（**読むだけ・編集しない**） |
 | **H. アーカイブ** | 廃棄済み | 何を捨てた？（**参照専用・本ページ非掲載**） |
+| **I. 運用** | 現場の手順書 | 実際にどう回す？（**Phase 1 の納品物**） |
 
 **迷ったときの原則**
 
@@ -127,7 +129,8 @@ tags:
 | 領域 | ドキュメント | 内容 |
 | --- | --- | --- |
 | frontend | [UI_UX設計指針](https://github.com/KoshiNakano1017/Fuyu/blob/main/docs/spec/basic-design/frontend/UI_UX設計指針.md) | 画面設計の原則・摩擦ゼロUI |
-| frontend | [HTMLモック_v13](https://github.com/KoshiNakano1017/Fuyu/blob/main/docs/spec/basic-design/frontend/HTMLモック_v13.md) | 画面モック |
+| frontend | [HTMLモック_v13](https://github.com/KoshiNakano1017/Fuyu/blob/main/docs/spec/basic-design/frontend/HTMLモック_v13.md) | 画面モックの**仕様書**（版の管理・反映履歴） |
+| frontend | [prototype_v15.html](https://github.com/KoshiNakano1017/Fuyu/blob/main/docs/design/prototype_v15.html) | 画面モックの**実体**（`docs/design/`・v1.17.0準拠）。2026-08-24 にGit管理下へ移した |
 | backend | [会員データモデル_ユーザーテーブル定義](https://github.com/KoshiNakano1017/Fuyu/blob/main/docs/spec/basic-design/backend/会員データモデル_ユーザーテーブル定義.md) | **会員スキーマの正**（実データ準拠・7テーブル構成） |
 | backend | [ER図_概念データモデル](https://github.com/KoshiNakano1017/Fuyu/blob/main/docs/spec/basic-design/backend/ER図_概念データモデル.md) | **概念**レベルのエンティティ整理 |
 | infra | [システムアーキテクチャ](https://github.com/KoshiNakano1017/Fuyu/blob/main/docs/spec/basic-design/infra/システムアーキテクチャ.md) | 全体構成・技術スタック |
@@ -141,7 +144,7 @@ tags:
 | [画面設計](https://github.com/KoshiNakano1017/Fuyu/blob/main/docs/spec/detailed-design/画面設計.md) | 全画面の仕様とロール別表示制御 |
 | [API設計](https://github.com/KoshiNakano1017/Fuyu/blob/main/docs/spec/detailed-design/API設計.md) | エンドポイント定義 |
 | [DB物理設計](https://github.com/KoshiNakano1017/Fuyu/blob/main/docs/spec/detailed-design/DB物理設計.md) | **カラム定義・型・制約の正**。RLS ポリシー |
-| [外部連携設計](https://github.com/KoshiNakano1017/Fuyu/blob/main/docs/spec/detailed-design/外部連携設計.md) | line-rag-bot・LINE・eumo・Googleフォームとの連携 |
+| [外部連携設計](https://github.com/KoshiNakano1017/Fuyu/blob/main/docs/spec/detailed-design/外部連携設計.md) | line-rag-bot・LINE・eumo との連携（**Googleフォーム連携は 2026-08-23 に廃止**／§5） |
 | [非機能要件詳細](https://github.com/KoshiNakano1017/Fuyu/blob/main/docs/spec/detailed-design/非機能要件詳細.md) | 性能・セキュリティ・可用性 |
 
 ### 5-3. 図（`docs/spec/` 直下）
@@ -178,6 +181,9 @@ tags:
 | --- | --- | --- |
 | [CONSOLIDATED_DECISIONS](https://github.com/KoshiNakano1017/Fuyu/blob/main/docs/spec/CONSOLIDATED_DECISIONS.md) | **確定方針の索引**。意思決定ログを兼ねる | 「なぜそう決めたか」はここ。決定を覆すときは**取り消し線**で残す |
 | [QUESTIONS.md](https://github.com/KoshiNakano1017/Fuyu/blob/main/QUESTIONS.md) | **未決事項**。人間への確認待ち | 仕様の矛盾を見つけたら**推測で実装せず**ここへ起票して `BLOCKED` にする |
+| [2026-08-13レビュー_指摘内容とv1.15.0対応まとめ](https://github.com/KoshiNakano1017/Fuyu/blob/main/docs/spec/2026-08-13レビュー_指摘内容とv1.15.0対応まとめ.md) | 8/13クライアントレビュー17項目の指摘内容とv1.15.0での対応の突合記録（2026-08-24に正本から外出し） | 「あの指摘、対応したっけ」を確認するときに参照 |
+| [2026-08-25レビュー_指摘内容とv1.18.0対応まとめ](https://github.com/KoshiNakano1017/Fuyu/blob/main/docs/spec/2026-08-25レビュー_指摘内容とv1.18.0対応まとめ.md) | 8/25クライアントレビュー7項目（プロトタイプ確認3件＋追加指示4件）の指摘内容とv1.18.0での対応の突合記録 | 顧客管理の部屋履歴・決済手段・物販EC送客の判断根拠を辿るときに参照 |
+| [2026-08-29レビュー_指摘内容とv1.21.0対応まとめ](https://github.com/KoshiNakano1017/Fuyu/blob/main/docs/spec/2026-08-29レビュー_指摘内容とv1.21.0対応まとめ.md) | 8/29最終レビュー6テーマ（画像AIタグ・EUMO給付管理・初回来訪キャッシュバック・予約時の街人申告・ロール呼称・チャット履歴吸い上げ）の指摘内容とv1.21.0での対応の突合記録 | キャッシュバック2段階（#51決着）・チェックイン連動給付・呼称変更の判断根拠を辿るときに参照 |
 
 ---
 
@@ -208,7 +214,24 @@ tags:
 
 ---
 
-## 9. G層：一次資料（読むだけ・編集しない）
+## 9. I層：運用（現場の手順書）
+
+すべて `docs/operations/` 配下。**Phase 1 の納品物**（v13 §8「操作マニュアルの整備・提出」／WBS 17-1）です。
+
+> [!warning] 現在はいずれもドラフトで、現場配布はできません
+> 着手条件（v13 §9 #44）は「①v1.15.0 のオーナー承認 ②`prototype_v14.html` の v1.15.0 準拠更新」の2点です。
+> **②が未確認**のまま先行作成しています。アプリ本体も未実装（コード0行）のため、記述は「設計上こう動く」であり実機検証を経ていません。
+> #44 が避けようとしている「**古いマニュアルが現場に残る**」事故は、実装前に配ることでも同じように起きます。
+
+| ドキュメント | 内容 | 状態 |
+| --- | --- | --- |
+| [現場運用マニュアル（運営スタッフ向け）](https://github.com/KoshiNakano1017/Fuyu/blob/main/docs/operations/現場運用マニュアル_運営スタッフ向け.md) | `admin` / `core_member` が朝会・宿泊・注文・クエスト・会計・会員管理・コンシェルジュをどう回すか。事故防止集と権限早見表つき | ⚠️ ドラフト v0.1.0 |
+| [コンシェルジュ登録ナレッジ台帳（運営向け）](https://github.com/KoshiNakano1017/Fuyu/blob/main/docs/operations/コンシェルジュ登録用ナレッジ原稿_運営向け.md) | 上記マニュアルから登録した50件（`ops-01`〜`ops-50`）の台帳、登録禁止事項、マニュアル改訂時の同期手順 | ✅ **2026-08-23 本番投入済み** |
+| 利用者（街人・ゲスト）向けマニュアル | 未着手。WBS 17-1 はこの2本セット | 未作成 |
+
+---
+
+## 10. G層：一次資料（読むだけ・編集しない）
 
 `docs/spec/background/` に **AI との会話ログ24件**が保存されています（2026-07-06 〜 2026-08-03）。
 意思決定の根拠を追跡するための**一次資料**です。
@@ -219,7 +242,7 @@ tags:
 
 ---
 
-## 10. H層：アーカイブ（本ページ非掲載）
+## 11. H層：アーカイブ（本ページ非掲載）
 
 `docs/spec/OLD/` に**廃止済みドキュメント**が退避されています。
 
@@ -230,7 +253,7 @@ tags:
 
 ---
 
-## 11. このサイトマップの保守ルール
+## 12. このサイトマップの保守ルール
 
 > **ドキュメントを追加・移動・廃止したら、必ず本ページを更新してください。**
 
