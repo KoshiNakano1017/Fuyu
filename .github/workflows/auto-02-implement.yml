@@ -1,0 +1,298 @@
+# 自律ループ 02 実装フェーズ
+#
+# トリガ : Issue に `auto:approved` ラベルが付いた時（auto-01 の handoff ジョブが付ける）
+# 担当   : テスト設計 → コーディング
+# ゲート : **なし**（設計 §6 の表。ゲート1・2 は auto-01 で通過済み）
+# 設計   : docs/自律開発ループ設計.md §3 #3/#4・§6・§8.1・§8.3・§11.6
+#
+# ── 前提 ──
+#   足場（Next.js 雛形・Supabase スキーマ・Playwright 設定）が main にマージされていること。
+#   設計 §9 フェーズ0-1・決定#3。足場が無い状態ではテストの実行基盤が存在しない。
+#
+# ── 責務の分界（auto-01 と同じ）──
+#   エージェント = tests/ と実装コードの編集、最終メッセージとマーカーの出力
+#   ワークフロー = コミット・push・PR 作成・ラベル遷移・エージェント出力の転記
+#   auto-01 の試運転で「エージェントの編集がランナー内に留まって消える」不具合を踏んだため、
+#   永続化は例外なく機械側に寄せる。
+
+name: 自律ループ 02 実装
+
+on:
+  issues:
+    types: [labeled]
+
+# 設計 §8.3: 実装フェーズは1本に直列化する（マージ競合とレビュー負荷を避けるため）。
+# Issue 番号を含めないのは、Issue をまたいで直列化することが目的だから。
+concurrency:
+  group: auto-implement
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  # claude-code-action は OIDC トークンでの認証を必要とする。
+  # auto-01 の試運転ではこれが欠落し「Could not fetch an OIDC token」で失敗した。
+  id-token: write
+
+env:
+  MODEL: claude-opus-5
+  OWNER: KoshiNakano1017
+
+jobs:
+  implement:
+    if: github.event.label.name == 'auto:approved'
+    runs-on: ubuntu-latest
+    # 設計 §8.3「コーディングは timeout-minutes: 60 程度に明示的に絞る」。
+    # テスト設計（〜30分）とコーディング（〜60分）を1ジョブに置くため合計 90 分。
+    timeout-minutes: 90
+    outputs:
+      branch: ${{ steps.branch.outputs.name }}
+      pr: ${{ steps.pr.outputs.number }}
+      blocked: ${{ steps.tests-marker.outputs.blocked || steps.impl-marker.outputs.blocked }}
+      reason: ${{ steps.tests-marker.outputs.reason || steps.impl-marker.outputs.reason }}
+    steps:
+      # PAT で checkout する。以降の push がこの資格情報を使うため、
+      # push イベントが ci.yml を起動する（GITHUB_TOKEN では起動しない・設計 §8.1）。
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.AUTOMATION_PAT }}
+
+      - name: ラベルを auto:implementing に付け替え
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
+        run: |
+          set -euo pipefail
+          gh issue edit "${{ github.event.issue.number }}" \
+            --repo "${{ github.repository }}" \
+            --remove-label "auto:approved" --add-label "auto:implementing"
+
+      - name: ブランチを決める
+        id: branch
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
+          ISSUE: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # CLAUDE.md §5.1 が列挙する短命ブランチのうち feature/* を使う。
+          # 1 Issue = 1 ブランチ = 1 PR（設計 §10.6）。auto-03 は逆にこの命名から Issue 番号を引く。
+          BRANCH="feature/issue-${ISSUE}"
+          # 既に PR が開いているブランチを作り直すと、レビュー中の差分を消してしまう。
+          EXISTING="$(gh pr list --repo "$REPO" --head "$BRANCH" --state open --json number --jq '.[0].number // empty')"
+          if [ -n "$EXISTING" ]; then
+            echo "::error::${BRANCH} には既に PR #${EXISTING} が開いています。実装をやり直すなら先に PR を閉じてください"
+            exit 1
+          fi
+          git checkout -B "$BRANCH"
+          echo "name=${BRANCH}" >> "$GITHUB_OUTPUT"
+          echo "ブランチ: ${BRANCH}"
+
+      # ── テスト設計: 仕様だけを見て受入テストを先に書く（設計 §3 #3・§11.6）──
+      # 書き込み範囲は tests/ のみ。settings/test.json で機械的に制限する（設計 §7.2）。
+      - name: テスト設計エージェント
+        id: test-design
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: '--model ${{ env.MODEL }} --effort high'
+          settings: automation/settings/test.json
+          prompt: |
+            automation/prompts/test-design.md を読み、その指示に従うこと。
+            対象 Issue 番号: ${{ github.event.issue.number }}
+
+      # test.json は gh を許可していないため、エージェントは Issue に到達できない。
+      # 転記はワークフローが行う（auto-01 の「権限不足で出力先に届かない」不具合の再発防止）。
+      - name: テスト設計の出力を転記し、マーカーを読む
+        id: tests-marker
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          bash automation/scripts/post_agent_output.sh \
+            "${{ steps.test-design.outputs.execution_file }}" \
+            issue "${{ github.event.issue.number }}" \
+            "auto-02 / テスト設計" /tmp/test-design-output.md
+          if grep -q '<!--blocked-->' /tmp/test-design-output.md 2>/dev/null; then
+            echo "blocked=true" >> "$GITHUB_OUTPUT"
+            echo "reason=テスト設計が停止しました。完了条件を受入テストへ変換できていません（ゲート2からやり直してください）" >> "$GITHUB_OUTPUT"
+            echo "::error::テスト設計が停止しました"
+            exit 1
+          fi
+          if ! grep -q '<!--tests:designed-->' /tmp/test-design-output.md 2>/dev/null; then
+            echo "::warning::テスト設計の完了マーカーが見つかりません。出力の転記に失敗した可能性があります"
+          fi
+
+      # commit-first（設計 §11.6）。実装より前にテストを単独のコミットとして確定させる。
+      # 後段のコーディング・修正はこのコミットを書き換えない規律で動く。
+      - name: 受入テストだけを先にコミットする
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          CHANGED="$(git status --porcelain)"
+          if [ -z "$CHANGED" ]; then
+            echo "::error::テスト設計エージェントがファイルを1つも作っていません"
+            exit 1
+          fi
+          # 設計 §3 #3 の書き込み範囲（tests/ のみ）を機械的にも確認する。
+          # settings による制限との二重化（設計 §7.2 の考え方）。
+          OUTSIDE="$(printf '%s\n' "$CHANGED" | sed 's/^...//' | grep -v '^tests/' || true)"
+          if [ -n "$OUTSIDE" ]; then
+            echo "::error::テスト設計が tests/ の外を変更しました（設計 §3 #3）"
+            printf '%s\n' "$OUTSIDE"
+            exit 1
+          fi
+          git add tests
+          git commit -F - <<'COMMIT_MSG'
+          test: Issue #${{ github.event.issue.number }} の受入テストを追加する
+
+          実装より先にテストを置き、完了条件を実行可能な形で固定する。
+          生成側と評価側が同じモデルであることによる判定の汚染を防ぐ commit-first 構造。
+          根拠: docs/自律開発ループ設計.md §3 #3・§11.6、Issue #${{ github.event.issue.number }}
+          COMMIT_MSG
+
+      # ── コーディング: 承認済みの段取りに従って実装し、先に置いたテストを通す ──
+      - name: コーディングエージェント
+        id: coding
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: '--model ${{ env.MODEL }} --effort xhigh'
+          settings: automation/settings/code.json
+          prompt: |
+            automation/prompts/coding.md を読み、その指示に従うこと。
+            対象 Issue 番号: ${{ github.event.issue.number }}
+
+      - name: 実装の出力を転記し、マーカーを読む
+        id: impl-marker
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          bash automation/scripts/post_agent_output.sh \
+            "${{ steps.coding.outputs.execution_file }}" \
+            issue "${{ github.event.issue.number }}" \
+            "auto-02 / 実装" /tmp/coding-output.md
+          if grep -q '<!--blocked-->' /tmp/coding-output.md 2>/dev/null; then
+            echo "blocked=true" >> "$GITHUB_OUTPUT"
+            echo "reason=実装が停止しました。段取りの前提が崩れています（ゲート2からやり直してください）" >> "$GITHUB_OUTPUT"
+            echo "::error::実装が停止しました"
+            exit 1
+          fi
+          if ! grep -q '<!--implemented-->' /tmp/coding-output.md 2>/dev/null; then
+            echo "::warning::実装の完了マーカーが見つかりません。出力の転記に失敗した可能性があります"
+          fi
+
+      - name: 実装をコミットする
+        run: |
+          set -euo pipefail
+          # 仕様書ガード（設計 §8.2）の前倒し。auto-03 でも検査するが、
+          # ここで止めれば docs/spec/ の差分が public リポジトリへ push されずに済む。
+          SPEC_CHANGED="$(git status --porcelain -- docs/spec | sed 's/^...//' || true)"
+          if [ -n "$SPEC_CHANGED" ]; then
+            echo "::error::自律ループは docs/spec/ を変更できません（設計 §0・§8.2）"
+            printf '%s\n' "$SPEC_CHANGED"
+            exit 1
+          fi
+          # commit-first の担保。先に確定させた受入テストが書き換えられていないことを確認する。
+          TESTS_TOUCHED="$(git status --porcelain -- tests | sed 's/^...//' || true)"
+          if [ -n "$TESTS_TOUCHED" ]; then
+            echo "::error::コーディングが受入テストを変更しました。テストの書き換えは仕様変更にあたります（設計 §0・§11.6）"
+            printf '%s\n' "$TESTS_TOUCHED"
+            exit 1
+          fi
+          if git diff --quiet && [ -z "$(git ls-files --others --exclude-standard)" ]; then
+            echo "::error::コーディングエージェントが実装を1行も書いていません"
+            exit 1
+          fi
+          git add -A
+          git commit -F - <<'COMMIT_MSG'
+          feat: Issue #${{ github.event.issue.number }} の実装
+
+          承認済みの段取りに従って実装し、先に置いた受入テストを通す。
+          根拠: Issue #${{ github.event.issue.number }} の段取りコメント、docs/自律開発ループ設計.md §3 #4
+          COMMIT_MSG
+
+      - name: ブランチを push する
+        run: |
+          set -euo pipefail
+          # PAT で checkout してあるため、この push は ci.yml を起動する（設計 §8.1）。
+          git push -u origin "${{ steps.branch.outputs.name }}"
+
+      - name: PR を作成する
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
+          ISSUE: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ steps.branch.outputs.name }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+        run: |
+          set -euo pipefail
+          # PR 本文とタイトルはコーディングエージェントが書く
+          # （設計 §11.4 のトレーサビリティ表を含むため）。
+          # 取り出せなかった場合でも PR 作成そのものは失敗させない。
+          if [ ! -s /tmp/pr-body.md ]; then
+            echo "::warning::/tmp/pr-body.md がありません。最小限の本文で PR を作成します"
+            {
+              echo "## 概要"
+              echo
+              echo "Issue #${ISSUE} の実装。"
+              echo
+              echo "Closes #${ISSUE}"
+              echo
+              echo "> [!WARNING]"
+              echo "> コーディングエージェントが PR 本文を出力しませんでした。"
+              echo "> 設計 §11.4 のトレーサビリティ表がありません。ゲート3で差分を直接確認してください。"
+            } > /tmp/pr-body.md
+          fi
+          if [ -s /tmp/pr-title.txt ]; then
+            TITLE="$(head -1 /tmp/pr-title.txt)"
+          else
+            echo "::warning::/tmp/pr-title.txt がありません。Issue タイトルから組み立てます"
+            TITLE="feat: ${ISSUE_TITLE#\[auto\] }"
+          fi
+          # squash マージでこのタイトルが main のコミット件名になる（CLAUDE.md §5.2）。
+          gh pr create --repo "$REPO" --base main --head "$BRANCH" \
+            --title "$TITLE" --body-file /tmp/pr-body.md
+          PR="$(gh pr list --repo "$REPO" --head "$BRANCH" --state open --json number --jq '.[0].number')"
+          echo "number=${PR}" >> "$GITHUB_OUTPUT"
+          echo "PR #${PR} を作成しました"
+
+      - name: ラベルを auto:review に付け替え
+        env:
+          # PAT でないと auto-03 が起動しない（設計 §8.1）。
+          GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
+        run: |
+          set -euo pipefail
+          gh issue edit "${{ github.event.issue.number }}" \
+            --repo "${{ github.repository }}" \
+            --remove-label "auto:implementing" --add-label "auto:review"
+
+  # ── 停止: 実装フェーズにゲートは無いので、失敗はすべてオーナーへ委ねる ──
+  blocked:
+    needs: implement
+    if: always() && needs.implement.result != 'success' && needs.implement.result != 'skipped'
+    runs-on: ubuntu-latest
+    steps:
+      - name: auto:blocked へ付け替えて通知
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
+          ISSUE: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REASON: ${{ needs.implement.outputs.reason }}
+        run: |
+          set -euo pipefail
+          gh issue edit "$ISSUE" --repo "$REPO" \
+            --remove-label "auto:implementing" --add-label "auto:blocked" || true
+          printf '%s\n\n%s\n\n%s\n' \
+            "@${OWNER} 実装フェーズが停止しました。" \
+            "理由: ${REASON:-ワークフローの失敗（実行ログを確認してください）}" \
+            "実行: ${RUN_URL}" > notice.md
+          gh issue comment "$ISSUE" --repo "$REPO" --body-file notice.md
