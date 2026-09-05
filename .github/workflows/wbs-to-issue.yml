@@ -1,0 +1,172 @@
+# WBS → Issue 生成（設計 §10.1.5 導線1）
+#
+# トリガ : 手動（workflow_dispatch）。作業パッケージ番号を渡す
+# 担当   : スクリプトによる転記のみ。エージェントは動かさない
+# 設計   : docs/自律開発ループ設計.md §10.1.5「導線1: WBS → Issue 生成」
+#
+# ── このワークフローがやること / やらないこと ──
+#   やる     : WBS_Phase1.md の1行を読み、Issue テンプレート5項目のうち
+#              「目的・根拠となる仕様・想定サイズ」の3つを埋めて Issue を作る
+#   やらない : 完了条件とスコープ外の考案（＝仕様判断。設計 §0 によりオーナーの専権事項）
+#
+#   WBS には検証可能な完了条件が書かれていない。ここを機械が埋めると
+#   「起票の場で仕様を考える」ことになり、翌朝のゲート1（PM の解釈とオーナーの意図の
+#   照合）が空回りする（設計 §10.1.3 の警告）。だから意図的に空欄で出す。
+#
+# ── `auto` ラベルを自動では付けない理由 ──
+#   起票可能かの3条件（設計 §10.1.3）のうち、機械が判定できるのは2つだけ:
+#     1. 節番号が引ける        → WBS から抽出できるので自動判定できる
+#     2. ブロッカーが解けている → WBS のステータス欄で自動判定できる
+#     3. 完了条件が検証可能    → **WBS に情報が無いので判定できない**
+#   3を人が埋めない限り `auto` を付けてはいけないため、既定では無ラベルで作る。
+#   `start_loop: true` を明示したときだけ `auto` を付けるが、1・2 が満たされない
+#   場合はワークフロー側で拒否する。
+
+name: WBS → Issue 生成
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: "作業パッケージ番号（WBS の表の1列目と完全一致。例: 3-5b / 1-2 / 0-1 / 14-6）"
+        required: true
+        type: string
+      start_loop:
+        description: "auto ラベルを付けて自律ループを即開始する（完了条件を自分で埋めてから使うこと）"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  create-issue:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: WBS から作業パッケージを読み出す
+        id: wbs
+        run: |
+          set -euo pipefail
+          PACKAGE='${{ inputs.package }}'
+
+          # スクリプトは JSON を1行で吐く。見つからなければ非ゼロで終了する。
+          if ! python3 automation/scripts/wbs_to_issue.py "$PACKAGE" > /tmp/issue.json; then
+            echo "::error::WBS から作業パッケージ '${PACKAGE}' を読み出せませんでした"
+            exit 1
+          fi
+
+          jq -r '.title'                      /tmp/issue.json > /tmp/title.txt
+          jq -r '.body'                       /tmp/issue.json > /tmp/body.md
+          jq -r '.labels | join(",")'         /tmp/issue.json > /tmp/labels.txt
+
+          {
+            echo "blocked=$(jq -r '.blocked'  /tmp/issue.json)"
+            echo "retired=$(jq -r '.retired'  /tmp/issue.json)"
+            echo "spec_ref=$(jq -r '.spec_ref' /tmp/issue.json)"
+            echo "reason=$(jq -r '.reason'    /tmp/issue.json)"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "タイトル: $(cat /tmp/title.txt)"
+
+      # 廃止・不要化・Phase 2 移送済みのパッケージは起票させない。
+      # WBS 上で取り消し線になっているものを掘り起こすのは、ほぼ確実に操作ミスのため。
+      - name: 廃止済みパッケージの起票を止める
+        if: steps.wbs.outputs.retired == 'true'
+        run: |
+          echo "::error::このパッケージは廃止・不要化・Phase 2 移送済みです。起票しません"
+          echo "理由: ${{ steps.wbs.outputs.reason }}"
+          exit 1
+
+      # start_loop が指定されていても、3条件のうち機械が見られる2つが
+      # 満たされていなければ `auto` は付けない。安全側に倒す。
+      - name: auto ラベルの可否を判定
+        id: gate
+        run: |
+          set -euo pipefail
+          START='${{ inputs.start_loop }}'
+          BLOCKED='${{ steps.wbs.outputs.blocked }}'
+          SPEC='${{ steps.wbs.outputs.spec_ref }}'
+
+          if [ "$START" != "true" ]; then
+            echo "既定どおり auto を付けずに起票します（完了条件を埋めてから手で付けてください）"
+            echo "apply_auto=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if [ "$BLOCKED" = "true" ]; then
+            echo "::warning::WBS 上でブロック中のため auto を付けません（設計 §10.1.3 条件2）"
+            echo "apply_auto=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if [ -z "$SPEC" ]; then
+            echo "::warning::正本の節番号を抽出できなかったため auto を付けません（設計 §10.1.3 条件1）"
+            echo "apply_auto=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+
+          echo "::warning::auto を付けて起票します。完了条件が空欄のままだと PM エージェントが自分で解釈します"
+          echo "apply_auto=true" >> "$GITHUB_OUTPUT"
+
+      - name: ラベルの存在を保証する
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
+        run: |
+          set -euo pipefail
+          # 既にあれば失敗するので握りつぶす。--force は色を上書きしてしまうので使わない。
+          gh label create "needs-spec" --repo "${{ github.repository }}" \
+            --color "D4C5F9" --description "仕様が未確定。auto に流す前にオーナーの回答が要る" 2>/dev/null || true
+          gh label create "auto" --repo "${{ github.repository }}" \
+            --color "0E8A16" --description "自律ループの対象（3条件を満たしたものだけ）" 2>/dev/null || true
+          gh label create "from-wbs" --repo "${{ github.repository }}" \
+            --color "C2E0C6" --description "WBS_Phase1.md から自動生成された Issue" 2>/dev/null || true
+
+      # ⚠️ GITHUB_TOKEN ではなく AUTOMATION_PAT を使う。
+      #    GITHUB_TOKEN が作成・ラベル付けしたイベントは他のワークフローを起動しないため、
+      #    `auto` を付けても auto-01-plan.yml が発火しない（GitHub の再帰実行防止の仕様）。
+      - name: Issue を作成する
+        id: create
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
+        run: |
+          set -euo pipefail
+
+          LABELS="from-wbs"
+          FROM_WBS="$(cat /tmp/labels.txt)"
+          [ -n "$FROM_WBS" ] && LABELS="${LABELS},${FROM_WBS}"
+          [ "${{ steps.gate.outputs.apply_auto }}" = "true" ] && LABELS="${LABELS},auto"
+
+          echo "付与するラベル: ${LABELS}"
+
+          URL="$(gh issue create \
+            --repo "${{ github.repository }}" \
+            --title "$(cat /tmp/title.txt)" \
+            --body-file /tmp/body.md \
+            --label "$LABELS")"
+
+          echo "url=${URL}" >> "$GITHUB_OUTPUT"
+          echo "作成しました: ${URL}"
+
+      - name: 実行サマリー
+        run: |
+          {
+            echo "## WBS → Issue 生成"
+            echo
+            echo "| 項目 | 値 |"
+            echo "| --- | --- |"
+            echo "| 作業パッケージ | \`${{ inputs.package }}\` |"
+            echo "| Issue | ${{ steps.create.outputs.url }} |"
+            echo "| 根拠となる仕様 | ${{ steps.wbs.outputs.spec_ref }} |"
+            echo "| WBS 上のブロック | ${{ steps.wbs.outputs.blocked }} |"
+            echo "| auto を付与したか | ${{ steps.gate.outputs.apply_auto }} |"
+            echo
+            if [ "${{ steps.gate.outputs.apply_auto }}" != "true" ]; then
+              echo "### 次にやること"
+              echo
+              echo "1. Issue の **完了条件** を「〜が〜できる」の形で埋める（自動では埋まりません）"
+              echo "2. **スコープ外** に、今回やらないことを書く"
+              echo "3. 起票前チェックの3条件を確認し、揃っていれば \`auto\` ラベルを手で付ける"
+              echo
+              echo "\`auto\` を付けた時点で \`auto-01-plan.yml\`（計画フェーズ）が動きます。"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

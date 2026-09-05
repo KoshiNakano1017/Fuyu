@@ -1,0 +1,18 @@
+{
+  "$comment": "調査エージェント用。ファイルは読み取り専用のまま、設計 §3 が定める出力先(Issue コメント)だけを許可する。readonly.json は Bash を全面拒否するため、これを調査に使うと調査メモを出力できない。",
+  "permissions": {
+    "allow": [
+      "Read", "Glob", "Grep", "WebFetch", "WebSearch",
+      "Bash(gh issue view:*)",
+      "Bash(gh issue comment:*)"
+    ],
+    "deny": [
+      "Write",
+      "Edit",
+      "NotebookEdit",
+      "Bash(gh issue edit:*)",
+      "Bash(gh pr:*)",
+      "Bash(git:*)"
+    ]
+  }
+}

@@ -39,13 +39,21 @@ jobs:
       # push イベントの差分範囲でスキャンするため、初回 push（event.before が空）では
       # 「0バイトをスキャンして失敗」または「何も見ずに成功」になり、
       # 秘密情報の検出漏れに気づけない。バイナリを直接叩いて全履歴を確実に走査する。
+      # バージョンは固定する。releases/latest への API 呼び出しは未認証のため、
+      # ランナー共有IPのレート制限（60回/時）に当たり断続的に 403 で落ちる。
+      # 失敗の見た目が「機密情報スキャン failure」になるため、そのたびに漏洩を疑って
+      # 確認する羽目になり、§6.2「CIが赤いPRはマージしない」が形骸化する。
+      #
+      # 固定すればAPI呼び出し自体が消え、ビルドも再現可能になる。
+      # latest 追随は「侵害されたリリースを自動で引く」供給網リスクでもあるため、
+      # 更新は人間が意図して行う（バージョンを上げるコミットとして履歴に残す）。
       - name: gitleaks をインストール
+        env:
+          GITLEAKS_VERSION: '8.30.1'
         run: |
           set -euo pipefail
-          VERSION="$(curl -sSfL https://api.github.com/repos/gitleaks/gitleaks/releases/latest \
-            | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')"
-          echo "gitleaks v${VERSION} を取得します"
-          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" \
+          echo "gitleaks v${GITLEAKS_VERSION} を取得します"
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
             | sudo tar -xz -C /usr/local/bin gitleaks
           gitleaks version
 

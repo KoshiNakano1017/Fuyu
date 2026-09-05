@@ -4,7 +4,7 @@ doc_type: 設計
 status: "詳細設計ドラフト（要オーナーレビュー）"
 owner: プロジェクトオーナー
 date: "2026-08-16"
-updated: 2026-08-22
+updated: 2026-08-28
 tags: ["浮遊街アプリ"]
 up: "[[浮遊街アプリ 総合要件定義・設計書_v13]]"
 ---
@@ -27,7 +27,7 @@ up: "[[浮遊街アプリ 総合要件定義・設計書_v13]]"
 | 命名規則 | リソース指向のREST（`/api/{resource}/{id}/{sub-resource}`）。一覧は複数形、作成は`POST`、部分更新は`PATCH` |
 | 共通レスポンス | 成功時 `{ data, meta }`、エラー時 `{ error: { code, message } }`。HTTPステータスコードと併用 |
 | 監査ログ | 顧客管理画面の伝票編集・宿泊日数調整・免除操作等、**理由入力必須の操作は全て`operator_id`＋`reason`をリクエストボディ必須項目とする**（正本§5.6.4の編集理由必須ルールをAPI層でも強制） |
-| べき等性 | Webhook系（宿泊予約フォーム連携等）は外部からの再送に備え、`idempotency_key`または送信元の一意ID（フォーム回答ID等）で重複作成を防止する |
+| べき等性 | ~~Webhook系（宿泊予約フォーム連携等）は外部からの再送に備え、`idempotency_key`または送信元の一意ID（フォーム回答ID等）で重複作成を防止する~~ → **2026-08-23：宿泊予約フォーム連携の廃止（§9 #46）により、外部からの再送を前提とするべき等性制御は不要**。公開予約ページは OTP セッショントークン単位で二重送信を抑止する |
 
 ---
 
@@ -44,14 +44,14 @@ up: "[[浮遊街アプリ 総合要件定義・設計書_v13]]"
 
 | メソッド | パス | 概要 | 認可 | 対応DB |
 | --- | --- | --- | --- | --- |
-| POST | `/api/reservations/webhook` | 宿泊予約フォーム送信トリガー（**ドラフト保留・§9 #30参照**） | システム間（署名検証） | `check_ins`（`pre_registered`） |
+| ~~POST~~ | ~~`/api/reservations/webhook`~~ | ~~宿泊予約フォーム送信トリガー~~ → ❌ **廃止（2026-08-23 ／ v13 §9 #46）**：Googleフォームを廃止し公開予約ページへ置換したため、Webhook 自体が不要になった（§3-4 参照） | — | — |
 | POST | `/api/checkins` | チェックイン（QR/画面タップ） | core_member, admin, 本人 | `check_ins` |
 | PATCH | `/api/checkins/{id}/checkout` | チェックアウト | core_member, admin, 本人 | `check_ins`, `stay_ticket_transactions`（consume） |
 | DELETE | `/api/checkins/{id}` | 予約キャンセル・ノーショー（論理削除、理由必須） | core_member, admin | `check_ins`, `room_assignments` |
 | POST | `/api/checkins/{id}/room-assignments` | 部屋割当 | core_member, admin | `room_assignments` |
 | PATCH | `/api/room-assignments/{id}/move` | 部屋移動（既存終了＋新規追加） | core_member, admin | `room_assignments` |
 | GET | `/api/rooms?status=available` | 空き部屋一覧 | core_member, admin | `rooms` |
-| GET | `/api/admin/stay-calendar` | 宿泊予定カレンダー（**2026-08-20：ドラフト保留を解除**。§9 #30-⑤ 決着によりGoogleカレンダー同等の操作感で確定） | core_member, admin | `check_ins`×`room_assignments`×`rooms` |
+| GET | `/api/admin/stay-calendar` | 宿泊予定カレンダー（**2026-08-20：ドラフト保留を解除**。§9 #30-⑤ 決着によりGoogleカレンダー同等の操作感で確定）。**2026-08-23：日別の食数サマリー（朝/昼/夜）を含める**（v13 §5.4.1b） | core_member, admin | `check_ins`×`room_assignments`×`rooms`×`meal_reservations` |
 
 ### 2-3. 朝会・議事録・クエスト自動起案
 
@@ -111,13 +111,33 @@ up: "[[浮遊街アプリ 総合要件定義・設計書_v13]]"
 | GET | `/api/accommodation-rates?date=YYYY-MM-DD` | 指定日に適用される宿泊料金（6形態 × 会員区分） | 全員 | `accommodation_rates` |
 | POST | `/api/accommodation-rates` | 料金改定。**既存行を上書きせず適用期間を区切って追加**（期間重複は `EXCLUDE` 制約で拒否） | **admin のみ** | `accommodation_rates` |
 
-### 2-2b. アプリ内からの宿泊予約・残枠（2026-08-20 新設 ／ v13 §5.2.4・§5.2.5・§9 #36・#37）
+### 2-2b. 宿泊予約（公開ページ／アプリ内）・残枠（2026-08-20 新設 ／ **2026-08-23 改訂** ／ v13 §5.2.3・§5.2.4・§5.2.5・§9 #36・#37・#46）
 
 | メソッド | パス | 概要 | 権限 | 主な対象テーブル |
 | --- | --- | --- | --- | --- |
 | GET | `/api/availability?from=&to=&room_type=` | **宿泊枠の残数**（`v_room_availability` から都度算出。保存値ではない） | 全員 | `v_room_availability` |
 | POST | `/api/reservations` | **アプリ内予約**。氏名・連絡先・住所は会員マスタから自動補完。備考欄が空なら自動確定、記載があれば「要確認」 | `active` の全ロール | `check_ins`（`reservation_source='in_app'`） |
 | GET | `/api/me/stay-calendar` | **本人の宿泊予定・履歴カレンダー** | 本人 | `check_ins`×`room_assignments` |
+
+**★ 公開予約ページ関連（2026-08-23 新設 ／ v13 §5.2.3 ／ §9 #46）**
+
+| メソッド | パス | 概要 | 権限 | 主な対象テーブル |
+| --- | --- | --- | --- | --- |
+| POST | `/api/public/reservations/otp` | **メールOTPの発行**。予約送信の前段で本人確認を行う（v13 §5.8.3 の本人確認要件を予約時点で満たす） | **公開（未認証）** | `reservation_otps`（短命・TTL付き） |
+| POST | `/api/public/reservations/otp/verify` | OTP検証。成功時に**短命の予約セッショントークン**を返す | **公開（未認証）** | — |
+| POST | `/api/public/reservations` | **公開予約ページからの予約作成**。OTP検証済みトークン必須。備考欄が空なら自動確定、記載があれば「要確認」 | **公開（未認証・要OTP）** | `check_ins`（`reservation_source='web_public'`）, `meal_reservations` |
+| GET | `/api/public/availability?from=&to=` | 未認証で参照できる残枠。**非会員料金**で表示する | **公開（未認証）** | `v_room_availability` |
+| GET | `/api/public/rates` | 宿泊料金・送迎料金の公開表示（Uii 主・円 副） | **公開（未認証）** | `accommodation_rates`, `menu_items` |
+| POST | `/api/reservations/{id}/meals` | 事前予約注文の登録・変更（滞在日別・朝/昼/夜／**任意**） | 本人, core_member, admin | `meal_reservations` |
+| GET | `/api/admin/meal-summary?date=` | **日別の食数サマリー**（仕込み数量の把握用） | core_member, admin | `meal_reservations` |
+
+> [!warning] 公開エンドポイントは anon キーで直接DBを触らせない
+> `/api/public/*` は未認証で到達できるため、**クライアントから Supabase へ直接 INSERT させてはならない**。
+> Server Action / Route Handler の内部で `service_role` を用い、サーバ側でのみ書き込む（`CLAUDE.md` §3.2）。
+> anon キーに `check_ins` の INSERT 権限を与えると、**RLS の緩みがそのまま個人情報テーブルへの書き込み口**になる。
+>
+> あわせて必須の防御：**Cloudflare Turnstile**（ボット対策）、**レート制限**（同一メール24時間3件・同一IP単位）、
+> OTP の**試行回数制限と短いTTL**。フォーム時代は検証手段が無く、架空の予約で枠が埋まっても検知できなかった。
 
 ### 2-6. FAQ・ナレッジ・RAG
 
@@ -156,7 +176,7 @@ up: "[[浮遊街アプリ 総合要件定義・設計書_v13]]"
 | メソッド | パス | 概要 | 認可 | 対応DB |
 | --- | --- | --- | --- | --- |
 | POST | `/api/media/signed-upload-url` | Cloud Storage for Firebaseへの署名付きアップロードURL発行 | 全員 | ― |
-| POST | `/api/media` | アップロード完了通知＋用途タグ登録（AI解析を非同期トリガー） | 全員（本人のみ） | `media_assets` |
+| POST | `/api/media` | 用途タグ・メタデータ登録（AI解析を非同期トリガー）。**アップロード完了の確定は本APIではなくGCS Object Finalizeイベントが起点**（クライアント通知に依存しない・v13 §5.11.2） | 全員（本人のみ） | `media_assets` |
 | PATCH | `/api/media/{id}/purpose` | 用途タグの追加・変更（AI再解析を非同期トリガー） | 本人 | `media_assets` |
 | GET | `/api/media?purpose=instagram&sort=relevance` | 用途タグでの絞り込み・適合度順取得 | 本人（自分のアップロード分のみ） | `media_assets` |
 | PATCH | `/api/media/{id}/caption` | AIキャプション案の編集・確定 | 本人 | `media_assets` |
@@ -310,32 +330,97 @@ paths:
                       escalated: { type: boolean, description: "信頼度が閾値未満の場合true。運営LINE通知をサーバ側でトリガー" }
 ```
 
-### 3-4. 宿泊予約フォーム連携 Webhook（ドラフト・未確定）
+### 3-4. ~~宿泊予約フォーム連携 Webhook~~ → **廃止（2026-08-23 ／ v13 §9 #46）**
+
+> [!important] このエンドポイントは実装しない
+> Googleフォームを廃止し、ログイン不要の**公開予約ページ `/reserve`** へ置き換える決定（v13 §5.2.3）により、
+> **外部フォームからの Webhook 受信という経路そのものが存在しなくなった**。
+> 旧ドラフトが未確定としていたリクエストスキーマ・べき等性キー・署名検証は、**確定させる必要がなくなった**。
+> 詳細な廃止理由は外部連携設計.md §5 を参照。
+
+代わりに実装するのは以下（§2-2b「公開予約ページ関連」の詳細）。
 
 ```yaml
 paths:
-  /api/reservations/webhook:
+  /api/public/reservations:
     post:
-      summary: "【ドラフト・未確定】Googleフォーム送信をトリガーに予約を自動生成する想定のWebhook"
+      summary: "公開予約ページからの予約作成（未認証・OTP検証済みトークン必須）"
       description: >
-        v13 §5.2.3（未コミット）に基づく暫定案。備考欄の空判定基準（§9 #30-③）・
-        旅館業法必須項目の収集方式（§9 #30-③②）が未確定のため、リクエストスキーマは
-        確定していない。以下は参考イメージ。
+        v13 §5.2.3 に基づく。ログイン不要で予約でき、備考欄が完全な空欄なら自動確定、
+        記載があれば「要確認」として予約担当者へ通知する（§9 #30-③ の判定基準を踏襲）。
+        会員料金はログイン状態からのみ判定し、自己申告では適用しない（§5.2.3）。
+      security:
+        - reservationSessionToken: []   # POST /api/public/reservations/otp/verify で取得
       requestBody:
+        required: true
         content:
           application/json:
             schema:
               type: object
-              description: "確定次第、正式スキーマに置き換える"
+              required: [guest_name, email, phone, check_in_date, check_out_date, room_type, adults_count, children_count, consent_version]
               properties:
-                form_response_id: { type: string, description: "べき等性キー" }
-                guest_name: { type: string }
-                room_type_requested: { type: string, description: "現行フォームは4択。運用実態6種との差分は§9 #30-②参照" }
-                remarks: { type: string, nullable: true, description: "空/非空でauto_confirm判定（基準未確定）" }
+                guest_name:      { type: string }
+                email:           { type: string, format: email, description: "OTP を検証済みのアドレスと一致すること" }
+                phone:           { type: string, description: "当日連絡用" }
+                check_in_date:   { type: string, format: date }
+                check_in_time:   { type: string, description: "到着予定時刻。案内は15:00以降" }
+                check_out_date:  { type: string, format: date }
+                room_type:
+                  type: string
+                  enum: [dormitory, cottage, campsite, car, earthbag, salon]
+                  description: "v13 §5.4.2 の6形態。満室の形態はUI側で選択不可（残枠は都度算出）"
+                adults_count:    { type: integer, minimum: 1, description: "高校生以上・代表者を含む" }
+                children_count:  { type: integer, minimum: 0, description: "中学生以下" }
+                children_ages:
+                  type: array
+                  items: { type: string, enum: ["0-2", "3-5", "elementary", "juniorhigh"] }
+                transport:
+                  type: string
+                  enum: [car, taxi, shuttle, other]
+                  description: "shuttle を選ぶと送迎（1,900円＝1,520Uii・片道）がチェックイン時に計上される（v13 §5.4.2③）"
+                meal_reservations:
+                  type: array
+                  description: "カフェ事前予約注文。**任意**（未指定でも予約は成立する／v13 §5.4.1b）"
+                  items:
+                    type: object
+                    required: [served_on, meal_slot, menu_item_id]
+                    properties:
+                      served_on:    { type: string, format: date, description: "滞在日。チェックイン当日を含む" }
+                      meal_slot:    { type: string, enum: [breakfast, lunch, dinner] }
+                      menu_item_id: { type: string, format: uuid, description: "is_pre_orderable = true の商品のみ" }
+                      quantity:     { type: integer, minimum: 1 }
+                consent_version: { type: string, description: "同意した「浮遊街に宿泊される方へ」の版数を記録する" }
+                remarks:
+                  type: string
+                  nullable: true
+                  description: "**完全な空欄なら自動確定**。「特になし」等の定型文言は要確認扱い（§9 #30-③）"
       responses:
-        "202":
-          description: 受理（実際の確定/要確認判定ロジックは未実装）
+        "201":
+          description: 予約作成完了
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  checkin_id: { type: string, format: uuid }
+                  status:     { type: string, enum: [confirmed, needs_review], description: "備考欄の有無で分岐" }
+                  matched_member_hint:
+                    type: object
+                    nullable: true
+                    description: >
+                      名寄せ候補が1件に定まった場合のみ返す。**候補が複数ある場合は返さず、運営承認キューへ回す**
+                      （v13 §5.8.3 の誤名寄せ防止要件）。宿泊券・Uii残高・XPの引き継ぎはここでは行わない
+        "409":
+          description: 満室（送信までの間に他の予約で枠が埋まった場合）
+        "429":
+          description: レート制限（同一メール/IPからの過剰な予約試行）
 ```
+
+> [!warning] 名寄せを予約時に「成立」させない
+> OTP により**メールアドレスの本人性は確認できる**が、それだけで既存会員アカウントへ結合してはならない。
+> 同姓同名・家族間での連絡先共有があり得るため、v13 §5.8.3 のとおり
+> **候補が複数件ヒットした場合は自動連携せず運営承認キューへ回す**。
+> 予約時点で確定させるのは**宿泊枠であって人物の同定ではない**、という切り分けを守ること。
 
 ---
 
@@ -343,7 +428,7 @@ paths:
 
 | # | トリガー元 | 用途 | 状態 |
 | --- | --- | --- | --- |
-| 1 | Googleフォーム（Apps Script経由 or 直接） | 宿泊予約の自動反映 | ドラフト保留（§9 #30） |
+| ~~1~~ | ~~Googleフォーム（Apps Script経由 or 直接）~~ | ~~宿泊予約の自動反映~~ | ❌ **廃止（2026-08-23 ／ §9 #46）**：フォームを廃止し公開予約ページへ置換。**Webhook・署名検証・べき等性・再送台帳のいずれも実装しない**（外部連携設計.md §5） |
 | 2 | Eumo（将来） | Uii/Eumo同期（Phase2、非同期キャッシュ方式） | Phase2スコープ外 |
 | ~~3~~ | ~~line-rag-bot~~ | ~~ナレッジCRUD連携~~ | **API連携なし（2026-08-16再確定）**：line-rag-botとのWebhook/API連携は一切存在しない。ナレッジ登録・エスカレーション閲覧は全てline-rag-bot Streamlit管理画面で完結（外部連携設計.md §2参照） |
 
@@ -354,7 +439,7 @@ paths:
 | # | 内容 | 関連QUESTIONS.md項目 |
 | --- | --- | --- |
 | ~~1~~ | ~~`PATCH /api/settlement-adjustments/{id}`の免除操作をcore_memberにも許すか~~ | ✅解消済み（2026-08-16）：Phase1はコアメンバーにも許可 |
-| ~~2~~ | ~~`POST /api/reservations/webhook`の正式スキーマ確定~~ | ✅5/5点回答済み（2026-08-16）。正式スキーマ化は次回サイクルで実施 |
+| ~~2~~ | ~~`POST /api/reservations/webhook`の正式スキーマ確定~~ | ❌ **不要になった（2026-08-23 ／ v13 §9 #46）**：Googleフォーム廃止によりエンドポイント自体を実装しない。代わりに `POST /api/public/reservations`（§3-4）を実装する |
 | ~~3~~ | ~~`GET /api/admin/stay-calendar`のレスポンス粒度~~ | ✅解消済み（2026-08-16）：Googleカレンダーと同等の操作感 |
 | ~~4~~ | ~~line-rag-bot連携APIの認証方式（APIキー／署名検証等）~~ | ✅解消済み（2026-08-16）：Streamlit継続決定により、REST API実装自体が当面不要に。将来API化する際の課題として引き継ぎ |
 
@@ -364,6 +449,8 @@ paths:
 
 | 日付 | 内容 |
 | --- | --- |
+| 2026-08-28 | §2-10 `POST /api/media` の概要を正本 v13 §5.11.2 に整合させる修正。「アップロード完了通知」という表現が、正本の「完了確定はGCS Object Finalizeイベント起点・クライアント完了通知に依存しない」（非機能要件詳細.md §2-2と同旨）と食い違っていたため、本APIの役割を用途タグ・メタデータ登録に限定する記述へ改めた（正本優先ルールの適用。CLAUDE.md §1.1）。 |
+| **2026-08-23** | **Googleフォーム連携の廃止と公開予約ページ化を反映（v13 §9 #46〜#49）**。①§2-2 の `POST /api/reservations/webhook` と §4 Webhook一覧 #1 を**廃止**として取消線化。②§3-4 のドラフトyamlを削除し、**`POST /api/public/reservations` の正式スキーマ**へ差し替え（宿泊形態6種のenum・送迎・**任意**の事前予約注文・同意版数・名寄せ候補の返却方針・409/429）。③§2-2b に公開予約ページ関連7エンドポイント（OTP発行/検証・公開予約作成・公開残枠・公開料金・事前予約注文・日別食数サマリー）を新設し、**anonキーで直接DBを触らせない**旨と Turnstile／レート制限／OTP試行制限を明記。④§1 のべき等性方針から外部Webhook前提の記述を撤回。⑤`GET /api/admin/stay-calendar` に日別食数サマリーを追加。⑥オーナー確認事項 #2 を「不要になった」へ更新。 |
 | 2026-08-16 | 初版作成。DB物理設計・画面設計を踏まえ、9機能領域・約35エンドポイントを一覧化。主要4エンドポイント（街人登録承認・注文明細編集・AIコンシェルジュ質問・宿泊予約Webhook）はOpenAPI風yamlで詳細化。宿泊予約フォーム連携関連は未コミットドラフトのため確定スキーマとせず「参考イメージ」に留めた。 |
 | 2026-08-16（追記） | オーナー回答（ナレッジ・RAG基盤をline-rag-botへ統合、アプリ内チャットUIなし）を反映。
 `POST /api/ai/ask`を削除（§3-3へ参考記録として移動）、`/api/knowledge`系をline-rag-bot APIへの

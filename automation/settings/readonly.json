@@ -1,0 +1,7 @@
+{
+  "$comment": "調査・レビュー(5a/5b/5c)用。読み取り専用。設計 §3 の書き込み権限「なし」を機械的に強制する。",
+  "permissions": {
+    "allow": ["Read", "Glob", "Grep", "WebFetch", "WebSearch"],
+    "deny": ["Write", "Edit", "NotebookEdit", "Bash"]
+  }
+}
