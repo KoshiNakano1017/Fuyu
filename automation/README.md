@@ -22,9 +22,9 @@
 | 場所 | 中身 | なぜそこか |
 | --- | --- | --- |
 | `automation/prompts/` | エージェントのプロンプト10本 | 任意の場所でよいので、自動化を1箇所に集約 |
-| `automation/settings/` | エージェントごとの権限設定4本 | 同上 |
+| `automation/settings/` | エージェントごとの権限設定5本 | 同上 |
 | `automation/scripts/` | ワークフローから呼ぶスクリプト | YAML に長い処理を埋めると読めず、手元で検証もできないため分離 |
-| `.github/workflows/` | ワークフロー4本 | **GitHub の仕様で位置が固定**されている |
+| `.github/workflows/` | ワークフロー6本 | **GitHub の仕様で位置が固定**されている |
 | `.github/ISSUE_TEMPLATE/` | Issue テンプレート | 同上 |
 | `docs/` | 仕様書（正本）・設計 | ループが読む対象。**ループは書き換えない**（§8.2） |
 | ルート | アプリのソース | ループが書く対象 |
@@ -41,12 +41,19 @@
 | | `settings/test.json` | 🟡 未検証 | 同上 |
 | | `settings/code.json` | 🟡 未検証 | 同上 |
 | **ワークフロー** | `.github/workflows/auto-01-plan.yml` | 🟢 完成 | 計画フェーズ。§4.1 のリスク分岐・停止・異議申立て窓まで実装。**足場が無くても動く** |
-| | `.github/workflows/auto-02-implement.yml` | 🔴 未着手 | 実装フェーズ |
-| | `.github/workflows/auto-03-review-merge.yml` | 🔴 未着手 | **最重量**（レビュー3並列＋修正ループ＋リトライ判定＋仕様書ガード） |
+| | `.github/workflows/auto-02-implement.yml` | 🟢 完成 | 実装フェーズ。テスト設計 → 実装 → PR。ゲートなし（設計 §6）。**足場が必要** |
+| | `.github/workflows/auto-03-review-merge.yml` | 🟢 完成 | **最重量**（レビュー3並列＋修正ループ＋リトライ判定＋仕様書ガード＋ゲート3）。**足場が必要** |
 | **プロンプト** | `prompts/pm-define.md` | 🟢 完成 | タスク定義＋リスク区分の判定 |
 | | `prompts/research.md` | 🟢 完成 | 調査。§3.2 の6軸と質問形式を転記済み |
 | | `prompts/pm-plan.md` | 🟢 完成 | 段取り＋`QUESTIONS.md` への起票 |
-| | `prompts/` 残り7本 | 🔴 未着手 | 実装ループ用。足場が出来てから。[書き方](prompts/README.md) |
+| | `prompts/test-design.md` | 🟢 完成 | 仕様だけを見て受入テストを先に書く（設計 §11.6 の commit-first） |
+| | `prompts/coding.md` | 🟢 完成 | 実装。テストと `docs/spec/` は書き換えない |
+| | `prompts/review-quality.md` | 🟢 完成 | レビュー 5a。バグ・認可漏れ・CLAUDE.md §4 |
+| | `prompts/review-spec.md` | 🟢 完成 | レビュー 5b。**差分を読む前に仕様から要件を列挙する2段構造**（設計 §11.6） |
+| | `prompts/review-privacy.md` | 🟢 完成 | レビュー 5c。**最後の防波堤**。ダミーデータでは止めない（2026-09-05 オーナー決定） |
+| | `prompts/fix.md` | 🟢 完成 | 修正。振る舞いが変わるなら直さず止まる（設計 §7.1） |
+| | `prompts/pm-report.md` | 🟢 完成 | 報告。`LOOP_LOG.md` へ §10.9 の指標の**素材**を記録する |
+| **スクリプト** | `scripts/post_agent_output.sh` | 🟢 完成 | エージェントの最終メッセージを Issue / PR へ転記する（下記「出力先に届かないエージェント」） |
 | **Issue テンプレ** | `.github/ISSUE_TEMPLATE/auto-task.yml` | 🟢 完成 | 起票3条件を必須フィールド化 |
 | **起票導線** | `.github/workflows/wbs-to-issue.yml` | 🟢 完成 | **導線1（§10.1.5）**。WBS の作業パッケージ番号を渡すと Issue を生成。手動起動 |
 | | `automation/scripts/wbs_to_issue.py` | 🟢 完成 | 上記のパーサ。`python3 automation/scripts/wbs_to_issue.py 3-5b` で手元検証できる |
@@ -93,6 +100,9 @@
 | 5 | `prompts/pm-plan.md` | 1時間 | ✅ 完了 |
 | 6 | `auto-01-plan.yml` の完成 | 1時間 | ✅ 完了 |
 | 7 | 試運転（設計 §9 フェーズ3 の 3-3 / 3-5 / 3-6） | 1時間 | ⬅ **次はここ** |
+| 8 | `prompts/` 残り7本（テスト設計〜PM報告） | — | ✅ 完了 |
+| 9 | `auto-02-implement.yml` / `auto-03-review-merge.yml` | — | ✅ 完了（**足場のマージ待ち**） |
+| 10 | 実装ループの試運転（設計 §9 フェーズ3 の 3-2 / 3-4） | 1時間 | ⬜ 足場が main に入ってから |
 
 > [!WARNING] 試運転の前に Environment を1つ追加する
 > 低リスクの**30分の異議申立て窓**（設計 §4.1）は、`sleep` ではなく
@@ -104,7 +114,26 @@
 > **自動通過せずに止まる**（安全側には倒れるが、試運転 3-1 が再現しない）。
 
 **ここまでで「仕様の曖昧さが選択肢に変換されて返ってくる」状態になる。**
-実装ループ（`auto-02` / `auto-03` と残りプロンプト7本）は足場が出来てから。
+
+実装ループ（`auto-02` / `auto-03`）も実装済みだが、**動かすには足場が要る**
+（設計 §9 フェーズ0-1・§12 #2）。`tests/` `app/` `supabase/` がまだ存在しないため、
+テスト設計エージェントには書き込み先が無く、`ci.yml` の Lint・型・E2E も実体を持たない。
+
+> [!IMPORTANT] ゲート3の Environment
+> `auto-03` は `gate-merge` で停止する。`Settings → Environments` に
+> **`gate-merge`（Required reviewers にオーナー）** が無いと、承認を待たずに素通りする。
+> 設計 §9 フェーズ1-1 で作成済みのはずだが、実装ループを回す前に実在を確認すること。
+
+> [!IMPORTANT] 出力先に届かないエージェントがいる
+> `readonly.json`（レビュー 5a/5b/5c）は `Bash` を全面拒否し、
+> `test.json`（テスト設計）は `gh` を許可していない。
+> **この4体は設計 §3 が定める出力先（Issue / PR コメント）へ自力で到達できない。**
+>
+> 権限を緩めると §3 の権限表が崩れるため、**転記はワークフローが行う**
+> （`scripts/post_agent_output.sh` が `claude-code-action` の `execution_file` から
+> 最終メッセージを取り出してコメントする）。
+> auto-01 の試運転で踏んだ「①権限不足で Issue コメントに到達できない」
+> 「③エージェントの編集がランナー内に留まる」と同じ形の不具合を避けるための措置である。
 
 > [!IMPORTANT]
 > **手順4（`research.md`）が全体の成否を決める。**
