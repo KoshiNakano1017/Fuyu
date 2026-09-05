@@ -79,6 +79,8 @@ jobs:
       # 決定的にコミット・push する。「機械的に決まるものは機械が持つ」の適用範囲を
       # ラベル遷移からファイル永続化へ広げたもの(試運転で発覚。設計 §12 に追記予定)。
       - name: PMの編集をコミット・push（TASKS.md／QUESTIONS.md／LOOP_LOG.md）
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
@@ -89,6 +91,10 @@ jobs:
           fi
           git add TASKS.md QUESTIONS.md LOOP_LOG.md
           git commit -m "docs: PM(タスク定義)によるTASKS.md/QUESTIONS.md更新 (Issue #${{ github.event.issue.number }})"
+          # claude-code-action のステップを経由すると、actions/checkout@v4 が設定した認証情報が
+          # 失われる(試運転 Issue #9 で判明。おそらくエージェントが git 経由で操作できないようにする
+          # 意図的な措置)。push 前に明示的に張り直す。
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
           for i in 1 2 3 4 5; do
             git push origin HEAD:main && break
             echo "push失敗。origin/main を取り込んで再試行 (${i}/5)"
@@ -206,6 +212,8 @@ jobs:
       # define ジョブと同じ理由(上記コメント参照)。plan ジョブは調査の chekcout を
       # 引き継いだ別ジョブのため、ここでも同じコミット・push ステップが要る。
       - name: PMの編集をコミット・push（TASKS.md／QUESTIONS.md／LOOP_LOG.md）
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
@@ -216,6 +224,10 @@ jobs:
           fi
           git add TASKS.md QUESTIONS.md LOOP_LOG.md
           git commit -m "docs: PM(段取り)によるTASKS.md/QUESTIONS.md更新 (Issue #${{ github.event.issue.number }})"
+          # claude-code-action のステップを経由すると、actions/checkout@v4 が設定した認証情報が
+          # 失われる(試運転 Issue #9 で判明。おそらくエージェントが git 経由で操作できないようにする
+          # 意図的な措置)。push 前に明示的に張り直す。
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
           for i in 1 2 3 4 5; do
             git push origin HEAD:main && break
             echo "push失敗。origin/main を取り込んで再試行 (${i}/5)"
