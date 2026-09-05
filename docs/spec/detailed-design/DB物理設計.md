@@ -4,7 +4,7 @@ doc_type: 設計
 status: "詳細設計ドラフト（要オーナーレビュー）"
 owner: プロジェクトオーナー
 date: "2026-08-16"
-updated: 2026-08-29
+updated: 2026-09-05
 tags: ["浮遊街アプリ"]
 up: "[[浮遊街アプリ 総合要件定義・設計書_v13]]"
 ---
@@ -35,6 +35,8 @@ up: "[[浮遊街アプリ 総合要件定義・設計書_v13]]"
 4. **マスタ値のハードコード禁止**。宿泊券付与枚数・料金等は`membership_plans`のようなマスタテーブルを参照し、画面・コードに直書きしない（v13 §9 #15）。
 5. 全テーブルで `created_at timestamptz NOT NULL DEFAULT now()` を基本とし、更新のあるテーブルには `updated_at` を付与する。
 6. 主キーは `gen_random_uuid()`（`pgcrypto`拡張）による UUID を標準とする。
+7. **個人情報カラムは、表示用カラムと同じ行に置かない**（2026-09-05 オーナー承認・A案）。氏名・カナ・住所・出身地・誕生年月は `member_profiles_private` へ、連絡先は `member_identifiers` へ、運営メモは `member_notes` へ分離する。RLS は**行**にしか効かないため、同居させると列単位のマスキングが必要になり、保護がエンドポイントごとの実装依存になる（§6-0）。
+8. **全テーブルで `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` を必須**とする。ポリシーを1本も定義しないテーブルは「全拒否」として扱う（§6-7）。**RLS を有効化していないテーブルを1つでも作った時点で、そのテーブルはインターネットへ全開になる**（`anon` キーはクライアントJSに埋め込まれる公開情報である／v13 §9 F-9）。
 
 ---
 
@@ -46,8 +48,9 @@ Vault側 `migration/01_schema.sql` で既に設計・実装され、実データ
 
 | テーブル | 役割 | 特記事項 |
 | --- | --- | --- |
-| `members` | 会員マスタ | `role`／`member_type`／`account_status`を分離。残高3カラムは集計キャッシュ |
-| `member_identifiers` | 名寄せキー（email/phone/line/discord） | 検証済み識別子のみ`(kind, value)`一意。未検証は重複許容 |
+| `members` | 会員マスタ | `role`／`member_type`／`account_status`を分離。残高3カラムは集計キャッシュ。**2026-09-05：個人情報カラムを `member_profiles_private` へ移し、`auth_user_id` を新設**（§6-0） |
+| **`member_profiles_private`** | **個人情報（氏名・カナ・住所・出身地・誕生年月）** | **2026-09-05 新設。`member_id` を PK 兼 FK とする1対1。`ON DELETE CASCADE`。本人＋`admin`/`core_member` のみ（§6-2）** |
+| `member_identifiers` | 名寄せキー（email/phone/line/discord） | 検証済み識別子のみ`(kind, value)`一意。未検証は重複許容。**`member_profiles_private` と同一の保護区分** |
 | `membership_plans` | 会員プランマスタ | 料金・付与泊数・付与Uii・権利期間をマスタ化（直書き禁止の担保） |
 | `memberships` | 会員権 | 開始日・満了日・ステータス。親方衆44名には作成しない（宿泊券0泊） |
 | `stay_ticket_transactions` | 宿泊券取引明細 | **Phase1で稼働する唯一の取引テーブル**。トリガーで`members.stay_tickets`等へ反映 |
@@ -63,6 +66,29 @@ Vault側 `migration/01_schema.sql` で既に設計・実装され、実データ
 > `01_schema.sql`・実データ（`03_seed_members.sql`）はオーナーのVault側にのみ存在し、本リポジトリ
 > （`fuyuugai-app`）にはコピー・コミットしていない。実データ（会員個人情報）を含むため、リポジトリへの
 > 取り込み要否・格納方法（`.gitignore`対象にする等）は別途オーナー判断が必要。
+
+> [!important] 2026-09-05：会員まわりのスキーマに2点の変更が入った（A案）
+> §2 は従来「Vault 側 `01_schema.sql` をそのまま採用する」としていたが、**2026-09-05 オーナー承認により
+> 以下2点は `01_schema.sql` から変更**される。移行実装時は本書と [[会員データモデル_ユーザーテーブル定義]] §5.2・§5.2b を正とすること。
+>
+> 1. **`members` から個人情報カラム（`full_name`・`full_name_kana`・`address`・`hometown`・`birth_ym`）を除去**し、
+>    新テーブル `member_profiles_private` へ移す
+> 2. **`members` へ `auth_user_id uuid UNIQUE NULL REFERENCES auth.users(id)` を新設**する
+>    （これが無いと RLS の本人ポリシーが書けない／§6-3）
+>
+> ```sql
+> ALTER TABLE members ADD COLUMN auth_user_id uuid UNIQUE REFERENCES auth.users(id);
+> COMMENT ON COLUMN members.auth_user_id IS
+>   'Supabase Auth との結合キー。NULL = アプリ未登録（account_status = pre_registered）。'
+>   'RLS の本人判定はこの列のみを根拠にする。一般会員に UPDATE 権限を与えてはならない（§6-6）';
+>
+> ALTER TABLE members
+>   DROP COLUMN full_name, DROP COLUMN full_name_kana,
+>   DROP COLUMN address,   DROP COLUMN hometown, DROP COLUMN birth_ym;
+> ```
+>
+> ⚠️ `01_schema.sql` は Vault 側で実データ370名の投入まで完了しているため、**この2点は「初期スキーマの修正」**
+> として扱う（既存マイグレーションの書き換えではない。本リポジトリには `supabase/migrations/` がまだ存在しない）。
 
 > [!note] 親方・街人リストの最終承認について
 > 上記の370名という移行対象数は、Vault側で実際に投入・検算まで完了している（技術的には実行可能な状態）。
@@ -702,14 +728,751 @@ LEFT JOIN booked b ON b.room_type = t.room_type AND b.date = cal.date;
 - ステータス列で絞り込みが頻発するテーブル（`orders.status`、`settlement_adjustments.status`等）は部分インデックス（`WHERE status = '...'`）を優先する。
 - 「現在有効な1件」を返す必要があるテーブル（`room_assignments`の`ended_at IS NULL`等）は、一意制約付き部分インデックスで整合性を保証する（既存`uq_room_assign_active`のパターンを踏襲）。
 
-## 6. RLS（Row Level Security）方針（DB観点の概要）
+## 6. RLS（Row Level Security）— ポリシー設計と実装
 
-詳細な権限マトリクスは v13 §6 および今後作成する画面設計・API設計ドキュメントに譲るが、DB設計上の原則を以下に示す。
+> [!danger] 本節の位置づけ
+> [[非機能要件詳細]] §7-3 の **F-6「RLSポリシーのDDLが未作成（本書 §6 は方針4行のみ）」** に対応する節である。
+> v13 §9 F-9 が指摘するとおり、**インターネットと会員370名の個人情報の間に立っているのは RLS 1枚のみ**であり、
+> [[システムアーキテクチャ]] は「RLS は最後の砦ではなく**唯一の砦**」と書いている。
+> [[API設計]] §1 の原則①により、**単純な CRUD は Supabase クライアントから RLS 越しに直接アクセス**する設計であるため、
+> API層の認可を通らないトラフィックが常に存在する。**ここが抜けると、他に受け止める層は無い。**
+>
+> 本節は**設計であり、適用ではない**。`supabase/migrations/` の作成は Supabase プロジェクト未作成のため行っていない（本書冒頭の注記と同じ扱い）。
 
-- 全テーブルでRLSを有効化し、`role`（`members.role`）に基づくポリシーを設定する。`member_type`はポリシー条件に一切使用しない。
-- 個人情報を含むテーブル（`members`本体の氏名・住所等）は、本人 (`member_id = auth.uid()相当`) と管理者・コアメンバーのみ参照可能とする。
-- `member_notes`はテーブル自体に`visibility`（`core_only`/`admin_only`）カラムを持つため、RLSポリシーはこのカラムと`role`の両方を条件に含める。
-- Cloud Storage for Firebase（メディア）への署名付きURL発行はSupabase Edge Function経由に一元化し、Firebase Security Rules側には認可ロジックを置かない（v13 §5.11.2・§9 #9、システムアーキテクチャ.md参照）。
+### 6-0. 前提：A案（個人情報の別テーブル分離）がRLSを単純にする
+
+2026-09-05 のオーナー承認により、`members` から個人情報カラムを `member_profiles_private` へ分離した（§2・[[会員データモデル_ユーザーテーブル定義]] §5.2b）。**この分離は RLS のためのものである。**
+
+| | 分離前 | 分離後（A案） |
+| --- | --- | --- |
+| `members` に氏名・住所 | **ある** | ない |
+| 「他人の行を読める」ポリシーを書くと | **氏名・住所まで返る** | 返らない（別の行にある） |
+| 必要な防御 | 行単位RLS ＋ **列単位のマスキング**（ロール別DTO・ビュー） | **行単位RLSのみ** |
+| 漏れる余地 | エンドポイントを1本足すたびに発生 | ポリシー1本で閉じる |
+
+> [!important] PostgreSQL の RLS は「行」にしか効かない
+> `CREATE POLICY` の `USING` 句が判定するのは**その行を見せてよいか**だけであり、**どの列を返すか**は制御できない。
+> 「一般会員は他人の氏名を見られないが、ニックネームは見られる」を1つのテーブルで実現するには、
+> 列単位の権限（`GRANT SELECT (col)`）かビューが要る。**保護対象を別の行へ移せば、この問題そのものが消える。**
+
+オーナーが示した前提を、DB設計上の規則として次のとおり固定する。
+
+1. **個人情報保護が必要なテーブルについては、一般会員は自分の行のみ**参照できる
+2. **それ以外のテーブルは個人情報を持たない**
+3. クエストボードで受注者を表示する際は**ニックネーム**を使う（実体は §6-4 の `v_member_public`）
+
+### 6-1. Phase 1 全テーブルの個人情報区分とアクセス規則
+
+**保護区分**の定義:
+
+| 区分 | 意味 | 既定のアクセス規則 |
+| :---: | --- | --- |
+| **PII-A** | 氏名・連絡先・住所・運営メモ。v13 §8「一般会員・ゲスト向けAPIレスポンスに含めない」の直接対象 | 本人 ＋ `admin`／`core_member`。**運営メモのみ本人も不可** |
+| **PII-B** | 個人の行動・金額・自由記述の履歴。氏名は含まないが `member_id` 経由で個人に紐づく | 本人（自分の行のみ）＋ `admin`／`core_member` |
+| **非PII** | マスタ・区分値。誰の情報でもない | `authenticated` 全員が SELECT 可。更新は `admin`（一部 `core_member`） |
+| **全拒否** | サーバサイド専用。クライアントから触らせない | ポリシーを1本も作らない＝`service_role` のみ |
+
+> [!warning] §7 の突合表からテーブル一覧を拾うと漏れる
+> 本書 §7 の突合表は §3 の追加に追いついておらず、**`member_notes`・`meal_reservations`・`reservation_otps`・
+> `accommodation_types`・`membership_plans`・`memberships`・`stay_ticket_transactions` が現れない**。
+> 下表は §2（会員まわり）＋§3（新規提案）の**DDL 実体**から起こしたものであり、**こちらを RLS 適用の正とする。**
+
+| # | テーブル / ビュー | 保護区分 | 個人情報カラム | 誰がどの行を読めるか | 書き込み |
+| ---: | --- | :---: | --- | --- | --- |
+| 1 | `members` | 非PII（**ただし残高を含むため他者非公開**） | なし（A案で除去済） | 本人の行 ＋ `admin`/`core_member` は全行。**他者向けは `v_member_public` 経由**（§6-4） | 本人は §6-6 の列のみ。`role`/`account_status`/`auth_user_id`/集計キャッシュは `service_role` |
+| 2 | **`member_profiles_private`** | **PII-A** | `full_name`, `full_name_kana`, `address`, `hometown`, `birth_ym` | 本人の行 ＋ `admin`/`core_member` は全行 | 本人（自分の行）＋ `admin`/`core_member` |
+| 3 | `member_identifiers` | **PII-A** | `value`（メール／電話／LINE ID／Discord ID の実値） | 同上 | INSERT は本人＋staff。**`is_verified` の UPDATE は staff のみ**（§6-2③） |
+| 4 | `member_notes` | **PII-A** | `body`（運営メモ）, `author_id` | **`core_only` → `admin`/`core_member` ／ `admin_only` → `admin` のみ。本人も読めない** | `admin`/`core_member` |
+| 5 | `check_ins` | PII-B | 滞在日・宿泊形態・人数・キャンセル理由。**宿泊法の住所/前泊地/後泊地の格納先は未定義（§6-9 ①）** | 本人の行 ＋ `admin`/`core_member` | 本人（アプリ内予約／v13 §5.2.4）＋ staff |
+| 6 | `reservation_otps` | **全拒否** | `email`（平文）, `code_hash` | **誰も読めない。** OTP 発行・検証は Edge Function（`service_role`）のみ | 同左 |
+| 7 | `member_import_links` / `import_jobs` | PII-B | 取込元ファイル名・照合根拠 | `admin` のみ | `admin`（実体は `service_role`） |
+| 8 | `memberships` | PII-B | `fee_amount_actual`（個人の実支払額）, `note`（例外理由） | 本人 ＋ staff | staff |
+| 9 | `stay_ticket_transactions` | PII-B | `reason`（贈与・調整の自由記述）, `operator_id` | 本人 ＋ staff | staff（`staff_adjust` は理由必須／v13 §5.8.5） |
+| 10 | `uii_transactions` | PII-B | `memo`, `operator_id` | 本人 ＋ staff | staff。**Phase 1 では稼働しない**が RLS は先に張る |
+| 11 | `room_assignments` | PII-B | 誰がどの部屋に泊まったか, `room_name_snapshot` | 本人（自分の `check_in` 経由）＋ staff | staff のみ（v13 §6） |
+| 12 | `orders` | PII-B | `purchaser_id`, `edited_by`, `edit_reason` | 本人 ＋ staff | 本人は自分の注文の INSERT。編集・キャンセルは staff |
+| 13 | `order_items` | PII-B | 個人の飲食内容（嗜好） | 親 `orders` に従う | 同上 |
+| 14 | `settlement_adjustments` | PII-B | `reason`（未払い理由の自由記述）, `waived_by` | 本人 ＋ staff | staff（免除は v13 §9 #2 で core_member にも許可） |
+| 15 | `meal_reservations` | PII-B | `checkin_id` 経由で個人の食事内容が復元可能 | 本人 ＋ staff | 本人＋staff |
+| 16 | `membership_applications` | PII-B | `qr_token`（決済QR）, `billed_amount_yen` | 本人 ＋ `admin`。**`core_member` は不可**（v13 §6：申請一覧は admin のみ） | 本人が申請 INSERT。QR発行・承認は `admin` |
+| 17 | `eumo_grants` | **PII-A** | **`sent_to`（送付先＝メール／LINE ID）**, `eumo_url` | 本人（自分の給付）＋ staff | staff |
+| 18 | `work_logs` | PII-B | `notes`, `issue_note`, `rejection_reason`, Before/After 写真 | 本人（申請者）＋ staff | 本人が報告 INSERT。確認・承認は staff／`admin` |
+| 19 | `work_log_reviews` | PII-B | `comment`（評価コメント） | **staff のみ**（被評価者に見せない） | staff |
+| 20 | `quest_applications` | PII-B | 誰がどのクエストに申請したか | 本人 ＋ staff。**受注確定後の受注者は `v_member_public` 経由で全員に見える**（§6-4） | 本人が INSERT。審査は staff |
+| 21 | `morning_meetings` | **PII-A** | **`transcript_text`／`summary_text`（会話の全文文字起こし＝個人の発言）** | **staff のみ**（v13 §6：朝会は admin/core_member） | `admin` |
+| 22 | `media_assets` | PII-B | `member_id`（投稿者）, **`geo_location`（Exif 位置情報）**, `ai_caption` | 投稿者本人 ＋ staff は全件。一般会員・ゲストは**「公開」のもののみ**（v13 §6） | 全ロールが自分の投稿を INSERT。非表示化・削除は staff |
+| 23 | `quests` | 非PII | ― | `authenticated` 全員（`guest_allowed=false` はゲスト除外） | `admin`/`core_member` |
+| 24 | `work_categories` | 非PII | ― | `authenticated` 全員 | `admin` |
+| 25 | `menu_items` | 非PII | ― | `authenticated` 全員 | `admin` |
+| 26 | `accommodation_rates` | 非PII | ― | `authenticated` 全員 | `admin` |
+| 27 | `accommodation_types` | 非PII | ― | `authenticated` 全員 | `admin` |
+| 28 | `membership_plans` | 非PII | ― | `authenticated` 全員 | `admin` |
+| 29 | `rooms` | 非PII | ― | `authenticated` 全員（残枠表示のため） | `admin`/`core_member` |
+| 30 | `v_room_availability`（ビュー） | 非PII | ― | `authenticated` 全員。**個人を含む列を持たせない**（日付×形態×残数のみ） | ― |
+| 31 | **`v_member_public`（ビュー・新設）** | 非PII | ― | `authenticated` 全員。**`member_id`・`display_name`・`member_type` のみ**（§6-4） | ― |
+
+> [!note] `member_type` はこの表のどこにも認可条件として現れない
+> v13 §2 の不可侵ルール（`member_type` を認可に使わない）を、**ポリシー条件に `member_type` を一切書かない**という形で担保している。
+> 表に現れる `member_type` は §6-4 の**表示名の接頭辞決定**のみであり、行の可視性判定には使っていない。
+
+### 6-2. 個人情報テーブル（PII-A）のポリシー DDL
+
+#### ① 共通ヘルパ関数（§6-3 で方式選定の理由を述べる）
+
+```sql
+-- 現在のセッションに対応する members.member_id を返す。未登録・退会済みなら NULL。
+CREATE OR REPLACE FUNCTION public.current_member_id()
+RETURNS uuid
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = ''          -- search_path 乗っ取りの防止（SECURITY DEFINER の必須作法）
+AS $$
+  SELECT m.member_id
+  FROM   public.members m
+  WHERE  m.auth_user_id = auth.uid()
+    AND  m.account_status <> 'withdrawn'
+$$;
+
+-- 現在のセッションの role（members.role）を返す。v13 §5.9.3：認可は role のみで判定する。
+CREATE OR REPLACE FUNCTION public.current_member_role()
+RETURNS text
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+  SELECT m.role
+  FROM   public.members m
+  WHERE  m.auth_user_id = auth.uid()
+    AND  m.account_status <> 'withdrawn'
+$$;
+
+CREATE OR REPLACE FUNCTION public.is_staff()      -- admin または core_member
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = ''
+AS $$ SELECT public.current_member_role() IN ('admin', 'core_member') $$;
+
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = ''
+AS $$ SELECT public.current_member_role() = 'admin' $$;
+
+-- 実行権限は authenticated に限定する。anon から呼べる必要はない。
+REVOKE EXECUTE ON FUNCTION
+  public.current_member_id(), public.current_member_role(),
+  public.is_staff(), public.is_admin()
+  FROM PUBLIC, anon;
+GRANT  EXECUTE ON FUNCTION
+  public.current_member_id(), public.current_member_role(),
+  public.is_staff(), public.is_admin()
+  TO authenticated;
+```
+
+> [!danger] `members` に `FORCE ROW LEVEL SECURITY` を付けてはならない
+> 上記の関数は `SECURITY DEFINER` によりテーブル所有者権限で走り、所有者は RLS を迂回する。
+> **これが無限再帰を避けている唯一の仕組みである。** `ALTER TABLE members FORCE ROW LEVEL SECURITY`
+> を付けると所有者にも RLS が適用され、`members` のポリシー → `is_staff()` → `members` のポリシー → …
+> と再帰して `infinite recursion detected in policy for relation "members"`（42P17）で全クエリが落ちる。
+
+> [!note] `(SELECT ...)` で包む理由
+> ポリシー中で `(SELECT public.is_staff())` のように包むと、PostgreSQL が **InitPlan として1回だけ評価**する。
+> 裸で書くと**行ごとに関数が呼ばれる**。370名規模では体感差は出ないが、`orders`・`stay_ticket_transactions`
+> のように行数が伸びるテーブルで効く。全ポリシーでこの書き方に統一する。
+
+#### ② `members`
+
+```sql
+ALTER TABLE members ENABLE ROW LEVEL SECURITY;
+
+-- SELECT：本人は自分の行。staff は全行。
+CREATE POLICY members_select_self ON members
+  FOR SELECT TO authenticated
+  USING ( auth_user_id = (SELECT auth.uid()) );
+
+CREATE POLICY members_select_staff ON members
+  FOR SELECT TO authenticated
+  USING ( (SELECT public.is_staff()) );
+
+-- UPDATE：本人は自分の行のみ。WITH CHECK で「更新後も自分の行であること」を強制し、
+-- auth_user_id を他人の値へ書き換えて行を乗っ取ることを防ぐ。
+CREATE POLICY members_update_self ON members
+  FOR UPDATE TO authenticated
+  USING       ( auth_user_id = (SELECT auth.uid()) )
+  WITH CHECK  ( auth_user_id = (SELECT auth.uid()) );
+
+CREATE POLICY members_update_staff ON members
+  FOR UPDATE TO authenticated
+  USING       ( (SELECT public.is_staff()) )
+  WITH CHECK  ( (SELECT public.is_staff()) );
+
+-- INSERT：ポリシーを作らない＝全拒否。
+--   会員行の生成は「リスト取込（§6.2b）」と「名寄せ成立時の結合」だけであり、
+--   いずれも service_role のサーバサイド処理。クライアントから会員を作れてはならない。
+-- DELETE：ポリシーを作らない＝全拒否。
+--   §1-3（物理削除の原則禁止）。退会は account_status = 'withdrawn' の論理削除、
+--   30日後の匿名化は service_role の定期ジョブが UPDATE で行う（v13 §2）。
+```
+
+> [!danger] `members` の UPDATE は RLS だけでは守れない — 列単位 `GRANT` が必須
+> `members_update_self` は「自分の行だけ更新できる」ことしか保証しない。
+> **自分の行の `role` を `'admin'` に書き換える**のは、RLS 的には完全に正当な操作である。
+> 防ぐ手段は RLS ではなく**列単位の権限**であり、§6-6 の `GRANT UPDATE (...)` が本体である。
+> ここを `GRANT UPDATE ON members TO authenticated`（全列）にした瞬間、
+> **全会員が自力で管理者に昇格できる**。
+
+#### ③ `member_profiles_private`（PII-A）
+
+```sql
+ALTER TABLE member_profiles_private ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY mpp_select_self ON member_profiles_private
+  FOR SELECT TO authenticated
+  USING ( member_id = (SELECT public.current_member_id()) );
+
+CREATE POLICY mpp_select_staff ON member_profiles_private
+  FOR SELECT TO authenticated
+  USING ( (SELECT public.is_staff()) );
+
+-- INSERT：本人（初回登録で自分の氏名・住所を入れる）と staff（現地代理入力）。
+CREATE POLICY mpp_insert_self ON member_profiles_private
+  FOR INSERT TO authenticated
+  WITH CHECK ( member_id = (SELECT public.current_member_id()) );
+
+CREATE POLICY mpp_insert_staff ON member_profiles_private
+  FOR INSERT TO authenticated
+  WITH CHECK ( (SELECT public.is_staff()) );
+
+CREATE POLICY mpp_update_self ON member_profiles_private
+  FOR UPDATE TO authenticated
+  USING       ( member_id = (SELECT public.current_member_id()) )
+  WITH CHECK  ( member_id = (SELECT public.current_member_id()) );
+
+CREATE POLICY mpp_update_staff ON member_profiles_private
+  FOR UPDATE TO authenticated
+  USING       ( (SELECT public.is_staff()) )
+  WITH CHECK  ( (SELECT public.is_staff()) );
+
+-- DELETE：ポリシーを作らない＝全拒否。
+--   退会30日後の匿名化は「行を消す」のではなく「値をダミーへ UPDATE する」ことで行う。
+--   行を消すと ON DELETE CASCADE は逆向き（members → profiles）のため members 側は残り、
+--   宿泊法の保存義務（旅館業法：宿泊者名簿3年）との整合も取れなくなる（§6-9 ③）。
+```
+
+#### ④ `member_identifiers`（PII-A）
+
+```sql
+ALTER TABLE member_identifiers ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY mid_select_self ON member_identifiers
+  FOR SELECT TO authenticated
+  USING ( member_id = (SELECT public.current_member_id()) );
+
+CREATE POLICY mid_select_staff ON member_identifiers
+  FOR SELECT TO authenticated
+  USING ( (SELECT public.is_staff()) );
+
+-- INSERT：本人は自分の識別子を追加できるが、is_verified = true では入れられない。
+CREATE POLICY mid_insert_self ON member_identifiers
+  FOR INSERT TO authenticated
+  WITH CHECK ( member_id = (SELECT public.current_member_id())
+               AND is_verified = false );
+
+CREATE POLICY mid_insert_staff ON member_identifiers
+  FOR INSERT TO authenticated
+  WITH CHECK ( (SELECT public.is_staff()) );
+
+-- UPDATE：staff のみ。本人には許可しない（下の danger を参照）。
+CREATE POLICY mid_update_staff ON member_identifiers
+  FOR UPDATE TO authenticated
+  USING      ( (SELECT public.is_staff()) )
+  WITH CHECK ( (SELECT public.is_staff()) );
+
+-- DELETE：admin のみ。主連絡先を本人に消させると、運営から到達できない会員が生まれる。
+CREATE POLICY mid_delete_admin ON member_identifiers
+  FOR DELETE TO authenticated
+  USING ( (SELECT public.is_admin()) );
+```
+
+> [!danger] `is_verified` を本人が書ける状態にしない
+> §5.3 のユニークは `WHERE is_verified = true` の**部分**ユニークである。
+> 本人が `is_verified = true` を自由に立てられると、**他人のメールアドレスを検証済みとして登録**でき、
+> v13 §5.8.3 の名寄せ（＝他人の宿泊券・Uii残高・XPの引き継ぎ）を正面から突破できる。
+> `is_verified = true` を書けるのは、**対面入力した staff と OTP 検証を通した Edge Function だけ**である。
+
+#### ⑤ `member_notes`（PII-A・**本人にも見せない**）
+
+```sql
+ALTER TABLE member_notes ENABLE ROW LEVEL SECURITY;
+
+-- SELECT：visibility と role の両方を条件に含める（旧 §6 の方針を DDL 化したもの）。
+--   本人ポリシーは「意図的に書かない」。運営が本人について書いた申し送りだからである。
+CREATE POLICY mnote_select_core ON member_notes
+  FOR SELECT TO authenticated
+  USING ( visibility = 'core_only' AND (SELECT public.is_staff()) );
+
+CREATE POLICY mnote_select_admin ON member_notes
+  FOR SELECT TO authenticated
+  USING ( visibility = 'admin_only' AND (SELECT public.is_admin()) );
+
+-- INSERT：staff のみ。author_id の詐称を防ぐため、自分自身の member_id しか書けない。
+CREATE POLICY mnote_insert_staff ON member_notes
+  FOR INSERT TO authenticated
+  WITH CHECK ( (SELECT public.is_staff())
+               AND author_id = (SELECT public.current_member_id()) );
+
+-- UPDATE：staff。ただし visibility を下げる（admin_only → core_only）のは admin のみ。
+CREATE POLICY mnote_update_staff ON member_notes
+  FOR UPDATE TO authenticated
+  USING      ( visibility = 'core_only' AND (SELECT public.is_staff()) )
+  WITH CHECK ( visibility = 'core_only' AND (SELECT public.is_staff()) );
+
+CREATE POLICY mnote_update_admin ON member_notes
+  FOR UPDATE TO authenticated
+  USING      ( (SELECT public.is_admin()) )
+  WITH CHECK ( (SELECT public.is_admin()) );
+
+-- DELETE：admin のみ。誤記入の撤回手段は残すが、通常は追記で対応する（§1-3）。
+CREATE POLICY mnote_delete_admin ON member_notes
+  FOR DELETE TO authenticated
+  USING ( (SELECT public.is_admin()) );
+```
+
+> [!warning] `visibility` の値域は未確定
+> 本書 §2 は `core_only`/`admin_only` の2値、[[会員データモデル_ユーザーテーブル定義]] §5.7 は `core_only` を既定と書く。
+> `CREATE TABLE member_notes` の実体は Vault 側 `01_schema.sql` にのみ存在し、本リポジトリからは確認できない。
+> **上記は2値を前提に書いている。値域の確定は要オーナー確認**（§6-9 ⑤）。
+> なお `CHECK (visibility IN ('core_only','admin_only'))` を付けておけば、
+> 想定外の値の行が「どのポリシーにも一致せず誰にも見えない」＝**安全側に倒れる**。
+
+#### ⑥ `eumo_grants`（PII-A：`sent_to` が送付先メール／LINE ID）
+
+```sql
+ALTER TABLE eumo_grants ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY eumo_select_self ON eumo_grants
+  FOR SELECT TO authenticated
+  USING ( member_id = (SELECT public.current_member_id()) );
+
+CREATE POLICY eumo_select_staff ON eumo_grants
+  FOR SELECT TO authenticated
+  USING ( (SELECT public.is_staff()) );
+
+CREATE POLICY eumo_insert_staff ON eumo_grants
+  FOR INSERT TO authenticated
+  WITH CHECK ( (SELECT public.is_staff()) );
+
+CREATE POLICY eumo_update_staff ON eumo_grants   -- 送付済 → 受領確認済（v13 §5.3.1）
+  FOR UPDATE TO authenticated
+  USING      ( (SELECT public.is_staff()) )
+  WITH CHECK ( (SELECT public.is_staff()) );
+
+-- DELETE：ポリシーを作らない＝全拒否（給付の証跡を消させない／§1-3）。
+```
+
+#### ⑦ `morning_meetings`（PII-A：全文文字起こし）
+
+```sql
+ALTER TABLE morning_meetings ENABLE ROW LEVEL SECURITY;
+
+-- 本人ポリシーを書かない。朝会の閲覧は admin/core_member のみ（v13 §6）。
+-- 発言者本人であっても「自分の行」という概念が無い（1レコード＝1回の朝会全体）。
+CREATE POLICY mm_select_staff ON morning_meetings
+  FOR SELECT TO authenticated USING ( (SELECT public.is_staff()) );
+
+CREATE POLICY mm_insert_admin ON morning_meetings
+  FOR INSERT TO authenticated WITH CHECK ( (SELECT public.is_admin()) );
+
+CREATE POLICY mm_update_admin ON morning_meetings
+  FOR UPDATE TO authenticated
+  USING ( (SELECT public.is_admin()) ) WITH CHECK ( (SELECT public.is_admin()) );
+
+-- DELETE：ポリシーを作らない＝全拒否。
+```
+
+#### ⑧ `reservation_otps`（全拒否）
+
+```sql
+-- RLS を有効化し、ポリシーを1本も作らない。これで authenticated / anon からは
+-- SELECT / INSERT / UPDATE / DELETE のすべてが 0 行になる（§6-7）。
+ALTER TABLE reservation_otps ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON reservation_otps FROM anon, authenticated;
+
+COMMENT ON TABLE reservation_otps IS
+  'RLS 全拒否。OTP の発行・検証は Edge Function（service_role）でのみ行う。'
+  'email を平文で保持するため、クライアントからの参照経路を一切作らない（v13 §5.2.3②）';
+```
+
+> [!important] 公開予約ページ（`/reserve`）は未ログイン＝`anon` だが、`anon` に権限を与えて解決しない
+> [[非機能要件詳細]] §2-2b が「**`anon` キーに `check_ins` 等の INSERT 権限を与えない**」と定めている。
+> `/reserve` からの予約は **Edge Function（`service_role`）が受け取って書き込む**。
+> `anon` へ INSERT を開けると、RLS の緩みがそのまま**個人情報テーブルへの書き込み口**になる。
+> `anon` に必要なのは「OTP を送ってもらう」ことだけであり、それは関数呼び出しであってテーブル権限ではない。
+
+### 6-3. ロール判定の方式選定 — `SECURITY DEFINER` 関数を採る
+
+`members.role` を参照して認可するとき、**素朴に書くと無限再帰する**。
+
+```sql
+-- ❌ 絶対に書いてはいけない例
+CREATE POLICY members_select_staff ON members
+  FOR SELECT TO authenticated
+  USING ( EXISTS (SELECT 1 FROM members m2
+                  WHERE m2.auth_user_id = auth.uid()
+                    AND m2.role IN ('admin','core_member')) );
+-- → members のポリシー評価が members の SELECT を呼び、そのポリシー評価がまた members を呼ぶ。
+--    ERROR: infinite recursion detected in policy for relation "members" (42P17)
+```
+
+検討した3方式:
+
+| 方式 | 再帰回避 | 権限変更の即時性 | コスト | 評価 |
+| --- | --- | --- | --- | --- |
+| **A. `SECURITY DEFINER` 関数**（採用） | ○ 所有者権限で走り RLS を迂回する | **○ 即時**（毎回 DB を読む） | 1クエリあたり InitPlan 1回 | **採用** |
+| B. JWT カスタムクレーム（Custom Access Token Hook で `app_role` を埋め、`auth.jwt()` から読む） | ○ テーブルを読まない | **× 最大1時間の遅延**（トークン期限まで古い `role` が有効） | 最速（ゼロクエリ） | 不採用（下記） |
+| C. `user_roles` 別テーブル（`members` と分離し、そこにはポリシーを張らない） | ○ | ○ | 1クエリ | 不採用（`role` の正本が2箇所になる） |
+
+> [!important] B（JWTクレーム）を採らない理由
+> Supabase の一般的な推奨は B（性能）だが、本プロジェクトでは **A を採る。**
+>
+> 1. **権限剥奪が即時に効かない。** JWT に焼き込んだ `role` は、トークンが失効するまで有効である。
+>    退会（`withdrawn`）・ロール降格・**名寄せ事故の緊急切り離し**を行っても、**最大1時間は
+>    古い権限で個人情報を読み続けられる。** v13 §9 F-9 が「RLS が唯一の砦」と書いている状況で、
+>    その砦に最大1時間の時間差を持ち込む判断はしない。
+> 2. **`role` の正本は DB である。** v13 §2・§5.9.3 は「認可は `members.role` のみで判定する」と定めている。
+>    JWT クレームは発行時点のコピーであり、正本ではない。v13 §9 #31・#61 は
+>    「自己申告のロールを信用しない」という判断を LINE 側で既に下しており、同じ考え方に揃える。
+> 3. **性能上の必要が無い。** 会員は370名、Phase 1 の同時接続は現場スタッフ＋滞在者規模である。
+>    `(SELECT public.is_staff())` は InitPlan として1クエリ1回しか評価されない。
+>
+> **将来 B へ移る場合の条件**：①実測でポリシー評価がボトルネックになったこと ②
+> `role` 変更時にセッションを強制失効させる仕組み（`auth.refresh_tokens` の失効）が実装済みであること。
+> この2つが揃うまで B へ移らない。
+
+`SECURITY DEFINER` を安全に使うための必須作法（上記 DDL に反映済み）:
+
+- **`SET search_path = ''` を必ず付け、全オブジェクトをスキーマ修飾する。** 付けないと、呼び出し側が
+  `search_path` を差し替えて偽の `members` テーブルを掴ませることができる（権限昇格の古典的手口）。
+- **`STABLE` を付ける。** InitPlan 化の前提になる。
+- **`REVOKE EXECUTE ... FROM PUBLIC` する。** 定義しただけでは誰でも実行できる。
+- **`members` に `FORCE ROW LEVEL SECURITY` を付けない**（§6-2① の danger）。
+
+### 6-4. 他者向け表示は `v_member_public` ビューに閉じる
+
+オーナー前提③「クエストボードで受注者を表示する際は**ニックネーム**を使う」を DB 側で担保する。
+`members` 本体は残高を含むため他者に開けられない（§6-1 #1）。そこで**露出してよい列だけのビュー**を作る。
+
+```sql
+CREATE VIEW v_member_public
+WITH (security_invoker = false)   -- ビュー所有者権限で実行＝members の RLS を意図的に迂回する
+AS
+SELECT
+  m.member_id,
+  COALESCE(
+    NULLIF(btrim(m.nickname), ''),
+    (CASE WHEN m.member_type = 'ゲスト' THEN 'ゲスト#' ELSE '街人#' END) || m.legacy_member_no,
+    (CASE WHEN m.member_type = 'ゲスト' THEN 'ゲスト#' ELSE '街人#' END) || left(m.member_id::text, 8)
+  ) AS display_name,
+  m.member_type          -- 画面上のバッジ表示用。認可には使わない（v13 §2）
+FROM public.members m
+WHERE m.account_status <> 'withdrawn';
+
+REVOKE ALL   ON v_member_public FROM anon;
+GRANT  SELECT ON v_member_public TO authenticated;
+
+COMMENT ON VIEW v_member_public IS
+  '他者向けに露出してよい会員情報はこの3列のみ。氏名・住所・連絡先・残高・XP を絶対に追加しない。'
+  'display_name のフォールバック規則は 会員データモデル §5.2c の不可侵ルール（本名へ落とさない）';
+```
+
+> [!danger] このビューに列を足すときは §5.2c の不可侵ルールを読み直すこと
+> `security_invoker = false` は **`members` の RLS を意図的に迂回する**。
+> つまり「このビューに書いた列は、ログインしている全員に見える」。
+> **`full_name` を JOIN して足した瞬間に、A案の分離は無意味になる。**
+> `member_profiles_private` を FROM 句に含めてはならない。
+
+> [!note] `display_name` を DB 側に置く理由
+> フロントで `nickname ?? full_name` と書かれるのを防ぐには、**フロントに `full_name` を渡さない**のが唯一確実な方法である。
+> [[非機能要件詳細]] §7-3 F-3 が指摘する Realtime 配信（再訪アラート）のように、表示層を経由しない
+> 配信経路が存在するため、表示層での対処は原理的に漏れる。
+
+### 6-5. 管理者・コアメンバー画面で JOIN が必要になる箇所（見取り）
+
+A案により、**氏名を出す画面はすべて `members` × `member_profiles_private` の JOIN が必要**になる。
+該当するのは v13 §6 の権限マトリクスで「氏名・連絡先・運営メモの閲覧 ＝ 管理者・コアメンバーのみ」と
+された画面群であり、具体的には **顧客管理画面（[[画面設計]] B3／v13 §5.6：氏名・カナ・住所・連絡先・
+未会計額・宿泊履歴を一覧表示）・再訪アラート（B6／v13 §5.8.4：氏名＋運営メモ＋残チケットをポップアップ）・
+チェックイン画面（店員タブレット：宿泊者の氏名照合と「連絡先未登録」バッジ）・宿泊予定カレンダー
+（`GET /api/admin/stay-calendar`：宿泊者名の表示）・会員データ取込／名寄せ承認画面（v13 §5.8.2・§5.8.3：
+氏名＋誕生年月の第2キー照合）・街人登録申請一覧（v13 §5.10.4：申請者の本人確認）・宿泊者名簿の法定出力
+（旅館業法対応／v13 §5.2）**の7系統である。API 上は `GET /api/admin/members`・`GET /api/admin/members/{id}`・
+`GET /api/admin/stay-calendar`・`POST /api/members/link-identifier`・`GET /api/admin/membership-applications`
+がこれに当たり、いずれも `admin`／`core_member` 限定であるため **RLS 越しの素の JOIN で成立する**
+（両テーブルとも staff には全行が見えるため、追加の権限設計は要らない）。
+一方、**一般会員・ゲスト向けの画面は1つも JOIN を必要としない** — クエストボード・注文履歴・
+マイログはいずれも `v_member_public.display_name` で足りる。**JOIN の要否が、そのまま認可境界と一致している**
+状態が保たれているかどうかが、A案が機能しているかの点検指標になる。
+
+### 6-6. GRANT 方針（`anon` / `authenticated` / `service_role`）
+
+> [!important] RLS と GRANT は別の関門であり、両方が必要
+> PostgREST 経由のアクセスは **①ロールへの `GRANT` → ②RLS ポリシー**の順に2つの関門を通る。
+> `GRANT` が無ければポリシーを書いても届かず、ポリシーが無ければ `GRANT` があっても0行になる。
+> **Supabase は新規テーブルへ既定で `anon`/`authenticated` に広い権限を与える**ため、明示的に絞る。
+
+```sql
+-- ① anon：アプリケーションテーブルへは一切触らせない（公開予約は Edge Function 経由／§6-2⑧）
+REVOKE ALL ON ALL TABLES    IN SCHEMA public FROM anon;
+REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM anon;
+REVOKE ALL ON ALL ROUTINES  IN SCHEMA public FROM anon;
+-- 今後追加されるテーブルにも自動で適用する（「新テーブルを作ったら全開だった」を防ぐ）
+ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES    FROM anon;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON SEQUENCES FROM anon;
+
+-- ② authenticated：SELECT はテーブル単位、書き込みは列単位で与える
+GRANT SELECT ON members, member_profiles_private, member_identifiers,
+                check_ins, orders, order_items, quests, v_member_public,
+                v_room_availability, menu_items, accommodation_rates,
+                accommodation_types, membership_plans, rooms
+  TO authenticated;
+GRANT SELECT ON member_notes, morning_meetings, work_log_reviews TO authenticated;  -- 行はRLSで0件に絞られる
+
+-- ★ members の UPDATE は「本人が変えてよい列」だけに限定する（§6-2② の danger）
+GRANT UPDATE (nickname, skills, certifications, line_joined, discord_joined)
+  ON members TO authenticated;
+-- role / account_status / auth_user_id / stay_tickets / total_stay_days / uii_balance /
+-- earned_xp / legacy_member_no / invite_code は列単位 GRANT に含めない＝更新不能。
+
+GRANT INSERT, UPDATE (full_name, full_name_kana, address, hometown, birth_ym)
+  ON member_profiles_private TO authenticated;
+GRANT INSERT ON member_identifiers TO authenticated;   -- UPDATE は与えない（is_verified 保護）
+
+-- ③ service_role：BYPASSRLS。サーバサイド（Edge Function / Server Actions）専用。
+--    CLAUDE.md §3.2 のとおりクライアントへ渡さない。RLS を迂回するため、
+--    service_role を使う処理では [[API設計]] §1 のアプリ層認可が唯一の関門になる。
+```
+
+> [!warning] 集計キャッシュ3種を列単位 GRANT から外すのは §1-1 の担保でもある
+> `stay_tickets`・`total_stay_days`・`uii_balance` は「アプリから直接 UPDATE してはならない」（§1-1・v13 §7）。
+> これを**規約ではなく DB 権限として強制**しているのが上の列指定である。
+> トリガーは所有者権限で走るため影響を受けない。
+
+### 6-7. デフォルト拒否の徹底
+
+```sql
+-- 全テーブルで有効化する。ポリシー未定義＝全拒否。
+ALTER TABLE members                  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE member_profiles_private  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE member_identifiers       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE member_notes             ENABLE ROW LEVEL SECURITY;
+ALTER TABLE memberships              ENABLE ROW LEVEL SECURITY;
+ALTER TABLE membership_plans         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE membership_applications  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE stay_ticket_transactions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE uii_transactions         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE check_ins                ENABLE ROW LEVEL SECURITY;
+ALTER TABLE rooms                    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE room_assignments         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE accommodation_types      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE accommodation_rates      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE meal_reservations        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE reservation_otps         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE menu_items               ENABLE ROW LEVEL SECURITY;
+ALTER TABLE orders                   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE order_items              ENABLE ROW LEVEL SECURITY;
+ALTER TABLE settlement_adjustments   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE work_categories          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE quests                   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE quest_applications       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE work_logs                ENABLE ROW LEVEL SECURITY;
+ALTER TABLE work_log_reviews         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE morning_meetings         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE media_assets             ENABLE ROW LEVEL SECURITY;
+ALTER TABLE eumo_grants              ENABLE ROW LEVEL SECURITY;
+```
+
+- **ポリシーを1本も定義しないテーブルは、`authenticated` から見て「存在するが常に0行」**になる
+  （`INSERT` は `WITH CHECK` に一致せずエラー）。これが既定の状態である。
+- **RLS を有効化していないテーブルが1つでもあると、そのテーブルは `GRANT` の範囲で全開**になる。
+  §6-8 のメタテストで機械的に検出する。
+- ビューは RLS を持たない。**ビューの安全性は「どの列を SELECT 句に書いたか」だけで決まる**（§6-4）。
+
+#### PII-B テーブルの共通テンプレート
+
+PII-B（§6-1 の #5・#8〜#20・#22）は形が同じであるため、**同一のテンプレートを各テーブルへ展開**する。
+所有者列（`owner_col`）だけがテーブルごとに異なる。
+
+```sql
+-- テンプレート（<T> = テーブル名、<owner_col> = 会員を指す列）
+CREATE POLICY <T>_select_self  ON <T> FOR SELECT TO authenticated
+  USING ( <owner_col> = (SELECT public.current_member_id()) );
+CREATE POLICY <T>_select_staff ON <T> FOR SELECT TO authenticated
+  USING ( (SELECT public.is_staff()) );
+CREATE POLICY <T>_insert_staff ON <T> FOR INSERT TO authenticated
+  WITH CHECK ( (SELECT public.is_staff()) );
+CREATE POLICY <T>_update_staff ON <T> FOR UPDATE TO authenticated
+  USING ( (SELECT public.is_staff()) ) WITH CHECK ( (SELECT public.is_staff()) );
+-- DELETE は原則ポリシーを作らない（§1-3 論理削除）
+```
+
+| テーブル | `<owner_col>` | テンプレートからの差分 |
+| --- | --- | --- |
+| `check_ins` | `member_id` | `<T>_insert_self` を追加（アプリ内予約／v13 §5.2.4）。UPDATE は staff のみ（チェックアウト・キャンセルは運営操作） |
+| `memberships` | `member_id` | 差分なし |
+| `stay_ticket_transactions` | `member_id` | 差分なし。INSERT は `staff_adjust` で `reason` NOT NULL（v13 §5.8.5） |
+| `uii_transactions` | `member_id` | 差分なし（Phase 1 は稼働しないが先に張る） |
+| `orders` | `purchaser_id` | `<T>_insert_self` を追加（自分の注文） |
+| `order_items` | 親 `orders` 経由 | `USING ( order_id IN (SELECT order_id FROM orders) )` — 親の RLS が効くため入れ子で足りる |
+| `settlement_adjustments` | 親 `orders` 経由 | 同上。免除操作は `core_member` も可（v13 §9 #2 決着） |
+| `meal_reservations` | 親 `check_ins` 経由 | 同上 |
+| `membership_applications` | `member_id` | **staff 版を `is_admin()` に置換**（申請一覧は admin のみ／v13 §6） |
+| `work_logs` | 申請者（`quest_application` 経由） | `<T>_insert_self` を追加（完了報告は申請者本人） |
+| `work_log_reviews` | ― | **`_select_self` を作らない**（評価コメントを被評価者に見せない） |
+| `quest_applications` | `member_id` | `<T>_insert_self` を追加（受注申請） |
+| `room_assignments` | 親 `check_ins` 経由 | `_insert_self` なし（部屋割当は staff のみ／v13 §6） |
+| `media_assets` | `member_id` | `_select_self` に加え **`_select_public`**（`visibility = '公開' AND deleted_at IS NULL`）を追加。全ロールが自分の投稿を INSERT 可（v13 §5.11.7） |
+| `import_jobs` / `member_import_links` | ― | `_select_self` を作らない。`is_admin()` のみ |
+
+#### 非PII テーブルの共通テンプレート
+
+```sql
+CREATE POLICY <T>_select_all   ON <T> FOR SELECT TO authenticated USING ( true );
+CREATE POLICY <T>_write_admin  ON <T> FOR ALL    TO authenticated
+  USING ( (SELECT public.is_admin()) ) WITH CHECK ( (SELECT public.is_admin()) );
+```
+
+適用先: `membership_plans`・`menu_items`・`accommodation_rates`・`accommodation_types`・`work_categories`・`rooms`（`rooms` の書き込みは `is_staff()`）。
+`quests` のみ差分あり — ゲストには `guest_allowed = true` の行だけを見せる:
+
+```sql
+CREATE POLICY quests_select_member ON quests FOR SELECT TO authenticated
+  USING ( (SELECT public.current_member_role()) <> 'guest' );
+CREATE POLICY quests_select_guest  ON quests FOR SELECT TO authenticated
+  USING ( guest_allowed = true );
+CREATE POLICY quests_write_staff   ON quests FOR ALL TO authenticated
+  USING ( (SELECT public.is_staff()) ) WITH CHECK ( (SELECT public.is_staff()) );
+```
+
+### 6-8. RLS のテスト方法（`CLAUDE.md` §4.4 の必須要件）
+
+`CLAUDE.md` §4.4 は「**認可・金額計算・個人情報の取り扱いに関わるロジックは必ずテストを書く**」と定めている。
+RLS はその3つすべてに該当する。**ポリシーを書いただけでレビューを通さない。**
+
+#### ① 3層のテスト
+
+| 層 | 何を検証するか | 実装 |
+| --- | --- | --- |
+| **メタテスト** | 全テーブルで RLS が有効か。ポリシーの無いテーブルが無いか | SQL 1本（下記②）。**新テーブル追加時の付け忘れを機械的に検出**する |
+| **ポリシー単体** | 各ポリシーの `USING` / `WITH CHECK` が意図どおりか | psql / pgTAP。トランザクション内でロールを偽装（下記③） |
+| **統合** | 実際の JWT を持った Supabase クライアントから見て正しいか | `supabase-js` ＋ Jest（`tests/rls/*.test.ts`）。**PostgREST の GRANT も同時に検証できる**唯一の層 |
+
+#### ② メタテスト（付け忘れの検出）
+
+```sql
+-- RLS が無効なテーブルが1つでもあれば失敗する
+SELECT c.relname AS rls_disabled_table
+FROM   pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE  n.nspname = 'public' AND c.relkind = 'r' AND c.relrowsecurity = false;
+-- 期待：0行
+
+-- RLS は有効だがポリシーが0本のテーブル（意図的な全拒否か、書き忘れかを人が判断する）
+SELECT c.relname
+FROM   pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE  n.nspname = 'public' AND c.relkind = 'r' AND c.relrowsecurity = true
+  AND  NOT EXISTS (SELECT 1 FROM pg_policies p
+                   WHERE p.schemaname = 'public' AND p.tablename = c.relname);
+-- 期待：reservation_otps のみ（§6-2⑧ の意図的な全拒否）
+```
+
+これは CI（`.github/workflows/ci.yml`）で毎回走らせる。
+`docs/自律開発ループ設計.md` が「RLS ポリシーの欠落したテーブル」を独自チェック項目としているのと同じ検査である。
+
+#### ③ SQL だけでロールを偽装する（JWT を発行せずにポリシーを試す）
+
+```sql
+BEGIN;
+  -- PostgREST が行うのと同じことを手で行う：JWT クレームを session 変数へ載せ、ロールを切り替える
+  SELECT set_config('request.jwt.claims',
+                    json_build_object('sub', '00000000-0000-0000-0000-0000000000a1',
+                                      'role', 'authenticated')::text,
+                    true);   -- true = トランザクションローカル
+  SET LOCAL ROLE authenticated;
+
+  -- ここでクエリを実行して行数を検査する
+  SELECT count(*) FROM member_profiles_private;   -- 期待：1（自分の行だけ）
+ROLLBACK;
+```
+
+`auth.uid()` は `request.jwt.claims` の `sub` を読むため、**実際の JWT を署名しなくてもポリシーを検証できる**。
+ポリシー単体テストはこの方式を使う（速い・秘密鍵が要らない）。
+
+#### ④ 統合テスト用の JWT をどう用意するか
+
+| 環境 | 方法 |
+| --- | --- |
+| **ローカル** | `supabase start` のローカルスタックは **JWT シークレットが固定値**で `supabase status` から取得できる。テストヘルパ `signTestJwt(authUserId, role)` が `jsonwebtoken` でそのシークレットを使い、`{ sub: <auth_user_id>, role: 'authenticated', aud: 'authenticated', exp }` を署名する。**シークレットはローカル既定値をコードに書かず、`supabase status -o json` から読む**（`CLAUDE.md` §3.2） |
+| **CI** | `CLAUDE.md` §6.2 の警告どおり、**`E2E_SUPABASE_URL` / `E2E_SUPABASE_ANON_KEY`（テスト用プロジェクト）のみ**を使う。テストユーザーは `supabase.auth.admin.createUser()` で毎回作り、`members.auth_user_id` へ結合してから使う |
+| **本番** | **テストを実行しない。** 本番の値を Secrets に入れると実名370名に対してテストが走る（`CLAUDE.md` §3.1 違反） |
+
+- テストユーザーは **`admin` / `core_member` / `member`（本人） / `member`（他人） / `guest` / 未ログイン（`anon`）の6種**を用意する。
+  「他人」役が居ないと、**最も重要な「他人の行が見えないこと」を検証できない。**
+- フィクスチャは**実データを一切参照せず自作**する（`CLAUDE.md` §3.2・§7.1）。氏名は架空のダミー
+  （例: `テスト 太郎` / `フユウ ハナコ`）、メールは `@example.invalid` を使う。
+
+#### ⑤ 「できる」「できない」を対で書く
+
+**片方だけのテストは通ってしまう。** 全ポリシーについて、許可される操作と拒否される操作を必ず対で書く。
+
+| # | できる（許可） | できない（拒否） |
+| ---: | --- | --- |
+| 1 | 一般会員は**自分の** `member_profiles_private` を1行 SELECT できる | 一般会員は**他人の** `member_profiles_private` を SELECT すると**0行**になる（エラーではなく0行である点に注意） |
+| 2 | `core_member` は全会員の `member_profiles_private` を SELECT できる | **`member_type = '親方'` の一般会員は他人の行を SELECT できない**（立場と権限の分離／v13 §2） |
+| 3 | 一般会員は自分の `nickname` を UPDATE できる | 一般会員は自分の `role` を `'admin'` へ UPDATE できない（列単位 GRANT で拒否／§6-6） |
+| 4 | 一般会員は自分の `member_identifiers` を `is_verified = false` で INSERT できる | 一般会員は `is_verified = true` で INSERT できない／既存行の `is_verified` を UPDATE できない |
+| 5 | `core_member` は `visibility = 'core_only'` の `member_notes` を読める | **本人は自分についての `member_notes` を1行も読めない**／`core_member` は `admin_only` を読めない |
+| 6 | 一般会員は `v_member_public` から全会員の `display_name` を読める | `v_member_public` に `full_name` は存在しない（列自体が無い） |
+| 7 | ニックネーム未設定の会員は `街人#10xxx` として表示される | **`display_name` に本名が現れることは無い**（§5.2c の不可侵ルールの回帰テスト） |
+| 8 | `admin` は `reservation_otps` を…**読めない**（service_role のみ） | `anon` / `authenticated` / `admin` のいずれも `reservation_otps` を SELECT できない |
+| 9 | 未ログイン（`anon`）は `v_room_availability` を…**読めない** | `anon` はいかなるテーブルも SELECT / INSERT できない（§6-6①） |
+| 10 | `member` は自分の `orders` を INSERT できる | `member` は他人の `purchaser_id` を指定した `orders` を INSERT できない |
+| 11 | 退会前の会員は自分の行を読める | **`account_status = 'withdrawn'` にした直後、本人ポリシーが即座に不成立になる**（`current_member_id()` が NULL を返す） |
+| 12 | `auth_user_id` が NULL の `pre_registered` 会員の行は staff から見える | `pre_registered` の行は**どの一般会員セッションからも見えない**（370名の移行直後の状態） |
+
+テスト名は日本語の文で書く（`CLAUDE.md` §4.4）:
+
+```ts
+test('一般会員は他人の member_profiles_private を1行も取得できない', async () => { ... });
+test('member_type が親方の一般会員でも他人の氏名は取得できない', async () => { ... });
+test('ニックネーム未設定の会員の display_name に本名が含まれない', async () => { ... });
+```
+
+#### ⑥ 回帰テストとして残すもの
+
+- **`v_member_public` の列構成**をスナップショットで固定する。列が増えた PR を検知する（§6-4 の danger）。
+- **`members` の列単位 GRANT** を `information_schema.column_privileges` から検査し、
+  `role`・`auth_user_id`・集計キャッシュ3種に `authenticated` の UPDATE が付いていないことを確認する。
+
+### 6-9. 本節の設計で解消できなかった論点（`QUESTIONS.md` 起票候補）
+
+**本書では決定しない。** 実装着手前にオーナー確認が必要な事項として列挙する。
+
+| # | 論点 | なぜ問題か |
+| ---: | --- | --- |
+| ① | **宿泊法の「住所・前泊地・後泊地」の物理的な格納先が未定義** | v13 §5.2 は収集必須、§9 #30-② は「チェックイン時に収集」と定めるが、`check_ins` のカラム定義（v13 §7）にこの3項目が無い。`address` は `member_profiles_private` にあるが、**前泊地・後泊地は「滞在ごと」に変わるため会員マスタには置けない**。[[データモデル図_ER_Diagram]] は `PROFILES.previous_residence` / `next_destination` に置いており、設計間で不一致 |
+| ② | **`core_member` の「自拠点のみ」をRLSで表現できない** | v13 §6 は顧客管理・部屋割当等を「コアメンバーは**自拠点**」と限定しているが、`members` に拠点を示す列が無い（`rooms.place_id` は存在する）。本節のポリシーは `core_member` に**全拠点**を許可しており、**v13 §6 より緩い** |
+| ③ | **退会30日後の匿名化の具体仕様が未定義** | v13 §2 が「30日後匿名化」と定めるのみ。`member_profiles_private` の値をダミーへ UPDATE する想定だが、**旅館業法の宿泊者名簿保存義務（3年）と衝突する可能性**がある。どちらが優先するかは法務判断 |
+| ④ | **Realtime（再訪アラート）のペイロード** | [[非機能要件詳細]] §7-3 F-3 の未解決事項。`postgres_changes` は RLS 準拠で配信されるが、**再訪アラートは氏名＋運営メモを含む**。`member_profiles_private` / `member_notes` を購読対象にするか、ID のみ配信して詳細は認可済みAPIで取るかが未決 |
+| ⑤ | **`member_notes.visibility` の値域**（`core_only` のみか、`admin_only` を含む2値か） | 文書間で不一致（§6-2⑤）。実体は Vault 側 `01_schema.sql` にあり本リポジトリから確認できない |
+| ⑥ | **`role` の値域に `custom` を含めるか** | v13 §2 は5値（`custom` あり）、[[会員データモデル_ユーザーテーブル定義]] §5.2 は4値。`custom` の権限内容が未定義のため、**本節のポリシーは `custom` を「`member` 相当（staff ではない）」として扱っている** |
+| ⑦ | **`member_type` の値域**（3値か4値か） | v13 §2 は `親方`/`街人（コア）`/`街人（一般）`/`ゲスト` の4値、会員データモデル §5.2 は3値。認可には使わないため RLS には影響しないが、§6-4 の `display_name` の接頭辞判定が値に依存する |
+| ⑧ | **正本 §8 の「`contact_info` のユニーク制約で二重取込を防ぐ」が成立していない** | §5.3 のユニークは `WHERE is_verified = true` の部分ユニークであり、**移行時は全件 `is_verified = false` のため制約が効かない**。A案とは独立した既存の穴（[[会員データモデル_ユーザーテーブル定義]] §6.5） |
+| ⑨ | **`v_member_public` を `anon` へ開けるか** | 公開予約ページ `/reserve` はログイン不要だが、クエストボードの公開範囲は未定義。現設計は `authenticated` 限定 |
+
+### 6-10. 本節の適用範囲外（既存方針の再掲）
+
+- Cloud Storage for Firebase（メディア）への署名付きURL発行は Supabase Edge Function 経由に一元化し、
+  **Firebase Security Rules 側には認可ロジックを置かない**（v13 §5.11.2・§9 #9、[[システムアーキテクチャ]]）。
+  RLS が守るのは `media_assets` の**メタデータ行**であり、ファイル実体の保護は署名付きURLの TTL が担う。
+- 詳細な機能単位の権限マトリクスは v13 §6 を正とする。本節はそれを DB の行単位アクセスへ写像したものであり、
+  **両者が食い違った場合は v13 §6 が勝つ**（`CLAUDE.md` §1.1）。
 
 ---
 
@@ -717,7 +1480,7 @@ LEFT JOIN booked b ON b.room_type = t.room_type AND b.date = cal.date;
 
 | WBS機能領域 | 対応テーブル | 状態 |
 | --- | --- | --- |
-| 2. 認証・アカウント基盤 | `members`, `member_identifiers` | 既存（Vault側で実装・検証済み） |
+| 2. 認証・アカウント基盤 | `members`, **`member_profiles_private`**, `member_identifiers`, `member_notes`, `membership_plans`, `memberships`, `stay_ticket_transactions` | 既存（Vault側で実装・検証済み）。**2026-09-05：`member_profiles_private` を新設し `members.auth_user_id` を追加**（§2・§6-0）。⚠️ 本表は従来 `member_notes` 等を落としていた。**RLS 適用対象の正は §6-1 の一覧表**とする |
 | 3. 予約・チェックイン・宿泊管理 | `rooms`, `room_assignments`, `check_ins` | 既存（同上）。宿泊予約フォーム連携部分（3-5・3-6）は**ドラフト段階**（§3-6参照） |
 | 4. 朝会・議事録・クエスト自動起案 | `morning_meetings` | **本書で新規提案**（未着手） |
 | 5. クエスト管理 | `quests`, `quest_applications`, `work_logs`, `work_categories` | **本書で新規提案**（未着手） |
@@ -751,6 +1514,7 @@ LEFT JOIN booked b ON b.room_type = t.room_type AND b.date = cal.date;
 | 5 | `knowledge_items.target_role`を配列化するか単一値のままとするか | **移管済み（2026-08-16）**：`knowledge_items`自体が不要になったため、line-rag-bot側Firestoreスキーマの論点に移った（v13 §9 #29は引き続き未決） |
 | 6 | Vault側の実データ（`01_schema.sql`/`03_seed_members.sql`）をこのリポジトリへ取り込むか、個人情報を含むため別管理とするか | （新規発見・本書独自の指摘。未回答のまま） |
 | 7 | `media_assets`：退会・アカウント削除時のカスケード削除 or 保持方針（§3-7参照） | 新規（2026-08-16、画面設計.md A10と連動） |
+| 9 | **RLS 設計で解消できなかった論点9件**（宿泊法項目の格納先／`core_member` の自拠点スコープ／退会後の匿名化と名簿保存義務の衝突／Realtime のペイロード／`member_notes.visibility` の値域／`role` の `custom` ／`member_type` の値域／`contact_info` ユニークの空振り／`v_member_public` の `anon` 公開） | **新規（2026-09-05・§6-9）**。`QUESTIONS.md` 起票候補。本書では決定していない |
 | 8 | `media_assets`：AI解析（~~Gemini~~ → **Claude**／2026-08-29変更）のコスト・レイテンシ、動画サムネイル生成・保存容量の見積り、肖像権チェックの要否。※ 写真AI判定（収穫可否・設備点検・献立提案）は **2026-08-29 に LINE（`line-rag-bot`）側での実装（A案）へ確定**したため、**本テーブルの解析コストには含まれない**（v13 §9 #56） | 新規（2026-08-16、画面設計.md §6 #5〜#7と同一論点） |
 
 ---

@@ -4,9 +4,9 @@ doc_type: 設計
 status: "Draft"
 owner: プロジェクトオーナー
 date: "2026-08-17"
-updated: 2026-08-22
+updated: 2026-09-05
 tags: ["浮遊街アプリ", "ER図", "データモデル", "スキーマ設計", "Supabase"]
-doc_version: "1.0.0"
+doc_version: "1.1.0"
 ---
 
 # 浮遊街アプリ データモデル図（ER図）
@@ -18,6 +18,16 @@ Supabase PostgreSQL 上に構築される浮遊街アプリの論理データモ
 
 **注記**: 詳細なカラム定義・型・制約は [[DB物理設計.md]] を参照。
 
+> [!important] 2026-09-05：個人情報を `MEMBER_PROFILES_PRIVATE` へ分離した（A案）
+> オーナー承認により、会員の個人情報（氏名・カナ・住所・出身地・誕生年月）を**会員本体とは別のテーブル**へ
+> 分離した。RLS は**行**にしか効かないため、氏名と表示用カラムが同居していると
+> 「他人の行を読める」ポリシーを書いた瞬間に氏名・住所まで返ってしまうからである。
+> 分離すれば**行単位のRLSだけで保護が完結**する。詳細は [[会員データモデル_ユーザーテーブル定義]] §5.2b、
+> ポリシーの実体は [[DB物理設計]] §6。
+>
+> **`USERS` は物理テーブル `members` に対応する。** 本図の他エンティティが持つ `user_id` は
+> 物理的には `members.member_id` である（命名の統一は §「本図と物理設計の不整合」を参照）。
+
 ---
 
 ## ER図（Mermaid形式）
@@ -25,35 +35,46 @@ Supabase PostgreSQL 上に構築される浮遊街アプリの論理データモ
 ```mermaid
 erDiagram
     USERS {
-        uuid id PK "ユーザーID（UUID）"
-        string email UK "メールアドレス"
-        string phone_number "電話番号"
+        uuid id PK "会員ID（物理: members.member_id）"
+        uuid auth_user_id UK "auth.users(id)。NULL=アプリ未登録。RLSの本人判定はこの列のみ"
+        string legacy_member_no UK "旧会員番号。表示フォールバックに使う"
+        string nickname "ニックネーム。NULL可。未設定時に本名へ落とさない"
         string role "ロール (admin/core_member/member/guest/custom)"
         string account_status "アカウント状態 (pre_registered/active/withdrawn)"
+        string member_type "立場 (親方/街人コア/街人一般/ゲスト)。認可に使わない"
+        integer stay_tickets "集計キャッシュ"
+        integer uii_balance "集計キャッシュ(Phase2)"
+        integer earned_xp "獲得XP"
         timestamp created_at "作成日時"
         timestamp updated_at "更新日時"
     }
 
-    PROFILES {
-        uuid id PK "プロファイルID"
-        uuid user_id FK "ユーザーID"
-        string nickname "ニックネーム"
-        string full_name "氏名"
-        string full_name_kana "氏名（カナ）"
-        date birth_date "誕生年月"
-        string address "住所"
-        string previous_residence "前泊地"
-        string next_destination "後泊地/行先"
+    MEMBER_PROFILES_PRIVATE {
+        uuid member_id PK "USERSへの1対1・FK・ON DELETE CASCADE"
+        string full_name "氏名【個人情報】"
+        string full_name_kana "氏名カナ【個人情報】"
+        string birth_ym "誕生年月【個人情報】"
+        string address "住所【個人情報・宿泊法】"
+        string hometown "出身地【個人情報】"
         timestamp created_at "作成日時"
         timestamp updated_at "更新日時"
     }
 
-    MEMBER_TYPES {
-        uuid id PK "メンバータイプID"
-        uuid user_id FK "ユーザーID"
-        string member_type "立場 (親方/街人コア/街人一般/ゲスト)"
-        text notes "運営メモ"
-        timestamp assigned_at "割当日時"
+    MEMBER_IDENTIFIERS {
+        uuid identifier_id PK "識別子ID"
+        uuid member_id FK "会員ID"
+        string kind "email/phone/line_user_id/discord"
+        string value "実値【個人情報】"
+        boolean is_verified "本人確認済み。本人には書かせない"
+        boolean is_primary "主連絡先か"
+    }
+
+    MEMBER_NOTES {
+        uuid note_id PK "メモID"
+        uuid member_id FK "会員ID"
+        text body "運営メモ【個人情報・本人にも見せない】"
+        string visibility "core_only / admin_only"
+        uuid author_id FK "記入者"
     }
 
     MEMBERSHIPS {
@@ -391,8 +412,9 @@ erDiagram
     }
 
     %% リレーション定義
-    USERS ||--o{ PROFILES : has
-    USERS ||--o{ MEMBER_TYPES : has
+    USERS ||--|| MEMBER_PROFILES_PRIVATE : "個人情報(1対1)"
+    USERS ||--o{ MEMBER_IDENTIFIERS : "識別子"
+    USERS ||--o{ MEMBER_NOTES : "運営メモ"
     USERS ||--o{ MEMBERSHIPS : has
     USERS ||--o{ ROOM_ASSIGNMENTS : "stays_in"
     USERS ||--o{ BOOKINGS : "makes"
@@ -447,24 +469,42 @@ erDiagram
 
 ### 👤 認証・プロフィール関連
 
-#### **USERS** - ユーザーマスタ
-- **主キー**: `id` (UUID)
-- **一意キー**: `email`
-- Supabase Auth と連携。全ユーザーの基本的な認証情報を保持
-- `role`: 権限レベル (`admin` / `core_member` / `member` / `guest` / `custom`)
+#### **USERS** - 会員マスタ（物理名 `members`）
+- **主キー**: `id` (UUID。物理では `member_id`)
+- **一意キー**: `auth_user_id`（`auth.users(id)`）、`legacy_member_no`
+- **★2026-09-05：個人情報カラムを持たない。** 氏名・カナ・住所・出身地・誕生年月は `MEMBER_PROFILES_PRIVATE` へ、
+  メール・電話は `MEMBER_IDENTIFIERS` へ、運営メモは `MEMBER_NOTES` へ分離済み
+- `auth_user_id`: Supabase Auth との結合キー。**`NULL` = アプリ未登録**（移行370名の初期状態）。
+  **RLS の本人判定はこの列のみを根拠にする**。一般会員に UPDATE 権限を与えてはならない
+- `role`: 権限レベル (`admin` / `core_member` / `member` / `guest` / `custom`)。**認可の唯一の根拠**
+- `member_type`: 立場 (`親方` / `街人コア` / `街人一般` / `ゲスト`)。**認可には一切使用しない**（立場であり権限ではない）。
+  画面表示・バッジ・再訪アラート等に用いる
 - `account_status`: ライフサイクル (`pre_registered` → `active` → `withdrawn`)
+- ⚠️ **個人情報は無いが、残高・XP を含むため他者へは公開しない。** 他者向け表示は `v_member_public`
+  ビュー（`member_id` / `display_name` / `member_type` の3列のみ）を経由する（[[DB物理設計]] §6-4）
 
-#### **PROFILES** - ユーザープロフィール
-- **外部キー**: `user_id` → `USERS`
-- 個人情報を集約：ニックネーム・氏名・カナ・住所・前泊地・後泊地
-- 旅館業法対応（住所・前泊地等は必須項目）
-- 名寄せキー：`email` / `phone_number` がない場合は `full_name` + `birth_date`
+#### **MEMBER_PROFILES_PRIVATE** - 個人情報（★2026-09-05 新設）
+- **主キー兼外部キー**: `member_id` → `USERS`（**1対1**・`ON DELETE CASCADE`）
+- 個人情報を集約：氏名・カナ・誕生年月・住所・出身地
+- 旅館業法対応（住所は必須項目）
+- **アクセス規則**: 本人（自分の行のみ）＋ `admin` / `core_member`（全行）。それ以外には**1行も返さない**
+- 名寄せキー：連絡先がない場合の第2キー `full_name_kana` + `birth_ym`（正本 §5.8.3）。
+  **ユニークにはしない**（同姓同名・同誕生年月は実在しうるため、一致は「候補」でしかない）
+- ⚠️ **`USERS` へ戻してはならない。** 戻すと列単位マスキングが再び必要になる
 
-#### **MEMBER_TYPES** - コミュニティ内立場
-- **外部キー**: `user_id` → `USERS`
-- `member_type`: `親方` / `街人コア` / `街人一般` / `ゲスト`
-- **重要**: 認可には一切使用しない（立場であり権限ではない）
-- 画面表示・バッジ・再訪アラート等に用いる
+#### **MEMBER_IDENTIFIERS** - 識別子（名寄せの中核）
+- **外部キー**: `member_id` → `USERS`
+- `kind`: `email` / `phone` / `line_user_id` / `discord`、`value`: 正規化後の実値【個人情報】
+- 検証済みのみ `(kind, value)` が一意（部分ユニーク `WHERE is_verified = true`）。未検証の重複は許容
+- **`MEMBER_PROFILES_PRIVATE` と同一の保護区分**として扱う
+- ⚠️ `is_verified` を本人に書かせない（他人のメールを検証済みとして登録できてしまう）
+
+#### **MEMBER_NOTES** - 運営メモ
+- **外部キー**: `member_id` → `USERS`、`author_id` → `USERS`
+- `visibility`: `core_only` / `admin_only`
+- **アクセス規則**: `admin` / `core_member` のみ。**本人にも見せない**（運営が本人について書いた申し送りのため）
+- ⚠️ 旧図では `MEMBER_TYPES.notes` として描かれていたが、**正は独立テーブル `member_notes`**
+  （[[会員データモデル_ユーザーテーブル定義]] §5.7 で 2026-09-05 に決着）
 
 ---
 
@@ -684,14 +724,37 @@ erDiagram
 
 ---
 
+## 本図と物理設計の不整合（2026-09-05 時点・未解消）
+
+**本図は物理設計と命名・構造が一致していない箇所がある。** A案の反映にあたり洗い出した結果を記録する。
+**実装の根拠は [[DB物理設計]] と [[会員データモデル_ユーザーテーブル定義]] を正とし、本図は概観用として読むこと。**
+
+| 概念 | 本図（論理） | 物理設計（正） | 状態 |
+| --- | --- | --- | --- |
+| 会員本体 | `USERS` | `members` | **命名のみ相違**。本図の `user_id` は物理では `member_id` |
+| 個人情報 | ~~`PROFILES`~~ → **`MEMBER_PROFILES_PRIVATE`** | `member_profiles_private` | ✅ **2026-09-05 に本改訂で一致させた** |
+| 運営メモ | ~~`MEMBER_TYPES.notes`~~ → **`MEMBER_NOTES`** | `member_notes` | ✅ **2026-09-05 に本改訂で一致させた** |
+| メール・電話 | ~~`USERS.email` / `phone_number`~~ → **`MEMBER_IDENTIFIERS`** | `member_identifiers` | ✅ **2026-09-05 に本改訂で一致させた** |
+| 立場 | `MEMBER_TYPES`（別エンティティ） | `members.member_type`（1カラム） | ⚠️ **未解消**。1:1 の別テーブルにする必要がない |
+| 予約 | `BOOKINGS`（独立エンティティ） | `check_ins`（同一テーブル・`reservation_source` で経路を区別） | ⚠️ **未解消**。[[DB物理設計]] §3-12 も同じ不整合を自ら記録している |
+| 宿泊券 | `STAY_TICKETS.remaining_quantity`（**残高カラム**） | `stay_ticket_transactions`（**取引明細のみ・残高カラムを持たない**） | 🚫 **本図が誤り**。残高を直接カラムで持つ設計は、実データで15件の不整合を起こしたため**明示的に否決済み**（[[会員データモデル_ユーザーテーブル定義]] §1.3、v13 §9 #25） |
+| 前泊地・後泊地 | `PROFILES.previous_residence` / `next_destination` | **物理カラム未定義** | ⚠️ **未解消**。滞在ごとに変わる値のため会員マスタには置けない（[[DB物理設計]] §6-9 ①） |
+
+> [!warning] `STAY_TICKETS.remaining_quantity` を実装の根拠にしない
+> v13 §9 #25 は「**残高カラムは集計キャッシュであり、正本は取引明細**」と定め、
+> アプリからの直接 UPDATE を禁じている。本図の `remaining_quantity` はこの決定より前の描写である。
+
+---
+
 ## リレーション・カーディナリティ
 
 ### 主要な1対多リレーション
 
 | 親テーブル | 子テーブル | 関係性 |
 |---|---|---|
-| `USERS` | `PROFILES` | 1:1（ユーザー1人＝プロフィール1件） |
-| `USERS` | `MEMBER_TYPES` | 1:1（立場は1つ） |
+| `USERS` | `MEMBER_PROFILES_PRIVATE` | **1:1**（会員1人＝個人情報1件。`member_id` が PK 兼 FK・`ON DELETE CASCADE`） |
+| `USERS` | `MEMBER_IDENTIFIERS` | 1:N（メール・電話・LINE・Discord を複数持てる） |
+| `USERS` | `MEMBER_NOTES` | 1:N（運営メモは追記されていく） |
 | `USERS` | `MEMBERSHIPS` | 1:N（複数の会員権期を持つ可能性） |
 | `MEMBERSHIPS` | `STAY_TICKETS` | 1:N（会員権に紐づく宿泊券複数枚） |
 | `STAY_TICKETS` | `STAY_TICKET_TRANSACTIONS` | 1:N（1枚の券の消費履歴） |
@@ -717,18 +780,31 @@ erDiagram
 
 ### 1. **Supabase RLS（Row Level Security）の活用**
 
-各テーブルに RLS ポリシーを設定し、ユーザーが自身のデータのみアクセス可能に制限：
+各テーブルで RLS を有効化し、ユーザーが自身のデータのみアクセスできるよう制限する。
+**ポリシーの正本は [[DB物理設計]] §6**。ここでは考え方だけを示す。
 
 ```sql
--- 例：注文テーブル
-CREATE POLICY select_own_orders ON orders
-  FOR SELECT USING (auth.uid() = user_id OR 
-                    auth.jwt() ->> 'role' = 'admin');
+-- 例：個人情報テーブル（本人＋admin/core_member のみ）
+CREATE POLICY mpp_select_self ON member_profiles_private
+  FOR SELECT TO authenticated
+  USING ( member_id = (SELECT public.current_member_id()) );
 
-CREATE POLICY update_own_orders ON orders
-  FOR UPDATE USING (auth.uid() = user_id OR 
-                    auth.jwt() ->> 'role' = 'admin');
+CREATE POLICY mpp_select_staff ON member_profiles_private
+  FOR SELECT TO authenticated
+  USING ( (SELECT public.is_staff()) );
 ```
+
+> [!warning] 旧サンプル（`auth.uid() = user_id OR auth.jwt() ->> 'role' = 'admin'`）は使わない
+> 本図の旧版には上記の書き方が載っていたが、**3点とも現行設計と合わない。**
+>
+> 1. **`auth.uid() = user_id` は成立しない。** `auth.users.id` と `members.member_id` は別の値であり、
+>    両者をつなぐのは 2026-09-05 に新設した `members.auth_user_id` である。列名も `user_id` ではなく
+>    `member_id` / `purchaser_id` である
+> 2. **`auth.jwt() ->> 'role'` を認可に使わない。** 認可の根拠は `members.role`（DBが正本）であり、
+>    JWT に焼き込んだロールは**トークン失効まで最大1時間、降格・退会が反映されない**。
+>    方式選定の理由は [[DB物理設計]] §6-3
+> 3. **`SECURITY DEFINER` 関数を経由しないと無限再帰する。** `members` のポリシーから `members` を
+>    参照すると `42P17 infinite recursion detected in policy` になる
 
 ### 2. **監査ログ（AUDIT_LOGS）の必須化**
 
@@ -1057,21 +1133,23 @@ WHERE DATE(ms.session_date) = CURRENT_DATE
 ## 画像：ER図の簡易表現
 
 ```
-┌────────────────┐
-│ USERS          │
-│ - id (PK)      │
-│ - email (UK)   │
-│ - role         │
-└────────┬───────┘
-         │ 1:N
+┌──────────────────────┐
+│ USERS (= members)    │  ← 個人情報を持たない
+│ - id (PK)            │
+│ - auth_user_id (UK)  │  ← auth.users との結合。NULL=アプリ未登録
+│ - nickname           │  ← NULL可。未設定でも本名へ落とさない
+│ - role               │
+└────────┬─────────────┘
+         │ 1:1                 │ 1:N
          ├─────────────────────┐
          │                     │
-    ┌────▼──────┐    ┌────────▼─────┐
-    │ PROFILES   │    │ MEMBERSHIPS   │
-    │ - user_id  │    │ - user_id (FK)│
-    │ - nickname │    │ - expires_on  │
-    │ - address  │    └────────┬──────┘
-    └────────────┘             │ 1:N
+ ┌───────▼──────────────┐  ┌───▼───────────┐
+ │ MEMBER_PROFILES_     │  │ MEMBERSHIPS   │
+ │ PRIVATE 【個人情報】  │  │ - user_id (FK)│
+ │ - member_id (PK,FK)  │  │ - expires_on  │
+ │ - full_name          │  └────────┬──────┘
+ │ - address            │           │ 1:N
+ │ 本人＋admin/core のみ │
                           ┌─────▼──────────┐
                           │ STAY_TICKETS   │
                           │ - quantity     │
