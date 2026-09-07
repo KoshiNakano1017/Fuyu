@@ -1,0 +1,52 @@
+@import "tailwindcss";
+
+/*
+ * デザイントークン
+ *
+ * 値の出所は `docs/design/prototype_v15.html` の `tailwind.config`（CDN 版 Tailwind v3 記法）。
+ * プロトタイプが唯一の配色の根拠なので、ここで色を新規に定義しない。
+ * プロトタイプ側を変えたときは、この @theme も同時に更新する。
+ *
+ * v3 の `theme.extend.colors` は v4 では `--color-<名前>-<階調>` の CSS 変数へ移す。
+ * 変数名がそのままユーティリティ名になる（例: `--color-sage-500` → `bg-sage-500`）。
+ */
+@theme {
+  /* sage: 主体色。畑・自然を表す緑 */
+  --color-sage-50: #f4f7f1;
+  --color-sage-100: #e7eedf;
+  --color-sage-200: #cfdec2;
+  --color-sage-300: #b0c99b;
+  --color-sage-400: #8fb073;
+  --color-sage-500: #71964f;
+  --color-sage-600: #597a3d;
+  --color-sage-700: #476132;
+  --color-sage-800: #3b4f2a;
+  --color-sage-900: #324224;
+
+  /* sand: 背景・面。土と光を表すベージュ */
+  --color-sand-50: #fdfbf6;
+  --color-sand-100: #f8f0dd;
+  --color-sand-200: #f0e0bd;
+  --color-sand-300: #e5c98c;
+  --color-sand-400: #d8ac5a;
+  --color-sand-500: #c8933c;
+  --color-sand-600: #aa762e;
+  --color-sand-700: #8a5d27;
+  --color-sand-800: #714b24;
+  --color-sand-900: #5f3f21;
+
+  /* wood: 縁取り・文字。木材を表す茶 */
+  --color-wood-50: #faf5f0;
+  --color-wood-100: #f0e2d3;
+  --color-wood-200: #dfc4a7;
+  --color-wood-300: #c9a175;
+  --color-wood-400: #b17f52;
+  --color-wood-500: #9a6740;
+  --color-wood-600: #815337;
+  --color-wood-700: #69432f;
+  --color-wood-800: #573729;
+  --color-wood-900: #4a2f24;
+
+  /* プロトタイプの boxShadow.soft。カード面の浮き上がりに使う */
+  --shadow-soft: 0 4px 24px -6px rgba(87, 67, 41, 0.18);
+}
