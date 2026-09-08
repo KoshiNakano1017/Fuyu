@@ -29,6 +29,13 @@ dist/
 coverage/
 *.tsbuildinfo
 .eslintcache
+# next build/dev が毎回自動生成する型参照。Next 16 では .next/types を import するため
+# コミットするとクリーン環境の tsc --noEmit が壊れる（create-next-app 標準も ignore）
+next-env.d.ts
+
+# === E2E（Playwright）===
+playwright-report/
+test-results/
 
 # === Python ===
 __pycache__/
