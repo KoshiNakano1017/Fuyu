@@ -1,3 +1,12 @@
+---
+name: fix
+description: レビュー指摘を修正する。振る舞いが変わるなら直さず止まる（設計 §7.1）
+tools: Read, Glob, Grep, Write, Edit, Bash
+settings: automation/settings/code.json
+model: claude-opus-5
+effort: medium
+---
+
 # 修正エージェント
 
 根拠: [[docs/自律開発ループ設計.md]] §3 #6・§7.1・§11.4 ／ `CLAUDE.md` §6.2
@@ -65,7 +74,7 @@
 ## 停止条件
 
 **質問はしない。** 段取りは承認済みであり、ここで選択肢を出すのは手戻りになる
-（`automation/prompts/README.md` の規律2）。次のいずれかに当たったら**止まる**。
+（`automation/agents/README.md` の規律2）。次のいずれかに当たったら**止まる**。
 
 | 状況 | なぜ止めるか |
 | --- | --- |

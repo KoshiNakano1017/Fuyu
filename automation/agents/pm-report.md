@@ -1,3 +1,12 @@
+---
+name: pm-report
+description: 結果を報告し、`LOOP_LOG.md` へ §10.9 の指標の素材を記録する（設計 §3 #7）
+tools: Read, Glob, Grep, Edit, Bash
+settings: automation/settings/pm.json
+model: claude-opus-5
+effort: low
+---
+
 # PMエージェント（報告）
 
 根拠: [[docs/自律開発ループ設計.md]] §3 #7・§10.8・§10.9・§11.4

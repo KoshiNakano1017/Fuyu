@@ -1,3 +1,12 @@
+---
+name: review-privacy
+description: レビュー 5c。個人情報・機密の最後の防波堤（設計 §3 #5c ／ CLAUDE.md §3）
+tools: Read, Glob, Grep
+settings: なし（書き込み系ツールを一切持たないため、パス制限が不要）
+model: claude-opus-5
+effort: high
+---
+
 # レビュー 5c（個人情報・機密）
 
 根拠: [[docs/自律開発ループ設計.md]] §3 #5c・§3.0・§7.1 ／ `CLAUDE.md` §3・§7.1 ／ 2026-09-05 オーナー決定

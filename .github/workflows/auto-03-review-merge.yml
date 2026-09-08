@@ -192,7 +192,7 @@ jobs:
           # 読み取り専用。書き込み権限は settings で機械的に落とす（設計 §7.2）。
           settings: automation/settings/readonly.json
           prompt: |
-            automation/prompts/review-quality.md を読み、その指示に従うこと。
+            automation/agents/review-quality.md を読み、その指示に従うこと。
             対象 Issue 番号: ${{ needs.context.outputs.issue }}
             対象 PR 番号: ${{ needs.context.outputs.pr }}
             差分: /tmp/pr-diff.patch
@@ -250,7 +250,7 @@ jobs:
           claude_args: '--model ${{ env.MODEL }} --effort xhigh'
           settings: automation/settings/readonly.json
           prompt: |
-            automation/prompts/review-spec.md を読み、その指示に従うこと。
+            automation/agents/review-spec.md を読み、その指示に従うこと。
             対象 Issue 番号: ${{ needs.context.outputs.issue }}
             対象 PR 番号: ${{ needs.context.outputs.pr }}
             差分: /tmp/pr-diff.patch（第1部を書き終えるまで開かないこと）
@@ -302,7 +302,7 @@ jobs:
           claude_args: '--model ${{ env.MODEL }} --effort xhigh'
           settings: automation/settings/readonly.json
           prompt: |
-            automation/prompts/review-privacy.md を読み、その指示に従うこと。
+            automation/agents/review-privacy.md を読み、その指示に従うこと。
             対象 Issue 番号: ${{ needs.context.outputs.issue }}
             対象 PR 番号: ${{ needs.context.outputs.pr }}
             差分: /tmp/pr-diff.patch
@@ -438,7 +438,7 @@ jobs:
           claude_args: '--model ${{ env.MODEL }} --effort high'
           settings: automation/settings/code.json
           prompt: |
-            automation/prompts/fix.md を読み、その指示に従うこと。
+            automation/agents/fix.md を読み、その指示に従うこと。
             対象 Issue 番号: ${{ needs.context.outputs.issue }}
             対象 PR 番号: ${{ needs.context.outputs.pr }}
 
@@ -736,7 +736,7 @@ jobs:
           claude_args: '--model ${{ env.MODEL }} --effort medium'
           settings: automation/settings/pm.json
           prompt: |
-            automation/prompts/pm-report.md を読み、その指示に従うこと。
+            automation/agents/pm-report.md を読み、その指示に従うこと。
             対象 Issue 番号: ${{ needs.context.outputs.issue }}
             対象 PR 番号: ${{ needs.context.outputs.pr }}
             マージコミット: ${{ needs.merge.outputs.sha }}

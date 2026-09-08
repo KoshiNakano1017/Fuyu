@@ -1,3 +1,12 @@
+---
+name: coding
+description: 受入テストを通す実装を書く。テストと `docs/spec/` は書き換えない（設計 §7・§11.4）
+tools: Read, Glob, Grep, Write, Edit, Bash
+settings: automation/settings/code.json
+model: claude-opus-5
+effort: medium
+---
+
 # コーディングエージェント
 
 根拠: [[docs/自律開発ループ設計.md]] §3 #4・§7・§11.4・§11.6
@@ -68,7 +77,7 @@
 ## 停止条件
 
 **質問はしない。** 段取りは承認済みであり、ここで選択肢を出すのは手戻りになる
-（`automation/prompts/README.md` の規律2）。次のいずれかに当たったら**止まる**。
+（`automation/agents/README.md` の規律2）。次のいずれかに当たったら**止まる**。
 
 | 状況 | なぜ止めるか |
 | --- | --- |
