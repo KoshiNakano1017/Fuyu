@@ -709,6 +709,334 @@ LEFT JOIN booked b ON b.room_type = t.room_type AND b.date = cal.date;
 > （データモデル図_ER_Diagram.md では予約が `BOOKINGS` という別エンティティとして描かれており、
 > `check_ins` との関係が図とテキストで食い違っている。この整合も同時に取る必要がある）。
 
+### 3-13. 宿泊者名簿（`lodging_register_entries`）（v13 §5.2 ／ §6-9 ① の解消。2026-09-05 新設）
+
+**オーナー決定（2026-09-05）: 旅館業法対応の格納先を作成する。退会時の匿名化より、3年保存を優先する。**
+
+§6-9 ① に「宿泊法の住所・前泊地・後泊地の物理的な格納先が未定義」と起票していた論点への対処である。
+
+#### ① 格納先の選択：`check_ins` へのカラム追加ではなく、専用テーブルを新設する
+
+| 案 | 内容 | 判定 |
+| --- | --- | :---: |
+| A. `check_ins` へ列を追加 | `address` / `previous_location` / `next_destination` を `check_ins` に足す | ❌ **不採用** |
+| **B. 専用テーブルを新設** | `lodging_register_entries` を新設し、`check_ins` と 1対多で紐付ける | ✅ **採用** |
+
+**A を採らない理由（重い順）:**
+
+1. **保護区分が違う。`check_ins` は PII-B（本人も自分の行を読める）だが、名簿は氏名・住所を持つ PII-A である。**
+   §6-1 #5 のとおり `check_ins` には `check_ins_select_self` があり、本人は自分の行を読める。
+   **RLS は列を絞れない**（§6-0）ため、`check_ins` に住所を足した瞬間、本人向けの SELECT で住所が返る。
+   同一滞在に**同伴者**の情報が入る場合、**同伴者の住所が予約者へ返る**。
+   これは A案（個人情報の別テーブル分離）が解こうとした問題そのものであり、**同じ轍を踏まないために分ける。**
+2. **ライフサイクルが違う。** `check_ins` はキャンセル・ノーショーを論理削除で保持する（v13 §5.2.2）。
+   名簿は**宿泊が成立した滞在についてのみ**作られ、**3年間保存**される。同居させると
+   「キャンセルされた予約の名簿行」という無意味な行が生まれ、法定出力の母集団が濁る。
+3. **カーディナリティが違う。** `check_ins` は `adults_count` / `children_count` を持つだけで、
+   **同伴者ひとりひとりの記録先が無い**。列追加では予約者1名分しか書けない。
+4. **退会時の挙動が違う（本節③）。** 名簿はカスケード削除の対象外にする必要があり、
+   `check_ins` の FK 設計とは別のライフサイクルを与えなければならない。
+
+#### ② DDL
+
+```sql
+CREATE TABLE lodging_register_entries (
+  entry_id        uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  -- ★ 参照は「弱い」リンクにする。会員・チェックインが消えても名簿は残る（本節③）
+  checkin_id      uuid REFERENCES check_ins(checkin_id) ON DELETE SET NULL,
+  member_id       uuid REFERENCES members(member_id)    ON DELETE SET NULL,
+
+  -- ★ 宿泊時点のスナップショット（値のコピー）。member_profiles_private を参照しない
+  full_name_snapshot      text NOT NULL,
+  full_name_kana_snapshot text,
+  address_snapshot        text NOT NULL,
+  previous_location       text,          -- 前泊地（v13 §5.2）
+  next_destination        text,          -- 後泊地／行先（v13 §5.2）
+
+  -- 滞在の事実（名簿の索引項目）
+  checked_in_on   date NOT NULL,
+  checked_out_on  date,                  -- 滞在中は NULL
+  is_representative boolean NOT NULL DEFAULT true,   -- false = 同伴者
+
+  -- 記録の出所と操作者
+  recorded_by     uuid REFERENCES members(member_id) ON DELETE SET NULL,
+  recorded_at     timestamptz NOT NULL DEFAULT now(),
+  source          text NOT NULL DEFAULT 'checkin'
+                    CHECK (source IN ('checkin','web_public','staff_manual','migration')),
+
+  -- 保存期限。3年保存（本節④）。generated 列にするため式は IMMUTABLE のみで構成する
+  retention_until_on date GENERATED ALWAYS AS
+                       ((coalesce(checked_out_on, checked_in_on) + interval '3 years')::date) STORED,
+
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  updated_at      timestamptz NOT NULL DEFAULT now(),
+
+  CONSTRAINT chk_stay_period CHECK (checked_out_on IS NULL OR checked_out_on >= checked_in_on)
+);
+
+-- 法定出力（期間指定での抽出）と保存期限の掃き出しに効かせる
+CREATE INDEX ix_lodging_register_period    ON lodging_register_entries (checked_in_on);
+CREATE INDEX ix_lodging_register_retention ON lodging_register_entries (retention_until_on);
+CREATE INDEX ix_lodging_register_member    ON lodging_register_entries (member_id)
+  WHERE member_id IS NOT NULL;
+
+COMMENT ON TABLE lodging_register_entries IS
+  '宿泊者名簿（旅館業法対応／v13 §5.2）。氏名・住所は宿泊時点のスナップショットであり、'
+  '会員が後から住所を変更しても本表の記録は変わらない。members / check_ins へのFKは '
+  'ON DELETE SET NULL。退会・予約削除で名簿を失わないため（3年保存を優先／2026-09-05 オーナー決定）';
+
+COMMENT ON COLUMN lodging_register_entries.address_snapshot IS
+  '宿泊時点の住所の写し。member_profiles_private.address を参照してはならない。'
+  '参照にすると、住所変更で過去の名簿が書き換わる（＝法定記録の遡及改変になる）';
+```
+
+> [!danger] スナップショットにする理由 — 参照にすると過去の記録が書き換わる
+> 名簿は「**宿泊した時点の情報**」を保存する必要がある。
+> `member_profiles_private` を JOIN して氏名・住所を出す設計にすると、
+> **会員が引っ越して住所を更新した瞬間、3年前の名簿の住所まで新住所に変わる。**
+> これは `room_assignments.room_name_snapshot`（v13 §7）・伝票明細が注文時点の単価をコピーするのと**同じ原則**である。
+> ⚠️ 逆に、**名簿の記録は原則として後から書き換えない**。誤記の訂正は `admin` に限り、
+> 訂正の記録方法（追記か上書きか）は **要確認**。
+
+#### ③ 退会時のふるまい — カスケード削除の対象外にする
+
+> [!important] `member_profiles_private` と**同じ設計にしてはならない**
+> `member_profiles_private` は `member_id uuid PRIMARY KEY REFERENCES members(member_id) ON DELETE CASCADE` である（§2）。
+> **同じ形にすると、会員行が消えた瞬間に名簿も消える。**
+> オーナー決定「退会時の匿名化より 3年保存を優先する」に真っ向から反するため、
+> 名簿の FK は **`ON DELETE SET NULL`**（かつ `member_id` は NULL 許容）とする。
+
+| 事象 | `members` | `member_profiles_private` | **`lodging_register_entries`** |
+| --- | --- | --- | --- |
+| 退会（`account_status = 'withdrawn'`） | 行は残る（論理削除／§1-3） | 行は残る | **残る**（無関係） |
+| 退会30日後の匿名化（v13 §2） | 対象外 | **値をダミーへ UPDATE**（§6-2③） | **対象外。氏名・住所をそのまま保持する** |
+| 会員行の物理削除（**原則禁止**／§1-3） | — | CASCADE で消える | **消えない**（`member_id` が NULL になるだけ） |
+| 宿泊から3年経過 | — | — | **削除する**（`retention_until_on < current_date` の定期ジョブ） |
+
+- **3年保存が匿名化に優先する。** これが §6-9 ③（「退会30日後の匿名化と宿泊者名簿保存義務の衝突」）の決着である。
+  匿名化の対象は `member_profiles_private`（会員マスタ側の**現在値**）であり、
+  名簿（**当時値**のスナップショット）は対象に含めない。
+- 退会者の名簿行は `member_id` が残ったまま（会員行を物理削除しないため）3年保存され、期限到来後に削除される。
+- ⚠️ **「退会した会員の氏名・住所が最大3年間システムに残る」ことのプライバシーポリシー・利用規約への反映は要確認。**
+  v13 §5.2 の注記が既に「プライバシーポリシー・利用規約側への反映状況は別途要確認」としている論点と同じ枠である。
+
+#### ④ 収集項目の根拠と、断定しない範囲
+
+| 項目 | 根拠 | 状態 |
+| --- | --- | --- |
+| 住所 | **v13 §5.2**「旅館業法に基づく『住所』『前泊地』『後泊地/行先』を収集・管理出力可能にする」 | ✅ 明文の根拠あり |
+| 前泊地 | 同上 | ✅ 明文の根拠あり |
+| 後泊地／行先 | 同上 | ✅ 明文の根拠あり |
+| 氏名 | **本書 §6-5**が「宿泊者名簿の法定出力（旅館業法対応／v13 §5.2）」を**氏名を出す7系統の1つ**として列挙している | ✅ 本書内の根拠あり |
+| 宿泊日（チェックイン日・チェックアウト日） | 名簿の索引として必須。`check_ins` に既存 | ✅ |
+| **職業・国籍・旅券番号・連絡先・同伴者の要否** | **v13 に記述が無い** | ⚠️ **要確認。本書では断定しない** |
+
+> [!warning] 法令が要求する項目の一覧を、本書で確定させない
+> 上表の「根拠」欄は**すべて本リポジトリ内の文書**であり、法令の条文ではない。
+> **旅館業法が実際に要求する項目の確定は、オーナー・法務の判断である。**
+> 追加項目が必要と判明した場合は、`ALTER TABLE lodging_register_entries ADD COLUMN` で足りる構造にしてある
+> （専用テーブルにした副次的な利点。`check_ins` へ足していた場合、列追加のたびに PII-B のテーブルへ
+> 個人情報が増えていくことになる）。
+
+#### ⑤ 書き込み経路
+
+| 経路 | `source` | 誰が |
+| --- | --- | --- |
+| 現地チェックイン（店員タブレット）| `checkin` | staff。`member_profiles_private` の現在値を初期表示し、**本人に確認のうえ確定してコピーする** |
+| 公開予約ページ `/reserve`（v13 §5.2.3） | `web_public` | Edge Function（`service_role`）。⚠️ 予約時点では宿泊が成立していないため、**名簿行はチェックイン確定時に作る**のが原則。予約時に住所を取る場合の扱いは要確認 |
+| 運営の代理登録 | `staff_manual` | staff |
+| 過去分の取込 | `migration` | `service_role`。Phase 1 で過去の名簿を取り込むかは**要確認**（現行は Excel／紙運用の可能性がある） |
+
+---
+
+### 3-14. 会員データ取込の二重取込防止（v13 §8 ／ §6-9 ⑧ の解消。2026-09-05 新設）
+
+**オーナー決定（2026-09-05）: 二重取込の照合は「本名」で行い、同姓同名は「年齢」で判定する。**
+
+#### ① 現状：v13 §8 の担保は成立していない（現物確認の結果）
+
+v13 §8 は再実行安全性を「`contact_info` のユニーク制約と取込前プレビューで担保」と書いている。
+**この前半は成立していない。**
+
+- 実体は `member_identifiers` の**部分**ユニーク `uq_identifier_verified ... WHERE is_verified = true`（§5.3）
+- **移行時は全件 `is_verified = false`**（§5.3・§6.1）。つまり**取込の瞬間には制約が1件も効かない**
+- さらに、メールを持たない会員が **105名**（メール欠損61件＋親方衆44名）居る。
+  仮に全件 `is_verified = true` で入れたとしても、**この105名には照合すべき値そのものが無い**
+
+#### ② 採る方式：ハードな UNIQUE 制約ではなく、取込時の検出ロジック
+
+| 案 | 内容 | 判定 |
+| --- | --- | :---: |
+| A. DB制約 | `UNIQUE (full_name_normalized, birth_ym)` を張る | ❌ **不採用** |
+| **B. 取込時の検出ロジック** | 正規化列＋インデックスで候補を引き、**取込前プレビューで候補提示 → 運営承認**（v13 §5.8.2・§5.8.3） | ✅ **採用** |
+
+**A を採らない理由:**
+
+1. **`birth_ym` が NULL のとき、どちらへ倒しても壊れる。** 移行370名は `birth_ym` を持たない（§6.4）。
+   - 既定の `UNIQUE`（`NULLS DISTINCT`）＝ **NULL 同士は衝突しない**ため、**移行時は制約が1件も効かない**。
+     `contact_info` の部分ユニークと**まったく同じ空振りを繰り返す**
+   - `UNIQUE NULLS NOT DISTINCT`（PostgreSQL 15+）＝ **同姓同名で生年月未取得の2人目を登録できなくなる**。
+     実在の別人を弾く
+2. **同姓同名かつ同誕生年月の実在人物はありうる。** 誤検知で正当な登録を弾くのは、
+   誤って重複を作るより回復が難しい（**弾かれた人は登録できないまま来訪する**）。
+3. **§6.2b の「1取込ジョブ＝1トランザクション」と衝突する。** 制約違反はトランザクション全体を落とすため、
+   **同姓同名1件のために370名の取込が全部ロールバックされる。** 業務としては
+   「1件だけ保留にして残りを通す」が正しい（v13 §5.8.2 の「取込前に差し戻せる」）。
+4. 既存要件が既に**人手による承認**を前提にしている（v13 §5.8.2 のプレビュー、§5.8.3 の運営承認キュー）。
+   ハード制約はこのフローと**二重に働き、しかも制約側が先に落ちる**ため、承認画面へ到達できない。
+
+> [!important] 「制約が無い＝守られない」ではない
+> 採るのは**取込パイプラインの中で必ず通る検出ステップ**であり、任意の実装ではない。
+> DB 側は**正規化列と索引を提供して検出を可能にする**役割を持ち、
+> **再実行そのものの遮断は ③ のファイル単位のべき等キー（こちらはハード制約）**が担う。
+> 「重複会員を1件も作らない」という v13 §8 の要求に対しては、**③ が主たる担保**であり、
+> ④ の本名照合は**部分的に重なるファイルを取り込んだ場合の網**である。
+
+#### ③ 主たる担保：取込ジョブのべき等キー（ここはハード制約にする）
+
+v13 §8 が求めているのは「**同一ファイルの二重取込で重複会員を生成しない**」ことである。
+**これはファイル単位の話であり、会員単位の照合では解けない**（照合は「似た人が居る」ことしか言えない）。
+
+```sql
+CREATE TABLE import_jobs (
+  job_id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  source_file_name  text NOT NULL,
+  source_file_sha256 text NOT NULL,          -- ★ 内容ハッシュ。ファイル名の変更では回避できない
+  row_count         integer NOT NULL,
+  status            text NOT NULL DEFAULT 'previewing'
+                      CHECK (status IN ('previewing','committed','rolled_back')),
+  operator_id       uuid REFERENCES members(member_id) ON DELETE SET NULL,
+  started_at        timestamptz NOT NULL DEFAULT now(),
+  committed_at      timestamptz
+);
+
+-- ★ 同一内容のファイルを2回コミットできない。これが v13 §8 の再実行安全性の本体。
+--   status を条件に含めるのは、プレビューして差し戻した（rolled_back）ファイルを
+--   修正せず再挑戦する運用を殺さないため。
+CREATE UNIQUE INDEX uq_import_job_committed_file
+  ON import_jobs (source_file_sha256)
+  WHERE status = 'committed';
+```
+
+- **`is_verified` に依存しない**ため、移行時（全件 `false`）でも確実に効く。ここが `contact_info` との決定的な違いである
+- 内容が1バイトでも違えば別ハッシュになる。**修正版ファイルの取込は正しく通る**
+- ⚠️ `import_jobs` / `member_import_links` は §6-1 #7 に区分だけが記載されており、**DDL は本書が初出**。
+  Vault 側 `01_schema.sql` に既存定義がある場合は突合すること（**要確認**）
+
+#### ④ 会員単位の照合：正規化した本名 ＋ 誕生年月
+
+```sql
+-- 氏名の照合用正規化。生成列で使うため IMMUTABLE で構成する。
+CREATE OR REPLACE FUNCTION public.normalize_person_name(raw text)
+RETURNS text
+LANGUAGE sql
+IMMUTABLE
+STRICT                          -- NULL 入力は NULL を返す
+SET search_path = ''
+AS $$
+  SELECT lower(
+           translate(
+             regexp_replace(                       -- ③ 空白を全て除去（姓名間スペースの有無を吸収）
+               normalize(btrim(raw), NFKC),        -- ①②前後空白除去 → NFKC（全角英数・半角カナ・全角空白を統一）
+               '\s+', '', 'g'
+             ),
+             -- ④ 異体字の代表字への寄せ（下表・暫定）
+             '髙﨑濵德瀨齋剱',
+             '高崎浜徳瀬斎剣'
+           )
+         );
+$$;
+```
+
+| # | 規則 | 例 | 備考 |
+| ---: | --- | --- | --- |
+| ① | 前後の空白を除去（`btrim`） | `" 山田 太郎 "` → `"山田 太郎"` | |
+| ② | Unicode **NFKC** 正規化 | 全角スペース `U+3000` → 半角、`ﾔﾏﾀﾞ` → `ヤマダ`、`Ａ` → `A` | PostgreSQL 13+ の `normalize()` |
+| ③ | **空白を全て除去** | `"山田 太郎"` → `"山田太郎"` | 姓名間スペースの有無・個数の揺れを吸収する。**照合用の値であり、表示には使わない** |
+| ④ | 異体字を代表字へ寄せる | `髙` → `高`、`﨑` → `崎` | **NFKC では統一されない**（別コードポイントの漢字であり互換文字ではないため） |
+| ⑤ | ラテン文字を小文字化 | `Yamada` → `yamada` | |
+
+> [!warning] ④ の異体字リストは暫定であり、**要確認**
+> 上記6組は日本人の姓に頻出するものを挙げた**たたき台**である。
+> **どこまで同一視するかは業務判断**（`辺／邊／邉`、`斉／斎／齊／齋` は同一視すると別姓を混同する恐れもある）。
+> 実データの姓の分布は `Knowledge/` 側にあり本リポジトリからは確認できない（`CLAUDE.md` §3.1）。
+> **一覧の確定はオーナー確認事項とする。**
+
+```sql
+-- 照合用の正規化値を生成列として保持する（アプリ側で正規化を書かせない／§5.2c と同じ理由）
+ALTER TABLE member_profiles_private
+  ADD COLUMN full_name_normalized text
+    GENERATED ALWAYS AS (public.normalize_person_name(full_name)) STORED;
+
+-- 候補抽出用。★ ユニークにはしない（②の理由）
+CREATE INDEX ix_member_profiles_name_norm       ON member_profiles_private (full_name_normalized);
+CREATE INDEX ix_member_profiles_name_norm_birth ON member_profiles_private (full_name_normalized, birth_ym);
+
+COMMENT ON COLUMN member_profiles_private.full_name_normalized IS
+  '二重取込検出・名寄せ第2キーの照合用に正規化した氏名（§3-14）。表示には使わない。'
+  '★ normalize_person_name() の定義を変更しても既存行は再計算されない。'
+  '規則を変えるときは列を作り直すマイグレーションを伴うこと';
+```
+
+> [!danger] 生成列は関数定義の変更に追随しない
+> `GENERATED ALWAYS AS ... STORED` の値は**行の書き込み時に確定**する。
+> 後から `normalize_person_name()` を書き換えても、**既存370行の `full_name_normalized` は古い規則のまま残る。**
+> 異体字リスト（④）を追加した場合は、**列を落として作り直すマイグレーション**（または全行の空 UPDATE）が要る。
+> これを忘れると「新しく登録した人だけ照合が効く」という、**気づきにくい半端な状態**になる。
+
+#### ⑤ 取込時の検出クエリと、判定できないときの落とし先
+
+```sql
+-- 取込候補1件について、既存会員の中から「同一人物かもしれない」行を引く。
+-- 取込前プレビュー（v13 §5.8.2）で運営に提示する。
+WITH incoming AS (
+  SELECT public.normalize_person_name($1) AS name_norm,
+         $2::text                          AS birth_ym
+)
+SELECT p.member_id,
+       p.birth_ym,
+       CASE
+         WHEN i.birth_ym IS NULL OR p.birth_ym IS NULL THEN '判定不能'   -- ← 移行370名はここへ落ちる
+         WHEN p.birth_ym = i.birth_ym                  THEN '同一人物の可能性が高い'
+         ELSE                                               '同姓同名の別人'
+       END AS verdict
+FROM   member_profiles_private p
+CROSS  JOIN incoming i
+WHERE  p.full_name_normalized = i.name_norm;
+```
+
+| 検出結果 | 取込時のふるまい |
+| --- | --- |
+| 一致0件 | **新規会員として取り込む** |
+| 氏名一致・**誕生年月も一致** | **同一人物とみなし、新規に作らない**。既存行への追記候補として運営に提示する |
+| 氏名一致・**誕生年月が異なる** | **別人として新規に取り込む**（同姓同名は実在する） |
+| 氏名一致・**どちらかの誕生年月が未取得** | 🚧 **自動判定しない。運営承認キューへ回す**（下記） |
+
+> [!danger] 移行370名は `birth_ym` を持たない — 同姓同名を年齢で自動解決できない
+> [[会員データモデル_ユーザーテーブル定義]] §5.2b・§6.4 のとおり、**誕生年月は受領した実データに列が存在しない**。
+> したがって**移行時点では、オーナー決定の「同姓同名は年齢で判定する」を機械的に適用できない。**
+> この場合は既存のガード（v13 §5.8.3・§9 #12）へ落とす:
+>
+> 1. **自動連携・自動取込を行わない。** 候補を複数件として運営承認キューへ回す
+> 2. 初回紐付け時は**招待コードまたはメール／SMS のワンタイム認証**による本人確認を必須とする
+> 3. 判断の根拠（誰が・いつ・どちらの候補を選んだか）を監査ログへ残す
+>
+> **`birth_ym` は「あれば自動解決でき、無ければ人手に落ちる」キーである。** 収集を進めるほど人手が減る。
+> ⚠️ 移行370名の `birth_ym` をいつ・どう収集するかは**要確認**（チェックイン時に併せて聞く運用が自然だが、未定）。
+
+#### ⑥ `contact_info`（`uq_identifier_verified`）の位置づけを改める
+
+**部分ユニークインデックスは削除しない。** 目的を書き換える。
+
+| | 改訂前の位置づけ | **改訂後の位置づけ** |
+| --- | --- | --- |
+| `uq_identifier_verified` | v13 §8「二重取込を防ぐユニーク制約」 | **検証済み連絡先の一意性を担保するもの。** 同じメール／電話が2人の会員に「検証済み」として結び付くことを防ぐ＝**誤名寄せ（他人の宿泊券・残高の引き継ぎ）の防止**（§5.3・v13 §5.8.3）。**二重取込防止の担保ではない** |
+
+- **この索引には十分な存在価値がある。** 「取込時に効かない」ことと「無意味」であることは別である。
+  運用中に本人確認を通った連絡先が重複することは、名寄せ事故そのものだからである
+- 二重取込の担保は ③（ファイル単位のべき等キー）＋ ④⑤（本名照合と運営承認）へ移す
+
 ---
 
 ## 4. line-rag-bot連携（ナレッジ・RAG）
@@ -1254,6 +1582,319 @@ GRANT INSERT ON member_identifiers TO authenticated;   -- UPDATE は与えない
 > `stay_tickets`・`total_stay_days`・`uii_balance` は「アプリから直接 UPDATE してはならない」（§1-1・v13 §7）。
 > これを**規約ではなく DB 権限として強制**しているのが上の列指定である。
 > トリガーは所有者権限で走るため影響を受けない。
+
+### 6-6b. 自分の権限は誰も変更できない — トリガーによる防御（2026-09-05 オーナー決定）
+
+> [!danger] 列単位 GRANT だけでは穴が残る — `service_role` が RLS も GRANT も迂回するため
+> §6-2② と §6-6 は、`members_update_self`（自分の行だけ更新できる）というポリシーが
+> **自分の `role` を `'admin'` へ書き換える操作を止められない**ことを指摘し、列単位 `GRANT` を防御の本体とした。
+> **これは `authenticated`（PostgREST 越しの一般セッション）にしか効かない。**
+>
+> 管理操作は Edge Function / Server Actions から `service_role` で実行される（§6-6③）。
+> **`service_role` は `BYPASSRLS` を持ち、かつテーブル権限も全開**であるため、
+> ポリシーにも列単位 GRANT にも一切引っかからない。**「自分を admin にする」処理を1本書けば通る。**
+>
+> **`service_role` でも必ず発火する関門はトリガーだけである。** したがって本節の防御はトリガーで実装する。
+
+**オーナー決定（2026-09-05）: 自分自身の権限（`role`）は、誰も変更できない。**
+管理者が**他人**の `role` を変更することは、運用上必要であるため引き続き可能とする。
+
+#### ① 列ごとの自己変更可否
+
+| 列 | **自分自身**への変更 | **他人**への変更 | 強制手段 |
+| --- | :---: | --- | --- |
+| **`role`** | 🚫 **禁止** | ✅ 可（`admin` のみ。認可判定はアプリ層／v13 §6）。**`operator_id` と `reason` の記録が必須** | **トリガー**（本節②）＋ 列単位 GRANT 除外 |
+| **`auth_user_id`** | 🚫 **禁止** | ⚠️ **`NULL → 非NULL`（名寄せ成立）のみ可**。確定後の付け替えは禁止 | **トリガー** ＋ 列単位 GRANT 除外 |
+| **`account_status`** | ⚠️ **`active → withdrawn`（退会）のみ可** | ✅ staff（名寄せ成立・退会処理） | **トリガー** ＋ 列単位 GRANT 除外 |
+| **`member_type`** | 🚫 **禁止** | ✅ staff | **トリガー** ＋ 列単位 GRANT 除外 |
+| **`stay_tickets`／`total_stay_days`／`uii_balance`** | 🚫 **禁止** | 🚫 **禁止**（自他を問わず**誰も直接更新できない**。正本は取引明細／§1-1・v13 §9 #25） | **専用トリガー**（本節④）＋ 列単位 GRANT 除外 |
+| `legacy_member_no`／`oyakata_member_no`／`invite_code` | 🚫 禁止 | 取込・採番処理（`service_role`）のみ | 列単位 GRANT 除外（トリガー対象外） |
+| `member_id` | 🚫 禁止（PK。変更する用途が無い） | 🚫 禁止 | **トリガー** |
+| `nickname`／`skills`／`certifications`／`line_joined`／`discord_joined` | ✅ 可 | staff も可 | — |
+
+**なぜ `role` 以外も対象にするか。** `role` だけを塞いでも、**同じ結果へ別の経路で到達できる**ためである。
+
+- `auth_user_id` を他人の `auth.uid()` へ書き換えれば、**その人の行が「自分の行」になる**（§5.2a）。`role` を触らずに管理者の権限で動ける
+- `account_status` を自力で `pre_registered → active` にできれば、**本人確認（§5.8.3 の誤名寄せ防止ガード）を飛ばして**移行済み会員の宿泊券・Uii残高を掌握できる
+- `member_type` は認可に使わない（v13 §2）ため権限昇格には直結しないが、**再訪アラート・バッジ表示・運営の判断材料**になる。自己申告で「親方」を名乗れる状態にしない
+
+> [!note] `account_status` の自己変更を「退会だけ」許す理由
+> 退会は本人の権利であり、経路を塞ぐと本人からの退会導線が実装できない。
+> 危険なのは**逆向き（自力で `active` になる）**であって、`withdrawn` にすることではない。
+> ⚠️ **本人からの退会導線を Phase 1 で提供するかは要確認**（現状の v13 §2 は「退会処理」の主体を明記していない）。
+> 提供しない場合でも、この分岐を許しておくことによる危険は無い（`withdrawn` は権限を失う方向にしか働かない）。
+
+#### ② 操作者の特定（`auth.uid()` が使えない経路をどうするか）
+
+トリガーは `authenticated` セッションからも `service_role` からも発火するが、**操作者の分かり方が経路ごとに違う。**
+
+| 経路 | `auth.uid()` | 操作者の特定方法 |
+| --- | :---: | --- |
+| PostgREST 越しのログインセッション（`authenticated`） | **非 NULL** | `members.auth_user_id = auth.uid()` から `member_id` を引く。**JWT 由来のため詐称できない** |
+| Edge Function / Server Actions（`service_role`） | **NULL** | 呼び出し側が `set_config('app.operator_id', <操作者の member_id>, true)` で**申告する** |
+| 移行スクリプト・psql（テーブル所有者） | **NULL** | 同上。申告しなければ `role` 変更は通らない |
+
+> [!danger] 安全側の既定：操作者を特定できない `role` 変更は拒否する
+> `app.operator_id` はアプリ側の申告であり、`auth.uid()` のような暗号学的な裏付けを持たない。
+> **それでも「申告が無ければ拒否する」ほうが安全である。** 申告を省略できる設計にすると、
+> **`auth.uid()` が NULL になる経路（＝`service_role`）で防御が丸ごと無効化される**からである。
+> 申告値の正しさは `service_role` キーを持つサーバサイドコードの責任であり、
+> そのコードは既に「アプリ層の認可が唯一の関門」という前提に置かれている（§6-6③）。
+> **両方が得られた場合に食い違っていれば拒否する**（詐称の疑いとして扱う）。
+
+```sql
+-- 操作者を特定する。特定できなければ NULL を返す（拒否の判断は呼び出し側で行う）。
+CREATE OR REPLACE FUNCTION public.current_operator_id()
+RETURNS uuid
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = ''          -- §6-3 の必須作法。乗っ取り防止
+AS $$
+DECLARE
+  session_operator  uuid;
+  declared_operator uuid;
+BEGIN
+  -- 経路①：ログインセッション。auth.uid() は JWT 由来であり、クライアントから詐称できない。
+  SELECT m.member_id INTO session_operator
+  FROM   public.members m
+  WHERE  m.auth_user_id = auth.uid();
+
+  -- 経路②：service_role。auth.uid() が NULL になるため、呼び出し側の申告を読む。
+  BEGIN
+    declared_operator := nullif(btrim(coalesce(current_setting('app.operator_id', true), '')), '')::uuid;
+  EXCEPTION WHEN invalid_text_representation THEN
+    RAISE EXCEPTION 'app.operator_id が uuid として解釈できない' USING ERRCODE = '22023';
+  END;
+
+  IF session_operator IS NOT NULL THEN
+    -- 両方あって食い違う ＝ 他人になりすまそうとしている。安全側に倒して拒否する。
+    IF declared_operator IS NOT NULL AND declared_operator <> session_operator THEN
+      RAISE EXCEPTION 'app.operator_id (%) がログインセッションの会員 (%) と一致しない',
+        declared_operator, session_operator USING ERRCODE = '42501';
+    END IF;
+    RETURN session_operator;
+  END IF;
+
+  RETURN declared_operator;   -- NULL になりうる。呼び出し側で拒否する
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.current_operator_id() FROM PUBLIC, anon;
+GRANT  EXECUTE ON FUNCTION public.current_operator_id() TO authenticated;
+```
+
+> [!note] `current_member_id()` と分ける理由
+> §6-2① の `current_member_id()` は**行の可視性を判定する**関数であり、`account_status <> 'withdrawn'` で絞っている。
+> `current_operator_id()` は**誰が操作したかを記録・判定する**関数であり、目的が違う。
+> 退会済みの行に対する操作であっても「誰がやったか」は記録されなければならないため、
+> ここでは `account_status` で絞らない。**同じ関数を兼用すると、片方の都合で条件を変えたときに他方が壊れる。**
+
+#### ③ 権限列のガードトリガー（`BEFORE UPDATE ON members`）
+
+```sql
+CREATE OR REPLACE FUNCTION public.members_guard_privileged_columns()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER               -- authenticated セッションから発火した際に members を RLS 越しに読まないため
+SET search_path = ''
+AS $$
+DECLARE
+  operator_id   uuid;
+  change_reason text;
+BEGIN
+  IF NEW.member_id IS DISTINCT FROM OLD.member_id THEN
+    RAISE EXCEPTION 'member_id は変更できない' USING ERRCODE = '42501';
+  END IF;
+
+  -- 権限に関わる列が1つも変わっていなければ何もしない（nickname 更新等の通常経路を素通りさせる）
+  IF     NEW.role           IS NOT DISTINCT FROM OLD.role
+     AND NEW.auth_user_id   IS NOT DISTINCT FROM OLD.auth_user_id
+     AND NEW.account_status IS NOT DISTINCT FROM OLD.account_status
+     AND NEW.member_type    IS NOT DISTINCT FROM OLD.member_type
+  THEN
+    RETURN NEW;
+  END IF;
+
+  operator_id := public.current_operator_id();
+
+  -- ★ 安全側の既定：操作者を特定できない権限列の変更は拒否する
+  IF operator_id IS NULL THEN
+    RAISE EXCEPTION
+      '操作者を特定できないため members の権限列を変更できない。service_role 経由の場合は '
+      'set_config(''app.operator_id'', <操作者のmember_id>, true) を先に実行すること'
+      USING ERRCODE = '42501';
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM public.members m WHERE m.member_id = operator_id) THEN
+    RAISE EXCEPTION '申告された操作者 % が members に存在しない', operator_id USING ERRCODE = '42501';
+  END IF;
+
+  -- ① role：自分自身の role は誰も変更できない（2026-09-05 オーナー決定）
+  IF NEW.role IS DISTINCT FROM OLD.role THEN
+    IF operator_id = OLD.member_id THEN
+      RAISE EXCEPTION '自分自身の role は変更できない（% → %）', OLD.role, NEW.role
+        USING ERRCODE = '42501';
+    END IF;
+
+    change_reason := nullif(btrim(coalesce(current_setting('app.change_reason', true), '')), '');
+    IF change_reason IS NULL THEN
+      RAISE EXCEPTION
+        'role の変更には理由が必須。set_config(''app.change_reason'', <理由>, true) を先に実行すること'
+        USING ERRCODE = '23514';
+    END IF;
+  END IF;
+
+  -- ② auth_user_id：本人ポリシーの根拠そのもの（§5.2a）。自己変更は常に拒否し、付け替えも禁止する
+  IF NEW.auth_user_id IS DISTINCT FROM OLD.auth_user_id THEN
+    IF operator_id = OLD.member_id THEN
+      RAISE EXCEPTION '自分自身の auth_user_id は変更できない' USING ERRCODE = '42501';
+    END IF;
+    IF OLD.auth_user_id IS NOT NULL THEN
+      RAISE EXCEPTION '確定済みの auth_user_id は付け替えられない（名寄せの解除は運営手順による）'
+        USING ERRCODE = '42501';
+    END IF;
+  END IF;
+
+  -- ③ account_status：自己変更は退会だけを許す。自力での active 化を禁止する
+  IF NEW.account_status IS DISTINCT FROM OLD.account_status
+     AND operator_id = OLD.member_id
+     AND NOT (OLD.account_status = 'active' AND NEW.account_status = 'withdrawn')
+  THEN
+    RAISE EXCEPTION '自分自身の account_status は退会（active → withdrawn）以外に変更できない（% → %）',
+      OLD.account_status, NEW.account_status USING ERRCODE = '42501';
+  END IF;
+
+  -- ④ member_type：立場の自己申告を禁止する
+  IF NEW.member_type IS DISTINCT FROM OLD.member_type AND operator_id = OLD.member_id THEN
+    RAISE EXCEPTION '自分自身の member_type は変更できない' USING ERRCODE = '42501';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_members_guard_privileged_columns
+  BEFORE UPDATE ON public.members
+  FOR EACH ROW
+  EXECUTE FUNCTION public.members_guard_privileged_columns();
+```
+
+> [!important] 初期管理者はどう作るか（ブートストラップ）
+> 本トリガーは **`BEFORE UPDATE` のみ**であり、`INSERT` には掛からない。
+> したがって**最初の `admin` は移行スクリプトの `INSERT` で作る**（`role = 'admin'` を初期値として投入する）。
+> 「誰も自分を昇格できない」と「最初の1人を作れない」は、この分離で両立する。
+>
+> 万一 `admin` が1人も居ない状態に陥った場合の復旧は、**テーブル所有者による
+> `ALTER TABLE members DISABLE TRIGGER trg_members_guard_privileged_columns` を伴う手動操作**になる。
+> これはアプリからは実行できず（`service_role` はテーブル所有者ではない）、
+> **DB の管理コンソールを持つ人間にしか行えない**。⚠️ この非常時手順の運用ルール（誰が・どう記録するか）は
+> `docs/operations/` 側の論点であり、**要確認**。
+
+#### ④ 集計キャッシュのガードトリガー（§1-1 を DB で強制する）
+
+`stay_tickets`・`total_stay_days`・`uii_balance` は「アプリから直接 UPDATE してはならない」（§1-1・v13 §9 #25）。
+§6-6 の列単位 GRANT はこれを `authenticated` に対して強制するが、**`service_role` には効かない**。
+
+```sql
+CREATE OR REPLACE FUNCTION public.members_guard_derived_columns()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = ''
+AS $$
+BEGIN
+  IF     NEW.stay_tickets    IS NOT DISTINCT FROM OLD.stay_tickets
+     AND NEW.total_stay_days IS NOT DISTINCT FROM OLD.total_stay_days
+     AND NEW.uii_balance     IS NOT DISTINCT FROM OLD.uii_balance
+  THEN
+    RETURN NEW;
+  END IF;
+
+  -- 取引明細側の再計算トリガーだけがこの旗を立てる。
+  IF coalesce(current_setting('app.balance_recalc', true), 'off') <> 'on' THEN
+    RAISE EXCEPTION
+      '集計キャッシュ（stay_tickets / total_stay_days / uii_balance）は直接更新できない。'
+      '正本は取引明細であり、再計算経路以外からは変更できない（§1-1・v13 §9 #25）'
+      USING ERRCODE = '42501';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_members_guard_derived_columns
+  BEFORE UPDATE ON public.members
+  FOR EACH ROW
+  EXECUTE FUNCTION public.members_guard_derived_columns();
+```
+
+- 再計算関数（`stay_ticket_transactions` / `uii_transactions` の `AFTER INSERT/UPDATE/DELETE`）は、
+  `members` を更新する直前に `PERFORM set_config('app.balance_recalc', 'on', true)` を実行し、
+  **更新の直後に必ず `'off'` へ戻す**。`true`（トランザクションローカル）で設定するため
+  セッションには残らないが、**戻さないと同一トランザクション内の後続の直接 UPDATE が素通りする。**
+
+#### ⑤ `role` 変更の監査記録（DB 側の格納先）
+
+`role` の変更は**必ず `operator_id` と `reason` とともに記録する**。記録は**アプリの善意ではなくトリガーで行う**。
+
+```sql
+CREATE TABLE member_role_changes (
+  change_id   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  member_id   uuid        NOT NULL REFERENCES members(member_id) ON DELETE RESTRICT,
+  old_role    text        NOT NULL,
+  new_role    text        NOT NULL,
+  operator_id uuid        NOT NULL REFERENCES members(member_id) ON DELETE RESTRICT,
+  reason      text        NOT NULL,
+  changed_at  timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT chk_role_actually_changed CHECK (old_role <> new_role),
+  -- 自己変更はトリガーで拒否されるため、記録として存在しえない。制約でも二重に表明しておく
+  CONSTRAINT chk_not_self_change       CHECK (member_id <> operator_id),
+  CONSTRAINT chk_reason_not_blank      CHECK (btrim(reason) <> '')
+);
+
+CREATE INDEX ix_role_changes_member ON member_role_changes (member_id, changed_at DESC);
+
+COMMENT ON TABLE member_role_changes IS
+  '権限ロールの変更履歴。トリガー（trg_members_log_role_change）だけが書き込む。'
+  'ON DELETE RESTRICT は、会員行の物理削除そのものを止める役割も兼ねる（§1-3）';
+
+CREATE OR REPLACE FUNCTION public.members_log_role_change()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = ''
+AS $$
+BEGIN
+  -- operator_id と reason は BEFORE トリガー（③）が非NULLを保証済み
+  INSERT INTO public.member_role_changes (member_id, old_role, new_role, operator_id, reason)
+  VALUES (OLD.member_id, OLD.role, NEW.role,
+          public.current_operator_id(),
+          btrim(current_setting('app.change_reason', true)));
+  RETURN NULL;
+END;
+$$;
+
+CREATE TRIGGER trg_members_log_role_change
+  AFTER UPDATE OF role ON public.members
+  FOR EACH ROW
+  WHEN (OLD.role IS DISTINCT FROM NEW.role)
+  EXECUTE FUNCTION public.members_log_role_change();
+```
+
+> [!note] 汎用の監査ログテーブルではなく専用テーブルにした理由
+> `role` 変更は**トリガーが強制的に書く**必要がある（アプリが書き忘れても記録が残らなければ意味がない）。
+> トリガーから書く以上、**列が固定された専用テーブルのほうが CHECK 制約で不正な記録を弾ける**。
+> 汎用の監査ログ（[[データモデル図_ER_Diagram]] `AUDIT_LOGS`・[[API設計]] の監査ログ方針）が別途整備される場合、
+> **本テーブルはその投影元として残す**（DB が強制する一次記録であり、汎用ログはアプリ層の記録である）。
+> ⚠️ 汎用監査ログとの正本関係の確定は本書のスコープ外・**要確認**。
+
+#### ⑥ `member_role_changes` の RLS
+
+```sql
+ALTER TABLE member_role_changes ENABLE ROW LEVEL SECURITY;
+
+-- SELECT：admin のみ。誰が誰を昇格させたかは運営の中でも限定情報として扱う。
+CREATE POLICY mrc_select_admin ON member_role_changes
+  FOR SELECT TO authenticated USING ( (SELECT public.is_admin()) );
+
+-- INSERT / UPDATE / DELETE：ポリシーを1本も作らない＝全拒否。
+--   書き込みは SECURITY DEFINER のトリガーだけが行う（所有者権限で走るため RLS を通らない）。
+--   本人ポリシーを作らないのは、自分の降格理由（運営の判断）を本人に開かないため（member_notes と同じ扱い）。
+```
 
 ### 6-7. デフォルト拒否の徹底
 
