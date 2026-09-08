@@ -1,3 +1,12 @@
+---
+name: research
+description: docs/spec と公式ドキュメントから一次情報を取得する。判断はせず事実だけ返す（設計 §3.1）
+tools: Read, Glob, Grep, WebFetch, WebSearch, Bash
+settings: automation/settings/research.json
+model: claude-opus-5
+effort: high
+---
+
 # 調査エージェント
 
 根拠: [[docs/自律開発ループ設計.md]] §3.1・§3.2

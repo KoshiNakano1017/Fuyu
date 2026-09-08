@@ -1,10 +1,19 @@
 {
-  "$comment": "コーディング・修正用。実装コードは可。docs/spec/ は拒否(設計 §8.2 の差分検出ガードとの二重防御)。",
+  "$comment": "コーディング・修正用。実装コードは可。docs/spec/ は拒否(設計 §8.2 の差分検出ガードとの二重防御)。 tests/ も拒否 — テスト設計が先に書いた受入テストを、通るように改変できてしまうと 設計 §11.6 の commit-first が成立しなくなるため(2026-09-07 追加)。",
   "permissions": {
-    "allow": ["Read", "Glob", "Grep", "Write", "Edit", "Bash"],
+    "allow": [
+      "Read",
+      "Glob",
+      "Grep",
+      "Write",
+      "Edit",
+      "Bash"
+    ],
     "deny": [
       "Write(docs/spec/**)",
       "Edit(docs/spec/**)",
+      "Edit(tests/**)",
+      "Write(tests/**)",
       "Read(../../Knowledge/**)",
       "Bash(git push --force:*)",
       "Bash(rm -rf:*)"

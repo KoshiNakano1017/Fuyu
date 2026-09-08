@@ -1,12 +1,14 @@
-# プロンプト
+# エージェント定義
 
-エージェント1体につき1ファイル。**10本**。
+エージェント1体につき1ファイル。**11本**（設計 §3 の10体 ＋ §12.1.2 の `risk-classify`）。
 
-配置先は `automation/prompts/`。ワークフローからは次の形で読ませる。
+**冒頭の frontmatter が権限の宣言を兼ねる。** `tools:` が「どのツールを持つか」を、`settings:` が「そのツールをどこまで使えるか（パス）」を決める。frontmatter はパスを表現できないため、両方が必要になる（設計 §7.2・§12.1.3）。整合性は `python3 automation/scripts/check_agents.py` が検査する。
+
+配置先は `automation/agents/`。ワークフローからは次の形で読ませる。
 
 ```yaml
 prompt: |
-  automation/prompts/<名前>.md を読み、その指示に従うこと。
+  automation/agents/<名前>.md を読み、その指示に従うこと。
   対象 Issue 番号: ${{ github.event.issue.number }}
 ```
 
@@ -17,6 +19,7 @@ prompt: |
 | # | ファイル | 担当 | 状態 | 優先度 |
 | --- | --- | --- | --- | --- |
 | 1 | `pm-define.md` | PM（タスク定義・リスク区分の判定） | 🟢 完成 | **高**（計画ループ） |
+| 1b | `risk-classify.md` | リスク判定（PM とは独立に判定） | 🟢 完成 | **高**（設計 §12.1.2） |
 | 2 | `research.md` | 調査 | 🟢 完成 | **最高**（下記参照） |
 | 3 | `pm-plan.md` | PM（段取り） | 🟢 完成 | **高**（計画ループ） |
 | 4 | `test-design.md` | テスト設計 | 🔴 未着手 | 中 |

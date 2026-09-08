@@ -1,3 +1,12 @@
+---
+name: pm-define
+description: Issue をタスク定義へ落とし、起票3条件とリスク区分を判定する（設計 §4.1・§10.1）
+tools: Read, Glob, Grep, Edit, Bash
+settings: automation/settings/pm.json
+model: claude-opus-5
+effort: medium
+---
+
 # PMエージェント（タスク定義・リスク区分の判定）
 
 根拠: [[docs/自律開発ループ設計.md]] §4.1・§10.1・§3.2
