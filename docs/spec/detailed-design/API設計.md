@@ -4,7 +4,7 @@ doc_type: 設計
 status: "詳細設計ドラフト（要オーナーレビュー）"
 owner: プロジェクトオーナー
 date: "2026-08-16"
-updated: 2026-09-05
+updated: 2026-09-10
 tags: ["浮遊街アプリ"]
 up: "[[浮遊街アプリ 総合要件定義・設計書_v13]]"
 ---
@@ -87,7 +87,8 @@ up: "[[浮遊街アプリ 総合要件定義・設計書_v13]]"
 - **10年保存（非機能 A6）は GCS の Retention Policy ＋ Bucket Lock（WORM）で担保する**
 - **⚠️ Postgres の外に出た時点で RLS は効かない。** GCS 上の監査ログのアクセス制御は **GCP IAM** に移る
 - 🚫 **監査ログと AI対話履歴を `line-rag-bot` のナレッジ空間へ投入してはならない**
-  （v13 §9 #61 の個人情報ガードが未決のため）
+  （**2026-09-10 にガード方式は確定したが本禁止は解除しない**。監査ログはほぼ全量が PII であり、
+  採用した出力導線ガードとは相性が悪い。詳細は [[システムアーキテクチャ]]「禁止事項」・`CONSOLIDATED_DECISIONS.md` §16-3）
 
 > [!warning] ⚠️ 新規論点: A6 の「AI対話履歴」は本書のエンドポイント設計上、**本体 DB に存在しない**
 > §2-6 のとおり**浮遊街アプリ本体はアプリ内AIチャットUIを持たず、当該領域のエンドポイントはゼロ件**である。
@@ -160,7 +161,7 @@ up: "[[浮遊街アプリ 総合要件定義・設計書_v13]]"
 | --- | --- | --- | --- | --- |
 | POST | `/api/orders` | 注文作成（セルフ／代理、チェックイン中限定） | 本人, core_member, admin | `orders`, `order_items` |
 | PATCH | `/api/orders/{id}/items/{itemId}` | 明細編集（単価上書き含む、理由必須） | admin, core_member | `order_items` |
-| POST | `/api/orders/{id}/settlement-qr` | 精算QR発行（即時／一括） | 本人, admin, core_member | `orders.settlement_qr_token` |
+| POST | `/api/orders/{id}/settlement-qr` | 精算QR発行（即時／一括）。**平文トークンは本レスポンスで1度だけ返す**（再表示はせず、必要なら再発行して旧トークンを失効させる／非機能 F-1・2026-09-10 確定） | 本人, admin, core_member | `orders.settlement_qr_token_hash` ほかQR列 |
 | POST | `/api/orders/{id}/settlement-adjustments` | 差額計上（追加請求/返金） | admin, core_member | `settlement_adjustments` |
 | PATCH | `/api/settlement-adjustments/{id}` | 精算／免除（**免除権限範囲は要確認**） | admin（core_memberの可否は未確認） | `settlement_adjustments` |
 | PATCH | `/api/orders/{id}/serving-status` | **提供ステータス切替**（未提供 ⇄ 提供済み）。**決済ステータスとは独立**。Realtime で客側へ即時反映（2026-08-20 新設／§9 #39） | core_member, admin | `orders.serving_status/served_at/served_by` |
@@ -193,6 +194,24 @@ up: "[[浮遊街アプリ 総合要件定義・設計書_v13]]"
 | POST | `/api/public/reservations/otp` | **メールOTPの発行**。予約送信の前段で本人確認を行う（v13 §5.8.3 の本人確認要件を予約時点で満たす） | **公開（未認証）** | `reservation_otps`（短命・TTL付き） |
 | POST | `/api/public/reservations/otp/verify` | OTP検証。成功時に**短命の予約セッショントークン**を返す | **公開（未認証）** | — |
 | POST | `/api/public/reservations` | **公開予約ページからの予約作成**。OTP検証済みトークン必須。備考欄が空なら自動確定、記載があれば「要確認」 | **公開（未認証・要OTP）** | `check_ins`（`reservation_source='web_public'`）, `meal_reservations` |
+
+> [!important] ⚠️ メール送信経路は2系統ある（2026-09-10 確定・実装時に取り違えないこと）
+> **送信基盤は Resend で確定**（`CONSOLIDATED_DECISIONS.md` §16-2）。ただし**配線先が2か所に分かれる。**
+>
+> | 経路 | 実装 | Resend の配線先 | Supabase 既定SMTP の 2通/時 |
+> | --- | --- | --- | :---: |
+> | **公開予約のOTP**（本節の `/api/public/reservations/otp`） | **自前実装**。`reservation_otps` にハッシュを保存し、サーバ側 `service_role` で処理 | **アプリ側に HTTP API を配線**（Route Handler から送信） | **掛からない**（Supabase Auth を経由しないため） |
+> | **会員サインアップ・パスワードリセット** | **Supabase Auth**（GoTrue） | **ダッシュボードに SMTP 認証情報**を設定 | 掛かる（カスタムSMTP 設定で解除） |
+>
+> **→ Supabase のダッシュボード設定だけでは公開予約は動かない。** アプリ側の送信 SDK 配線が別途必要。
+>
+> ⚠️ 本項が当初「既定SMTP の 2通/時 が公開予約をブロックする」として起票されていたのは**誤り**だった
+> （公開予約OTPは Auth を経由しない）。真の課題は「アプリからのメール送信手段が未選定」であり、
+> 結論（Resend が要る）は変わらないが**設定箇所が変わる**。経緯は `QUESTIONS.md`
+> 「[2026-09-05] 公開予約OTPの送信基盤」を参照。
+>
+> **送信ドメインは `fuyugai.jp`**（SPF/DKIM の設定担当は**未指名**）。
+> 無料枠は**月3,000通かつ1日100通**で、**日次キャップが先に効く**点に注意（370名への一括招待は超過する）。
 | GET | `/api/public/availability?from=&to=` | 未認証で参照できる残枠。**非会員料金**で表示する | **公開（未認証）** | `v_room_availability` |
 | GET | `/api/public/rates` | 宿泊料金・送迎料金の公開表示（Uii 主・円 副） | **公開（未認証）** | `accommodation_rates`, `menu_items` |
 | POST | `/api/reservations/{id}/meals` | 事前予約注文の登録・変更（滞在日別・朝/昼/夜／**任意**） | 本人, core_member, admin | `meal_reservations` |

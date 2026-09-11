@@ -237,7 +237,14 @@ CREATE TABLE orders (
   total_amount_yen   integer NOT NULL DEFAULT 0,
   total_amount_uii   integer NOT NULL DEFAULT 0,   -- floor(単価×0.8)を明細行ごとに丸めて合算（伝票合計への一括掛け算は禁止）
   settled_at         timestamptz,
-  settlement_qr_token text,
+  -- ▼ 精算QRトークン（2026-09-10 確定 ／ 非機能 F-1・§2-7。旧 `settlement_qr_token text` を置換）
+  --   平文は保存しない。発行APIのレスポンスで1度だけ返し、再表示はしない（必要なら再発行）。
+  --   トークン本体 = base64url(gen_random_bytes(32)) ＝ 256bit（提案の「128bit以上」を満たす）。
+  settlement_qr_token_hash  text UNIQUE,   -- sha256(トークン) の16進。DB流出だけでは清算できない
+  settlement_qr_issued_by   uuid REFERENCES members(member_id),
+  settlement_qr_issued_at   timestamptz,
+  settlement_qr_expires_at  timestamptz,   -- 既定: 発行から24時間（運用で調整可）
+  settlement_qr_consumed_at timestamptz,   -- 精算完了で確定。以降は再利用不可（単回使用）
   created_by         uuid REFERENCES members(member_id),  -- 代理注文時の店員ID
   created_at         timestamptz NOT NULL DEFAULT now(),
   updated_at         timestamptz NOT NULL DEFAULT now()
@@ -249,6 +256,9 @@ CREATE INDEX ix_order_serving ON orders (serving_status) WHERE serving_status = 
 -- 「精算済みだが未提供」＝要注意状態の検出用（v13 §5.4.1 の2軸マトリクス）
 CREATE INDEX ix_order_paid_unserved ON orders (created_at)
   WHERE status = '精算済み' AND serving_status = '未提供';
+-- 有効な精算QRの絞り込み用（期限切れ掃除ジョブ・レーン②が参照する）
+CREATE INDEX ix_order_qr_active ON orders (settlement_qr_expires_at)
+  WHERE settlement_qr_consumed_at IS NULL;
 
 CREATE TABLE order_items (
   item_id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -332,11 +342,14 @@ CREATE TABLE membership_applications (
   granted_nights       integer,             -- membership_plansを参照して決定。直書き禁止
   status               text NOT NULL DEFAULT '申込中'
                           CHECK (status IN ('申込中','QR送付済み','承認済み','却下','保留')),
-  qr_token             text,
+  -- ▼ 入金QRトークン（2026-09-10 確定 ／ 非機能 F-1・§2-7。旧 `qr_token text` を置換）
+  --   精算QRと同一規格: base64url(gen_random_bytes(32)) ＝ 256bit、平文は保存しない。
+  qr_token_hash        text UNIQUE,   -- sha256(トークン) の16進
   qr_issued_by         uuid REFERENCES members(member_id),
   qr_issued_at         timestamptz,
   qr_delivery_channel  text CHECK (qr_delivery_channel IN ('line','in_app','in_person')),
-  qr_expires_at        timestamptz,
+  qr_expires_at        timestamptz,   -- 既定: 発行から7日（入金を挟むため精算QRより長い。運用で調整可）
+  qr_consumed_at       timestamptz,   -- 承認確定で失効（単回使用）
   payment_confirmed_by uuid REFERENCES members(member_id),
   approved_at          timestamptz,
   role_upgraded_at      timestamptz,
@@ -1122,7 +1135,7 @@ WHERE  p.full_name_normalized = i.name_norm;
 | 13 | `order_items` | PII-B | 個人の飲食内容（嗜好） | 親 `orders` に従う | 同上 |
 | 14 | `settlement_adjustments` | PII-B | `reason`（未払い理由の自由記述）, `waived_by` | 本人 ＋ staff | staff（免除は v13 §9 #2 で core_member にも許可） |
 | 15 | `meal_reservations` | PII-B | `checkin_id` 経由で個人の食事内容が復元可能 | 本人 ＋ staff | 本人＋staff |
-| 16 | `membership_applications` | PII-B | `qr_token`（決済QR）, `billed_amount_yen` | 本人 ＋ `admin`。**`core_member` は不可**（v13 §6：申請一覧は admin のみ） | 本人が申請 INSERT。QR発行・承認は `admin` |
+| 16 | `membership_applications` | PII-B | `qr_token_hash`（決済QR。**平文は保存しない**／2026-09-10）, `billed_amount_yen` | 本人 ＋ `admin`。**`core_member` は不可**（v13 §6：申請一覧は admin のみ） | 本人が申請 INSERT。QR発行・承認は `admin` |
 | 17 | `eumo_grants` | **PII-A** | **`sent_to`（送付先＝メール／LINE ID）**, `eumo_url` | 本人（自分の給付）＋ staff | staff |
 | 18 | `work_logs` | PII-B | `notes`, `issue_note`, `rejection_reason`, Before/After 写真 | 本人（申請者）＋ staff | 本人が報告 INSERT。確認・承認は staff／`admin` |
 | 19 | `work_log_reviews` | PII-B | `comment`（評価コメント） | **staff のみ**（被評価者に見せない） | staff |
