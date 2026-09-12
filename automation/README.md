@@ -6,7 +6,7 @@
 | --- | --- |
 | **設計の正本**（なぜこう組んだか） | [`docs/自律開発ループ設計.md`](../docs/自律開発ループ設計.md) |
 | 実装状況・着手順序 | このファイルの下部 |
-| プロンプトの書き方 | [`prompts/README.md`](prompts/README.md) |
+| プロンプトの書き方 | [`agents/README.md`](agents/README.md) |
 | 権限設定の意図 | [設計 §7.2](../docs/自律開発ループ設計.md) |
 
 > [!IMPORTANT]
@@ -21,7 +21,7 @@
 
 | 場所 | 中身 | なぜそこか |
 | --- | --- | --- |
-| `automation/prompts/` | エージェントのプロンプト10本 | 任意の場所でよいので、自動化を1箇所に集約 |
+| `automation/agents/` | エージェント定義11本（frontmatter が権限の宣言を兼ねる） | 任意の場所でよいので、自動化を1箇所に集約 |
 | `automation/settings/` | エージェントごとの権限設定5本 | 同上 |
 | `automation/scripts/` | ワークフローから呼ぶスクリプト | YAML に長い処理を埋めると読めず、手元で検証もできないため分離 |
 | `.github/workflows/` | ワークフロー6本 | **GitHub の仕様で位置が固定**されている |
@@ -41,23 +41,26 @@
 | | `settings/test.json` | 🟡 未検証 | 同上 |
 | | `settings/code.json` | 🟡 未検証 | 同上 |
 | **ワークフロー** | `.github/workflows/auto-01-plan.yml` | 🟢 完成 | 計画フェーズ。§4.1 のリスク分岐・停止・異議申立て窓まで実装。**足場が無くても動く** |
-| | `.github/workflows/auto-02-implement.yml` | 🟢 完成 | 実装フェーズ。テスト設計 → 実装 → PR。ゲートなし（設計 §6）。**足場が必要** |
-| | `.github/workflows/auto-03-review-merge.yml` | 🟢 完成 | **最重量**（レビュー3並列＋修正ループ＋リトライ判定＋仕様書ガード＋ゲート3）。**足場が必要** |
-| **プロンプト** | `prompts/pm-define.md` | 🟢 完成 | タスク定義＋リスク区分の判定 |
-| | `prompts/research.md` | 🟢 完成 | 調査。§3.2 の6軸と質問形式を転記済み |
-| | `prompts/pm-plan.md` | 🟢 完成 | 段取り＋`QUESTIONS.md` への起票 |
-| | `prompts/test-design.md` | 🟢 完成 | 仕様だけを見て受入テストを先に書く（設計 §11.6 の commit-first） |
-| | `prompts/coding.md` | 🟢 完成 | 実装。テストと `docs/spec/` は書き換えない |
-| | `prompts/review-quality.md` | 🟢 完成 | レビュー 5a。バグ・認可漏れ・CLAUDE.md §4 |
-| | `prompts/review-spec.md` | 🟢 完成 | レビュー 5b。**差分を読む前に仕様から要件を列挙する2段構造**（設計 §11.6） |
-| | `prompts/review-privacy.md` | 🟢 完成 | レビュー 5c。**最後の防波堤**。ダミーデータでは止めない（2026-09-05 オーナー決定） |
-| | `prompts/fix.md` | 🟢 完成 | 修正。振る舞いが変わるなら直さず止まる（設計 §7.1） |
-| | `prompts/pm-report.md` | 🟢 完成 | 報告。`LOOP_LOG.md` へ §10.9 の指標の**素材**を記録する |
+|  | `.github/workflows/auto-02-implement.yml` | 🟢 完成 | 実装フェーズ。テスト設計 → 実装 → PR。ゲートなし（設計 §6）。**足場が必要** |
+|  | `.github/workflows/auto-03-review-merge.yml` | 🟢 完成 | **最重量**（レビュー3並列＋修正ループ＋リトライ判定＋仕様書ガード＋ゲート3）。**足場が必要** |
+| **エージェント定義** | `agents/pm-define.md` | 🟢 完成 | タスク定義＋リスク区分の判定 |
+|  | `agents/research.md` | 🟢 完成 | 調査。§3.2 の6軸と質問形式を転記済み |
+|  | `agents/pm-plan.md` | 🟢 完成 | 段取り＋`QUESTIONS.md` への起票 |
+|  | `agents/test-design.md` | 🟢 完成 | 仕様だけを見て受入テストを先に書く（設計 §11.6 の commit-first） |
+|  | `agents/coding.md` | 🟢 完成 | 実装。テストと `docs/spec/` は書き換えない |
+|  | `agents/review-quality.md` | 🟢 完成 | レビュー 5a。バグ・認可漏れ・CLAUDE.md §4 |
+|  | `agents/review-spec.md` | 🟢 完成 | レビュー 5b。**差分を読む前に仕様から要件を列挙する2段構造**（設計 §11.6） |
+|  | `agents/review-privacy.md` | 🟢 完成 | レビュー 5c。**最後の防波堤**。ダミーデータでは止めない（2026-09-05 オーナー決定） |
+|  | `agents/fix.md` | 🟢 完成 | 修正。振る舞いが変わるなら直さず止まる（設計 §7.1） |
+|  | `agents/pm-report.md` | 🟢 完成 | 報告。`LOOP_LOG.md` へ §10.9 の指標の**素材**を記録する |
+|  | `agents/risk-classify.md` | 🟢 完成 | **2026-09-07 新設**。PM の自己判定を独立 subagent の再判定へ分離（設計 §4.1・§11.6） |
 | **スクリプト** | `scripts/post_agent_output.sh` | 🟢 完成 | エージェントの最終メッセージを Issue / PR へ転記する（下記「出力先に届かないエージェント」） |
 | **Issue テンプレ** | `.github/ISSUE_TEMPLATE/auto-task.yml` | 🟢 完成 | 起票3条件を必須フィールド化 |
 | **起票導線** | `.github/workflows/wbs-to-issue.yml` | 🟢 完成 | **導線1（§10.1.5）**。WBS の作業パッケージ番号を渡すと Issue を生成。手動起動 |
 | | `automation/scripts/wbs_to_issue.py` | 🟢 完成 | 上記のパーサ。`python3 automation/scripts/wbs_to_issue.py 3-5b` で手元検証できる |
 | | 導線2（仕様ナビ）・導線3（QUESTIONS.md からの逆流） | 🔴 未着手 | 設計 §10.1.5 |
+| **正本参照** | `automation/scripts/spec_ref.py` | 🟢 完成 | **エージェント化 段1**（設計 §12.1.6）。`v13 §5.2.3` / `§9 #51` をパス・行範囲・本文・`sha256` へ解決する。解決できない参照は終了コード3で落ちるため、**ゲート1へ到達する前**に止められる。`python3 automation/scripts/spec_ref.py "v13 §5.2.3"` で手元検証できる |
+| **定義の検査** | `automation/scripts/check_agents.py` | 🟢 完成 | **エージェント化 段2**。frontmatter の `tools:`（ツール層）と `settings/*.json`（パス層）の対応を検査し、「`docs/spec/` を書けない」「`coding`/`fix` は `tests/` を書けない」を強制する。違反があれば終了コード3 |
 
 > [!IMPORTANT] 導線1 は `auto` ラベルを自動では付けない
 > 起票可能かの3条件（設計 §10.1.3）のうち、機械が判定できるのは**2つだけ**。
@@ -88,6 +91,16 @@
 
 ## 着手順序
 
+> [!IMPORTANT] 2026-09-08：「移行」という作業は無い — タスクを流すだけ
+> オーナー確定（2026-09-08）: **エージェント定義11本・`auto-01`〜`auto-03`・承認ゲートはすでに揃っている。**
+> 2026-09-07 の「エージェント方式への移行」は作り直しではなく**方式の再定義**であり、
+> **移行プロジェクトとして工数を取る必要はない**。下表の順序はそのまま有効。
+>
+> ⚠️ ただし「流すだけ」を阻んでいた不具合2件を 2026-09-08 に修正した:
+> **①`auto-02`／`auto-03` が `automation/prompts/*.md` を指したまま**だった（7か所。存在しないパスで必ず失敗する）／
+> **②09-05 作成の定義7本に frontmatter が無かった**（`tools:`／`settings:` 未宣言で §7.2 の権限制限が効かない）。
+> **`python automation/scripts/check_agents.py` で違反なしを確認してから流すこと。**
+
 **計画ループ（`auto-01`）だけを先に完成させると、足場が無くても動き始める。**
 計画フェーズのエージェントは Issue にコメントするだけでコードに触らないため。
 
@@ -95,9 +108,9 @@
 | --- | --- | --- | --- |
 | 1 | GitHub の器（PAT・Environments・ラベル・通知） | 45分 | ✅ 完了（設計 §9 フェーズ1） |
 | 2 | `settings/*.json` の実機検証 | 1時間 | ⬜ **試運転 3-3 で確認する**（設計 §12 #5） |
-| 3 | `prompts/pm-define.md` | 1時間 | ✅ 完了 |
-| 4 | **`prompts/research.md`** | 1.5時間 | ✅ 完了 |
-| 5 | `prompts/pm-plan.md` | 1時間 | ✅ 完了 |
+| 3 | `agents/pm-define.md` | 1時間 | ✅ 完了 |
+| 4 | **`agents/research.md`** | 1.5時間 | ✅ 完了 |
+| 5 | `agents/pm-plan.md` | 1時間 | ✅ 完了 |
 | 6 | `auto-01-plan.yml` の完成 | 1時間 | ✅ 完了 |
 | 7 | 試運転（設計 §9 フェーズ3 の 3-3 / 3-5 / 3-6） | 1時間 | ⬅ **次はここ** |
 | 8 | `prompts/` 残り7本（テスト設計〜PM報告） | — | ✅ 完了 |

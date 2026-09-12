@@ -3,7 +3,9 @@
 # トリガ : Issue に `auto` ラベルが付いた時
 # 担当   : PM(定義) → 調査 → PM(段取り)
 # ゲート : リスク区分により 0〜2 回停止する(設計 §4.1)
-# 設計   : docs/自律開発ループ設計.md §6.1
+# 設計   : docs/自律開発ループ設計.md §6.1（外側＝ワークフロー）
+# 注記   : 2026-09-07 にエージェント駆動へ切替（§12.1）。本ファイルは段4 で
+#          「ゲートとラベル遷移だけ」へ縮小し、判定はオーケストレータへ移す。
 #
 # このワークフローは **アプリのコードが1行も無い状態でも動く**。
 # 計画フェーズのエージェントは Issue にコメントするだけで、コードに触らないため。
@@ -71,7 +73,7 @@ jobs:
           claude_args: '--model ${{ env.MODEL }} --effort medium'
           settings: automation/settings/pm.json
           prompt: |
-            automation/prompts/pm-define.md を読み、その指示に従うこと。
+            automation/agents/pm-define.md を読み、その指示に従うこと。
             対象 Issue 番号: ${{ github.event.issue.number }}
 
       # PM は TASKS.md/QUESTIONS.md/LOOP_LOG.md をランナー内でしか編集できない
@@ -103,7 +105,8 @@ jobs:
             sleep $((i * 3))
           done
 
-      # エージェントが残したマーカーを読む(設計 §6.2 の <!--retry--> と同じ方式)。
+      # ⚠️ ワークフロー駆動時代の名残。段4 で構造化出力の読み取りへ置き換える(設計 §12.1.8 #1)。
+      # 旧方式の記述は docs/OLD/2026-09-08_自律開発ループ設計_ワークフロー駆動版_OLD.md §6.2。
       # 判定を後続ジョブの if 条件へ渡すため、job outputs に落とす。
       - name: 判定結果の読み取り
         id: classify
@@ -194,7 +197,7 @@ jobs:
           claude_args: '--model ${{ env.MODEL }} --effort high'
           settings: automation/settings/research.json
           prompt: |
-            automation/prompts/research.md を読み、その指示に従うこと。
+            automation/agents/research.md を読み、その指示に従うこと。
             対象 Issue 番号: ${{ github.event.issue.number }}
 
       # 調査が曖昧さを見つけていた場合、QUESTIONS.md への起票はこちらが行う。
@@ -206,7 +209,7 @@ jobs:
           claude_args: '--model ${{ env.MODEL }} --effort medium'
           settings: automation/settings/pm.json
           prompt: |
-            automation/prompts/pm-plan.md を読み、その指示に従うこと。
+            automation/agents/pm-plan.md を読み、その指示に従うこと。
             対象 Issue 番号: ${{ github.event.issue.number }}
 
       # define ジョブと同じ理由(上記コメント参照)。plan ジョブは調査の chekcout を

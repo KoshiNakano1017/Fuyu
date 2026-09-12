@@ -1,3 +1,12 @@
+---
+name: review-spec
+description: レビュー 5b。差分を読む前に仕様から要件を列挙する2段構造で見る（設計 §11.6）
+tools: Read, Glob, Grep
+settings: なし（書き込み系ツールを一切持たないため、パス制限が不要）
+model: claude-opus-5
+effort: high
+---
+
 # レビュー 5b（仕様適合）
 
 根拠: [[docs/自律開発ループ設計.md]] §3 #5b・§3.0・§11.6

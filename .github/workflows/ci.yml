@@ -177,6 +177,10 @@ jobs:
           path: |
             .next
             !.next/cache
+          # .next はドット始まりの「隠しディレクトリ」であり、upload-artifact v4.4.0 以降は
+          # 隠しファイルを既定で除外する。これが無いと中身が1件も拾われず成果物が作られないまま
+          # ジョブは success で終わり、E2E 側が「Artifact not found」で落ちる（原因が上流に無い）
+          include-hidden-files: true
           retention-days: 1
 
   # ───────────────────────────────────────────

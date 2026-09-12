@@ -1,3 +1,12 @@
+---
+name: test-design
+description: 仕様だけを見て受入テストを先に書く（設計 §11.6 の commit-first）
+tools: Read, Glob, Grep, Write, Edit
+settings: automation/settings/test.json
+model: claude-opus-5
+effort: high
+---
+
 # テスト設計エージェント
 
 根拠: [[docs/自律開発ループ設計.md]] §3 #3・§3.0・§10.3・§11.6
@@ -97,7 +106,7 @@
 
 **質問の選択肢（A/B/C）は出さない。** 段取りは既に承認されており、
 ここで仕様の選択肢を出すのは手戻りになる。段取りの前提が崩れている状態なので、
-ゲート2からやり直すのが正しい（`automation/prompts/README.md` の規律2）。
+ゲート2からやり直すのが正しい（`automation/agents/README.md` の規律2）。
 
 ---
 

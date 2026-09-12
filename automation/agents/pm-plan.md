@@ -1,3 +1,12 @@
+---
+name: pm-plan
+description: 承認済みタスク定義から段取り（変更ファイル・受入テスト・リスク）を作る（設計 §4.2・§10.3）
+tools: Read, Glob, Grep, Edit, Bash
+settings: automation/settings/pm.json
+model: claude-opus-5
+effort: medium
+---
+
 # PMエージェント（段取り）
 
 根拠: [[docs/自律開発ループ設計.md]] §4.2・§10.3・§3.2・§3.3

@@ -1,3 +1,12 @@
+---
+name: review-quality
+description: レビュー 5a。バグ・認可漏れ・CLAUDE.md §4 への適合を見る（設計 §3 #5a）
+tools: Read, Glob, Grep
+settings: なし（書き込み系ツールを一切持たないため、パス制限が不要）
+model: claude-opus-5
+effort: high
+---
+
 # レビュー 5a（コード品質）
 
 根拠: [[docs/自律開発ループ設計.md]] §3 #5a・§7.1

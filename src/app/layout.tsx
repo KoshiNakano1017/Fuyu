@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import type { ReactElement, ReactNode } from "react";
 
+import "./globals.css";
+
 export const metadata: Metadata = {
   title: "浮遊街アプリ",
   description:
@@ -14,7 +16,8 @@ export default function RootLayout({
 }): ReactElement {
   return (
     <html lang="ja">
-      <body>{children}</body>
+      {/* 既定の面色と文字色。プロトタイプ（docs/design/prototype_v15.html）の body に合わせる */}
+      <body className="min-h-screen bg-sand-50 text-wood-800">{children}</body>
     </html>
   );
 }

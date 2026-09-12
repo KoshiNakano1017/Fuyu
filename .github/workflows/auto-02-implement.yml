@@ -99,7 +99,7 @@ jobs:
           claude_args: '--model ${{ env.MODEL }} --effort high'
           settings: automation/settings/test.json
           prompt: |
-            automation/prompts/test-design.md を読み、その指示に従うこと。
+            automation/agents/test-design.md を読み、その指示に従うこと。
             対象 Issue 番号: ${{ github.event.issue.number }}
 
       # test.json は gh を許可していないため、エージェントは Issue に到達できない。
@@ -164,7 +164,7 @@ jobs:
           claude_args: '--model ${{ env.MODEL }} --effort xhigh'
           settings: automation/settings/code.json
           prompt: |
-            automation/prompts/coding.md を読み、その指示に従うこと。
+            automation/agents/coding.md を読み、その指示に従うこと。
             対象 Issue 番号: ${{ github.event.issue.number }}
 
       - name: 実装の出力を転記し、マーカーを読む
