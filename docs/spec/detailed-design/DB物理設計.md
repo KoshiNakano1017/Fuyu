@@ -1133,7 +1133,7 @@ WHERE  p.full_name_normalized = i.name_norm;
 | 2 | **`member_profiles_private`** | **PII-A** | `full_name`, `full_name_kana`, `address`, `hometown`, `birth_ym` | 本人の行 ＋ `admin`/`core_member` は全行 | 本人（自分の行）＋ `admin`/`core_member` |
 | 3 | `member_identifiers` | **PII-A** | `value`（メール／電話／LINE ID／Discord ID の実値） | 同上 | INSERT は本人＋staff。**`is_verified` の UPDATE は staff のみ**（§6-2③） |
 | 4 | `member_notes` | **PII-A** | `body`（運営メモ）, `author_id` | **`core_only` → `admin`/`core_member` ／ `admin_only` → `admin` のみ。本人も読めない** | `admin`/`core_member` |
-| 5 | `check_ins` | PII-B | 滞在日・宿泊形態・人数・キャンセル理由。**宿泊法の住所/前泊地/後泊地の格納先は未定義（§6-9 ①）** | 本人の行 ＋ `admin`/`core_member` | 本人（アプリ内予約／v13 §5.2.4）＋ staff |
+| 5 | `check_ins` | PII-B | 滞在日・宿泊形態・人数・キャンセル理由。**★ 宿泊法の住所/前泊地/後泊地は本テーブルではなく `lodging_register_entries`（#32・§3-13）が持つ**（§6-9 ① は 2026-09-05 に解消済み） | 本人の行 ＋ `admin`/`core_member` | 本人（アプリ内予約／v13 §5.2.4）＋ staff |
 | 6 | `reservation_otps` | **全拒否** | `email`（平文）, `code_hash` | **誰も読めない。** OTP 発行・検証は Edge Function（`service_role`）のみ | 同左 |
 | 7 | `member_import_links` / `import_jobs` | PII-B | 取込元ファイル名・照合根拠 | `admin` のみ | `admin`（実体は `service_role`） |
 | 8 | `memberships` | PII-B | `fee_amount_actual`（個人の実支払額）, `note`（例外理由） | 本人 ＋ staff | staff |
@@ -1160,6 +1160,15 @@ WHERE  p.full_name_normalized = i.name_norm;
 | 29 | `rooms` | 非PII | ― | `authenticated` 全員（残枠表示のため） | `admin`/`core_member` |
 | 30 | `v_room_availability`（ビュー） | 非PII | ― | `authenticated` 全員。**個人を含む列を持たせない**（日付×形態×残数のみ） | ― |
 | 31 | **`v_member_public`（ビュー・新設）** | 非PII | ― | `authenticated` 全員。**`member_id`・`display_name`・`member_type` のみ**（§6-4） | ― |
+| **32** | **`lodging_register_entries`（新設）** | **PII-A** | **氏名・住所の当時値スナップショット・前泊地・後泊地**（§3-13） | 本人の行 ＋ `admin`/`core_member` | staff（`checkin`/`web_public`/`staff_manual`/`migration`） |
+| **33** | **`member_role_changes`（新設）** | 非PII（ただし権限の監査記録） | 変更前後ロール・操作者・理由（§6-6b⑤） | **`admin` のみ** | **アプリからは全拒否。トリガーのみが書く** |
+| **34** | **`import_jobs`** | 非PII | 取込ジョブ。`source_file_sha256` によるべき等キー（§3-14③） | `admin`/`core_member` | `service_role`（取込処理） |
+| **35** | **`member_import_links`** | 非PII | 取込ジョブと会員行の対応 | `admin`/`core_member` | `service_role`（取込処理） |
+
+> [!warning] ★ 2026-09-12：#32〜#35 は本表から漏れていた
+> §3-13／§3-14／§6-6b で新設したにもかかわらず、**「RLS 適用対象の正」を自称する本表に載っていなかった**。
+> §6-7 の `ENABLE ROW LEVEL SECURITY` 列挙からも同じ4テーブルが漏れていたため、あわせて追加した。
+> **ポリシーを別節に書いてあることと、RLS を有効化してあることは別問題である。**
 
 > [!note] `member_type` はこの表のどこにも認可条件として現れない
 > v13 §2 の不可侵ルール（`member_type` を認可に使わない）を、**ポリシー条件に `member_type` を一切書かない**という形で担保している。
@@ -1950,6 +1959,14 @@ ALTER TABLE work_log_reviews         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE morning_meetings         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE media_assets             ENABLE ROW LEVEL SECURITY;
 ALTER TABLE eumo_grants              ENABLE ROW LEVEL SECURITY;
+
+-- ★ 2026-09-12 追加。§3-13／§3-14／§6-6b で新設したテーブルが本リストから漏れていた。
+-- §1-8 が「全テーブルで必須。1つでも漏れるとインターネットへ全開」と定めているため、
+-- ポリシーを別節に書いてあることと、RLS を有効化してあることは別問題である。
+ALTER TABLE lodging_register_entries ENABLE ROW LEVEL SECURITY;  -- §3-13（PII-A・法定名簿）
+ALTER TABLE member_role_changes      ENABLE ROW LEVEL SECURITY;  -- §6-6b⑤（SELECT は admin のみ）
+ALTER TABLE import_jobs              ENABLE ROW LEVEL SECURITY;  -- §3-14③（取込ジョブ）
+ALTER TABLE member_import_links      ENABLE ROW LEVEL SECURITY;  -- §3-14（取込元リンク）
 ```
 
 - **ポリシーを1本も定義しないテーブルは、`authenticated` から見て「存在するが常に0行」**になる
