@@ -4,7 +4,7 @@ doc_type: 設計
 status: "詳細設計ドラフト（要オーナーレビュー）"
 owner: プロジェクトオーナー
 date: "2026-08-16"
-updated: 2026-09-05
+updated: 2026-09-11
 tags: ["浮遊街アプリ"]
 up: "[[浮遊街アプリ 総合要件定義・設計書_v13]]"
 ---
@@ -1054,7 +1054,16 @@ WHERE  p.full_name_normalized = i.name_norm;
 
 ## 4. line-rag-bot連携（ナレッジ・RAG）
 
-> [!success] 2026-08-16確定：pgvectorは採用しない
+> [!warning] ⚠️ **2026-09-11 に本節の結論は反転した — 以下は 2026-08-16 時点の記録である**
+> **pgvector は採用する。** ベクトル基盤を **Supabase pgvector へ一本化**する決定（v13 §9 #31 限定改訂・v1.26.0 ／
+> `CONSOLIDATED_DECISIONS.md` §17）により、**本節の「設計しない」は撤回**された。
+> **反転の理由**: 当時の却下根拠は「無料枠 DB 500MB 制約下で併存させる利点が薄い」であり、
+> **2026-09-08 の有料プラン決定で失効**していた。
+> **現行の設計実体**は `supabase/migrations/0100_rag_pgvector_knowledge_chunks.sql`（Tier 1/2/3 構造・PII ガード）にある。
+> ⚠️ **本書 §9「参考: 不採用となった設計案」に退避した pgvector 関連 DDL は、再評価の対象になる。**
+> ただし §9 の旧案は `text-embedding-004` 前提であり、**現行は 768次元の `gemini-embedding-001` で統一**する点が異なる。
+
+> [!success] ~~2026-08-16確定：pgvectorは採用しない~~（下記は当時の記録）
 > §3-3で述べたとおり、ナレッジ・RAG基盤はline-rag-bot（Firestore）へ統合されたため、本書は
 > pgvector拡張・埋め込みモデル・ベクトルインデックスのいずれも設計しない。埋め込みモデル選定・
 > 検索フィルタ実装はline-rag-bot側の設計領域に移った（同リポジトリの `docs/06-マルチテナント設計.md`
