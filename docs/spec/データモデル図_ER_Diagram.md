@@ -4,9 +4,9 @@ doc_type: 設計
 status: "Draft"
 owner: プロジェクトオーナー
 date: "2026-08-17"
-updated: 2026-09-05
+updated: 2026-09-12
 tags: ["浮遊街アプリ", "ER図", "データモデル", "スキーマ設計", "Supabase"]
-doc_version: "1.1.0"
+doc_version: "1.2.0"
 ---
 
 # 浮遊街アプリ データモデル図（ER図）
@@ -53,11 +53,34 @@ erDiagram
         uuid member_id PK "USERSへの1対1・FK・ON DELETE CASCADE"
         string full_name "氏名【個人情報】"
         string full_name_kana "氏名カナ【個人情報】"
+        string full_name_normalized "正規化本名(生成列)・照合キー【個人情報】"
         string birth_ym "誕生年月【個人情報】"
-        string address "住所【個人情報・宿泊法】"
+        string address "住所【個人情報】現在値。法定名簿ではない"
         string hometown "出身地【個人情報】"
         timestamp created_at "作成日時"
         timestamp updated_at "更新日時"
+    }
+
+    LODGING_REGISTER_ENTRIES {
+        uuid entry_id PK "宿泊者名簿ID"
+        uuid checkin_id FK "ON DELETE SET NULL"
+        uuid member_id FK "ON DELETE SET NULL・CASCADEにしない"
+        string full_name_snapshot "氏名の当時値【個人情報】参照にしない"
+        string address_snapshot "住所の当時値【個人情報】参照にしない"
+        string previous_location "前泊地【個人情報・宿泊法】"
+        string next_destination "後泊地【個人情報・宿泊法】"
+        date retention_until_on "保存期限(生成列)・3年"
+        string source "checkin/web_public/staff_manual/migration"
+    }
+
+    MEMBER_ROLE_CHANGES {
+        uuid change_id PK "権限変更ID"
+        uuid member_id FK "変更された会員"
+        string old_role "変更前ロール"
+        string new_role "変更後ロール"
+        uuid operator_id "操作者・member_idと別人であること(CHECK)"
+        string reason "変更理由・必須"
+        timestamp changed_at "変更日時"
     }
 
     MEMBER_IDENTIFIERS {
@@ -461,6 +484,10 @@ erDiagram
 
     MEDIA_COLLECTIONS ||--o{ MEDIA_ITEMS : "contains"
 
+    USERS |o..o{ LODGING_REGISTER_ENTRIES : "listed_in (SET NULL)"
+    BOOKINGS |o..o{ LODGING_REGISTER_ENTRIES : "records (SET NULL)"
+    USERS ||--o{ MEMBER_ROLE_CHANGES : "role_changed"
+
 ```
 
 ---
@@ -735,10 +762,10 @@ erDiagram
 | 個人情報 | ~~`PROFILES`~~ → **`MEMBER_PROFILES_PRIVATE`** | `member_profiles_private` | ✅ **2026-09-05 に本改訂で一致させた** |
 | 運営メモ | ~~`MEMBER_TYPES.notes`~~ → **`MEMBER_NOTES`** | `member_notes` | ✅ **2026-09-05 に本改訂で一致させた** |
 | メール・電話 | ~~`USERS.email` / `phone_number`~~ → **`MEMBER_IDENTIFIERS`** | `member_identifiers` | ✅ **2026-09-05 に本改訂で一致させた** |
-| 立場 | `MEMBER_TYPES`（別エンティティ） | `members.member_type`（1カラム） | ⚠️ **未解消**。1:1 の別テーブルにする必要がない |
-| 予約 | `BOOKINGS`（独立エンティティ） | `check_ins`（同一テーブル・`reservation_source` で経路を区別） | ⚠️ **未解消**。[[DB物理設計]] §3-12 も同じ不整合を自ら記録している |
+| 立場 | ~~`MEMBER_TYPES`（別エンティティ）~~ → **`USERS.member_type`（1カラム）** | `members.member_type`（1カラム） | ✅ **解消済み**。`MEMBER_TYPES` エンティティは本図から削除済みで、現在は `USERS` の1カラムとして描いている |
+| 予約 | `BOOKINGS`（独立エンティティ） | `check_ins`（同一テーブル・`reservation_source` で経路を区別） | ⚠️ **未解消**。[[DB物理設計]] §3-12 も同じ不整合を自ら記録している。**⚠️ 2026-09-12 追記：`lodging_register_entries.checkin_id` は物理では `check_ins(checkin_id)` を参照する。** 本図では便宜上 `BOOKINGS` へ線を引いているが、**名称統一を先に決めないと宿泊者名簿のリレーションが正しく描けない** |
 | 宿泊券 | `STAY_TICKETS.remaining_quantity`（**残高カラム**） | `stay_ticket_transactions`（**取引明細のみ・残高カラムを持たない**） | 🚫 **本図が誤り**。残高を直接カラムで持つ設計は、実データで15件の不整合を起こしたため**明示的に否決済み**（[[会員データモデル_ユーザーテーブル定義]] §1.3、v13 §9 #25） |
-| 前泊地・後泊地 | `PROFILES.previous_residence` / `next_destination` | **物理カラム未定義** | ⚠️ **未解消**。滞在ごとに変わる値のため会員マスタには置けない（[[DB物理設計]] §6-9 ①） |
+| 前泊地・後泊地 | ~~`PROFILES.previous_residence` / `next_destination`~~ → **`LODGING_REGISTER_ENTRIES`** | `lodging_register_entries.previous_location` / `next_destination` | ✅ **2026-09-05 解消**。滞在ごとに変わる値のため会員マスタには置けず、**宿泊者名簿テーブルを新設**して当時値のスナップショットとして持つ（[[DB物理設計]] §3-13＝§6-9 ① の解消） |
 
 > [!warning] `STAY_TICKETS.remaining_quantity` を実装の根拠にしない
 > v13 §9 #25 は「**残高カラムは集計キャッシュであり、正本は取引明細**」と定め、
@@ -1241,6 +1268,7 @@ Status: 実装前レビュー待ち
 | 版 | 日付 | 内容 |
 | --- | --- | --- |
 | **1.1.0** | **2026-08-20** | **正本 v1.15.0（2026-08-13 レビュー未反映分の一括反映）を反映**。①`ORDERS` に **`serving_status`（未提供／提供済み）・`served_at`・`served_by`** を追加。**決済ステータスとは独立した2軸**であり、同一カラムへ統合しない（正本 §5.4.1／§9 #39）。②`QUEST_COMPLETIONS` を**二段階承認**へ変更：`status` を `報告済み/コアメンバー確認済/承認完了/差戻し` とし、**`reviewed_by`（コアメンバー確認者）と `approved_by`（最終承認者＝admin）を別カラムで保持**。`review_skipped`・`rejection_reason` も追加（正本 §5.3.2／§9 #34）。③**`WORK_LOG_REVIEWS` を新設**（2人目以降の確認ログ）。④**`EUMO_GRANTS` を新設**：`未送付→送付済→受領確認済` を追跡し、**送付と受領を別状態で保持**（正本 §5.3.1／§9 #35）。⑤**`MENU_ITEMS`・`ACCOMMODATION_RATES` を新設**：Uii価格は保存せず都度算出、宿泊料金は**適用期間付きの履歴管理**（正本 §5.4.2／§9 #40）。⑥リレーションに `QUEST_COMPLETIONS→EUMO_GRANTS`（最終承認時に起票）・`MENU_ITEMS→ORDER_ITEMS`（注文時点の単価をコピー）・`ACCOMMODATION_RATES→BOOKINGS`（適用期間で解決）を追加。 |
+| **1.2.0** | **2026-09-12** | **2026-09-05 の会員スキーマ決定を反映**（オーナー決定：食い違いは新しい方を正とする）。①**`LODGING_REGISTER_ENTRIES` を新設**：旅館業法の法定名簿。前泊地・後泊地の「物理カラム未定義」を解消した（[[DB物理設計]] §3-13）。氏名・住所は**当時値のスナップショット**であり `MEMBER_PROFILES_PRIVATE` への参照にしない（参照にすると住所変更で過去の名簿が書き換わり、法定記録の遡及改変になる）。`member_id` は **`ON DELETE SET NULL`**（`CASCADE` にすると退会で法定記録が消える）。②**`MEMBER_ROLE_CHANGES` を新設**：`role` 変更の一次記録。`CHECK (member_id <> operator_id)` により**自己変更の記録を物理的に作れない**（§6-6b⑤）。汎用 `AUDIT_LOGS` では代替せず、その投影元として残す。③`MEMBER_PROFILES_PRIVATE` に **`full_name_normalized`（生成列）** を追加し、照合キーをカナから正規化本名へ変更（§3-14④）。④不整合表を更新：**立場（`MEMBER_TYPES`）は解消済み**（エンティティは既に削除済みだった）。⚠️ `STAY_TICKETS.remaining_quantity` と `BOOKINGS`/`check_ins` の統合は**別論点として未解消のまま残している**。 |
 | 1.0.0 | 2026-08-17 | 初版作成（論理設計レベル）。 |
 
 > [!important] 残枠は**エンティティを持たない**
