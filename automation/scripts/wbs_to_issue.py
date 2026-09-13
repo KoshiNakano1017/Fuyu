@@ -414,7 +414,11 @@ def build_issue(package_id: str, row: dict, matches: list[dict]) -> dict:
             + "\n".join(f"> - `{r['source']} {r['ref']}`" for r in other_refs)
         )
 
-    body = f"""> [!note] この Issue は `WBS_Phase1.md` から自動生成されました
+    # 機械可読マーカー。導線5（§10.1.5）がマージ後にどの作業パッケージの進捗を
+    # 更新すべきかを、この1行から決める。人間可読の「生成元」行を正規表現で読むと、
+    # 装飾（`**4-1**`）や取り消し線で簡単に破綻するため、別に置く。
+    body = f"""<!--wbs:{display_id}-->
+> [!note] この Issue は `WBS_Phase1.md` から自動生成されました
 > 生成元: **{display_id}**（{section} ／ L{row["_line"]}）／ 生成ワークフロー: `wbs-to-issue.yml`
 > 転記のみを行っており、仕様判断はしていません（設計 §0・§10.1.5 導線1）。
 

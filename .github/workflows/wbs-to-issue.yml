@@ -42,7 +42,7 @@ on:
   workflow_dispatch:
     inputs:
       package:
-        description: "作業パッケージ番号（例: 3-5b / 1-2 / 0-1 / 14-6）。太字・全角・§・空白は自動で吸収する"
+        description: "作業パッケージ番号（例: 3-5b）／ 機能領域（例: 4 ／ §4 ／ 朝会録音）。太字・全角・§・空白は自動で吸収する"
         required: true
         type: string
       resolve:
@@ -68,7 +68,120 @@ permissions:
   id-token: write
 
 jobs:
+  # ── 段0: 入力が「作業パッケージ」か「機能領域」かを振り分ける（設計 §10.1.5 導線4）──
+  #   作業パッケージとして引ければ従来どおり（create-issue）。
+  #   引けず、機能領域として特定できればエピック（create-epic）。
+  #   **どちらとも決まらない場合は package 側へ倒す** — 既存の曖昧一致（resolve）と
+  #   「見つかりません」の案内をそのまま使うためで、ここで新しい失敗経路を作らない。
+  route:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      mode: ${{ steps.decide.outputs.mode }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 入力の種別を判定する
+        id: decide
+        env:
+          INPUT: ${{ inputs.package }}
+        run: |
+          set -euo pipefail
+          MODE=package
+          if PYTHONIOENCODING=utf-8 python3 automation/scripts/wbs_to_issue.py "$INPUT" >/dev/null 2>&1; then
+            MODE=package
+          elif PYTHONIOENCODING=utf-8 python3 automation/scripts/wbs_epic.py --area "$INPUT" >/dev/null 2>&1; then
+            MODE=epic
+          fi
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+          echo "入力 '${INPUT}' → ${MODE}"
+
+  # ── エピック（機能領域）──────────────────────────────────────────
+  #   親 Issue を作り、依存順で先頭の未ブロック作業パッケージを**1件だけ**
+  #   子として払い出す。払い出しは本ワークフロー自身を再実行して行うため、
+  #   起草エージェントを含む create-issue の経路がそのまま再利用される。
+  create-epic:
+    needs: route
+    if: needs.route.outputs.mode == 'epic'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 機能領域を読み出す
+        id: epic
+        env:
+          INPUT: ${{ inputs.package }}
+        run: |
+          set -euo pipefail
+          PYTHONIOENCODING=utf-8 python3 automation/scripts/wbs_epic.py --area "$INPUT" > /tmp/epic.json
+          # 本文とタイトルは同一ジョブ内の /tmp から直接読む。
+          # GITHUB_OUTPUT を経由すると、本文に含まれる `EOF` 行や絵文字で壊れうる。
+          jq -r '.epic_title' /tmp/epic.json > /tmp/epic_title.txt
+          jq -r '.epic_body'  /tmp/epic.json > /tmp/epic_body.md
+          echo "next=$(jq -r '.next.id // empty' /tmp/epic.json)" >> "$GITHUB_OUTPUT"
+          echo "領域: $(jq -r '.section' /tmp/epic.json)"
+          echo "次に払い出す: $(jq -r '.next.id // "(なし)"' /tmp/epic.json)"
+
+      - name: ラベルの存在を保証する
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh label create "auto:epic" --repo "$REPO" --color "5319E7" \
+            --description "機能領域のエピック（実装対象ではない。設計 §10.1.5 導線4）" 2>/dev/null || true
+
+      - name: 親 Issue を作成する
+        id: create
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          URL="$(gh issue create --repo "$REPO" \
+            --title "$(cat /tmp/epic_title.txt)" \
+            --body-file /tmp/epic_body.md \
+            --label "auto:epic")"
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "number=${URL##*/}" >> "$GITHUB_OUTPUT"
+          echo "作成: $URL"
+
+      # 子は本ワークフローの再実行で作る。起草エージェント・needs-spec 判定などを
+      # 二重実装しないための委譲であり、payload を増やさない（設計 §12.1.4）。
+      - name: 先頭の子 Issue を払い出す
+        if: steps.epic.outputs.next != ''
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh workflow run wbs-to-issue.yml --repo "$REPO" \
+            -f package="${{ steps.epic.outputs.next }}" \
+            -f draft=true -f resolve=false -f start_loop=false
+          printf '%s\n\n%s\n' \
+            "子 Issue \`${{ steps.epic.outputs.next }}\` の起票を開始しました。数分後に Issues 一覧へ現れます。" \
+            "起草を読んだうえで **\`auto\` ラベル**を付けてください（これが承認です。設計 §10.1.5 導線4）。" \
+            > /tmp/comment.md
+          gh issue comment "${{ steps.create.outputs.number }}" --repo "$REPO" --body-file /tmp/comment.md
+
+      - name: 払い出せるものが無い場合を通知する
+        if: steps.epic.outputs.next == ''
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          printf '%s\n\n%s\n%s\n' \
+            "⚠️ **いま払い出せる作業パッケージがありません。**" \
+            "配下がすべて「完了」「ブロック中」「依存待ち」「対象外」のいずれかです。上の表の状態欄を確認してください。" \
+            "ブロックが解けたら、この機能領域をもう一度実行すれば続きから払い出します。" \
+            > /tmp/comment.md
+          gh issue comment "${{ steps.create.outputs.number }}" --repo "$REPO" --body-file /tmp/comment.md
+
   create-issue:
+    needs: route
+    if: needs.route.outputs.mode == 'package'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

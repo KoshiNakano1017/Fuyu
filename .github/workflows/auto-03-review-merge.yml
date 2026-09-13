@@ -126,16 +126,56 @@ jobs:
           ref: ${{ needs.context.outputs.branch }}
           fetch-depth: 0
 
-      - name: 仕様書が変更されていないことを確認
+      # ── ガード① : WBS 以外の仕様書に差分があれば失敗（設計 §8.2） ──────────
+      #   WBS_Phase1.md だけは導線5（設計 §10.1.5）が進捗セルを更新するため除外する。
+      #   除外した分は下の「ガード②」が構造比較で受ける。**緩和ではなく差し替え。**
+      - name: 仕様書が変更されていないことを確認（WBS を除く）
         run: |
           set -euo pipefail
-          CHANGED="$(git diff --name-only origin/main...HEAD -- 'docs/spec/' || true)"
+          CHANGED="$(git diff --name-only origin/main...HEAD \
+            -- 'docs/spec/' ':(exclude)docs/spec/WBS_Phase1.md' || true)"
           if [ -n "$CHANGED" ]; then
             echo "::error::自律ループは docs/spec/ を変更できません（自律開発ループ設計 §0・§8.2）"
             printf '%s\n' "$CHANGED"
             exit 1
           fi
-          echo "docs/spec/ に差分なし"
+          echo "docs/spec/（WBS を除く）に差分なし"
+
+      # ── ガード② : WBS の差分が許可セルだけかを構造比較で検証（設計 §8.2） ──
+      #   許可は「Issue が指す作業パッケージ1行の、実装 / 総合 / ステータス」だけ。
+      #   grep ではなく表としてパースして比べる。パース不能は失敗させる（安全側）。
+      - name: WBS の変更が進捗セルだけかを確認
+        env:
+          ISSUE: ${{ needs.context.outputs.issue }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
+        run: |
+          set -euo pipefail
+
+          if ! git diff --quiet origin/main...HEAD -- 'docs/spec/WBS_Phase1.md'; then
+            echo "WBS に差分あり。許可範囲かを検証する"
+          else
+            echo "WBS に差分なし"
+            exit 0
+          fi
+
+          # どの作業パッケージの進捗なのかは Issue 本文のマーカーが正（設計 §10.1.5 導線5）。
+          PKG="$(gh issue view "$ISSUE" --repo "$REPO" --json body \
+            --jq '.body' | grep -oE '<!--wbs:[^>]+-->' | head -1 \
+            | sed -E 's/<!--wbs:(.*)-->/\1/' || true)"
+
+          if [ -z "$PKG" ]; then
+            echo "::error::Issue #${ISSUE} に <!--wbs:...--> マーカーがありません。"
+            echo "::error::どの作業パッケージの進捗か特定できないため、WBS の変更を許可できません。"
+            exit 1
+          fi
+          echo "対象の作業パッケージ: ${PKG}"
+
+          git show origin/main:docs/spec/WBS_Phase1.md > /tmp/wbs_base.md
+          PYTHONIOENCODING=utf-8 python3 automation/scripts/wbs_guard.py \
+            --base /tmp/wbs_base.md \
+            --head docs/spec/WBS_Phase1.md \
+            --package "$PKG"
 
   # ── CI（ci.yml）の結果を待つ（設計 §7「CI が赤い PR をマージしない」）──
   # 自分自身のチェックを待って自己デッドロックしないよう、ci.yml の run だけを直接見る。
