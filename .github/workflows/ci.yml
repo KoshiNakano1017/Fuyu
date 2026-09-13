@@ -126,6 +126,13 @@ jobs:
   # Lint / 型チェック / テスト / ビルド
   # package.json が存在する場合のみ実行（実装着手前は自動でスキップ）
   # ───────────────────────────────────────────
+      # 自動化の「宣言と実態」の一致を検査する（2026-09-13 追加）。
+      # 段取り表に書いた工程が未着手のまま完了扱いになるのを防ぐ。
+      - name: 自律ループの段取り検査
+        run: |
+          python3 automation/scripts/check_agents.py
+          python3 automation/scripts/check_stages.py
+
   build-and-test:
     name: Lint・型・テスト・ビルド
     runs-on: ubuntu-latest

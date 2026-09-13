@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -114,16 +115,45 @@ def load_settings(name: str) -> tuple[dict | None, str | None]:
 
 
 def blocks_writes_to(settings: dict, glob: str) -> bool:
-    """`glob` 配下への書き込みが settings で塞がれているかを判定する。
+    """`glob` 配下への書き込みが塞がれているかを判定する。
 
-    ツールごと全面拒否（`"Write"`）でも、パス指定の拒否（`"Write(tests/**)"`）でもよい。
-    片方だけ（Edit は塞いだが Write は空いている等）は塞がったとみなさない。
+    ⚠️ 2026-09-13 修正。以前の実装は `"Write(tests/**)"` を有効な防御として数えていたが、
+    **Claude Code はパス規則を `Edit(path)` と `Read(path)` にしか適用しない。**
+    `Write(...)` / `NotebookEdit(...)` / `Glob(...)` のパス規則は
+    「受け付けるが参照しない」（起動時に警告を出すだけ）。
+    つまり `Write(tests/**)` は無効で、コーディングエージェントは Write で
+    tests/ 配下を上書きできる状態だった（設計 §11.6 の commit-first が破れる）。
+
+    有効な防御は次のいずれか:
+      1. `"Edit(<glob>)"` … Edit はパス規則が効く
+      2. 加えて Write を塞ぐ手段
+         a. `"Write"`（ツールごと全面拒否）… 新規ファイルが作れなくなる
+         b. オーケストレータの PreToolUse フック
+            （automation/orchestrator/lib/runAgent.mjs が Edit の拒否から Write 拒否を補完する）
+
+    ここでは 1 を必須とし、2 は b があるため合格として扱う。
+    `Write(<glob>)` しか無い場合は**塞がっていない**と判定する。
     """
     deny = set(settings.get("permissions", {}).get("deny", []))
-    for tool in ("Write", "Edit"):
-        if tool not in deny and f"{tool}({glob})" not in deny:
-            return False
-    return True
+    edit_blocked = "Edit" in deny or f"Edit({glob})" in deny
+    return edit_blocked
+
+
+def inert_path_rules(settings: dict) -> list[str]:
+    """参照されないパス規則（`Write(...)` 等）を列挙する。
+
+    設定の書き手が「塞いだつもり」になるのを防ぐための警告材料。
+    存在しても違反にはしない（オーケストレータのフックが補完するため）が、
+    黙って無効になっているより、名指しで見えているほうがよい。
+    """
+    permissions = settings.get("permissions", {})
+    inert: list[str] = []
+    for bucket in ("allow", "deny", "ask"):
+        for rule in permissions.get(bucket, []):
+            match = re.match(r"^(Write|NotebookEdit|Glob|MultiEdit)\((.+)\)$", str(rule))
+            if match:
+                inert.append(f"{bucket}: {rule}")
+    return inert
 
 
 def check_agent(path: Path) -> list[str]:
@@ -166,6 +196,10 @@ def check_agent(path: Path) -> list[str]:
             problems.append(
                 "`docs/spec/` への書き込みが塞がれていない（設計 §0 ／ §8.2 の二重防御①）"
             )
+        for rule in inert_path_rules(settings):
+            print(f"  [warn] {path.name}: 参照されないパス規則があります（{rule}）。"
+                  "Claude Code は Write/NotebookEdit/Glob のパス規則を評価しません。"
+                  "実効はオーケストレータの PreToolUse フックが担保しています")
         if path.stem in TEST_GUARDED and not blocks_writes_to(settings, "tests/**"):
             problems.append(
                 "`tests/` への書き込みが塞がれていない。"

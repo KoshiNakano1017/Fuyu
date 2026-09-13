@@ -1,0 +1,21 @@
+# 改行コードの正規化。
+#
+# 開発は Windows（core.autocrlf=true）で行うが、CI と GitHub Actions は Linux で動く。
+# シェルスクリプトが CRLF で checkout されると `bad interpreter: /usr/bin/env bash^M`
+# で落ちる。拡張子ごとに明示して、環境設定に依存させない。
+* text=auto eol=lf
+
+*.sh      text eol=lf
+*.mjs     text eol=lf
+*.yml     text eol=lf
+*.yaml    text eol=lf
+*.json    text eol=lf
+*.py      text eol=lf
+.githooks/*  text eol=lf
+
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.gif     binary
+*.webp    binary
+*.ico     binary

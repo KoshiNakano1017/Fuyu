@@ -12,7 +12,10 @@
 # ── 修正ループの回り方 ──
 #   修正エージェントが push する → ci.yml が走る → pull_request(synchronize) で
 #   このワークフローが再び起動する → レビューからやり直す。
-#   回数は Issue コメントの `<!--retry-->` マーカーで数え、5回で停止する（設計 §4.3・§6.2）。
+#   回数は automation/state/issue-<n>.json で数える（段7 ／ 2026-09-13）。
+#   種別を infra / verify / review の3つに分け、エラー指紋が2回続いたら止める。
+#   旧版は Issue コメントの `<!--retry-->` を数える1種類で、基盤エラーでも
+#   上限まで空回りしていた（試運転で2件踏んだ・設計 §12.1.8 #5）。
 
 name: 自律ループ 03 検証・マージ
 
@@ -26,8 +29,19 @@ on:
 # auto-02 のブランチ命名（feature/issue-<N>）へ寄せて解決する。
 # 全体を1グループにしないのは、承認待ち（最大30日・設計 §8.3）の run が
 # 他タスクのレビューを堰き止めてしまうため。
+# ⚠️ 2026-09-13 修正（Issue #4 の自己ロックと同型の不具合）
+# `issues: types:[labeled]` はラベル名で絞れないため、ラベルが動くたびに run が作られる。
+# 旧設定は空振り run も同じ concurrency グループへ入れており、
+# ワークフロー自身のラベル書き込みが生成した run が、pending 中の本番 run を
+# キャンセルしていた（GitHub は1グループにつき pending を1本しか保持しない）。
+# 実際に仕事をする run だけを本番グループへ入れ、空振りは run_id で隔離する。
 concurrency:
-  group: auto-review-${{ github.event.pull_request.head.ref || format('feature/issue-{0}', github.event.issue.number) }}
+  group: >-
+    ${{ github.event_name == 'pull_request'
+        && format('auto-review-{0}', github.event.pull_request.head.ref)
+        || (github.event.label.name == 'auto:review'
+            && format('auto-review-feature/issue-{0}', github.event.issue.number)
+            || format('auto-review-noop-{0}', github.run_id)) }}
   cancel-in-progress: false
 
 permissions:
@@ -163,346 +177,124 @@ jobs:
           fi
           echo "green=${GREEN}" >> "$GITHUB_OUTPUT"
 
-  # ── レビュー 5a: コード品質（設計 §3 #5a）─────────────────────────
-  # 5a・5b・5c は並列。観点を混ぜた1体より、観点を絞った3体のほうが見落としが減る（設計 §3）。
-  review-quality:
-    needs: context
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    outputs:
-      result: ${{ steps.mark.outputs.result }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.context.outputs.branch }}
-          fetch-depth: 0
-
-      - name: 差分を取り出す
-        run: |
-          set -euo pipefail
-          git diff origin/main...HEAD > /tmp/pr-diff.patch
-          wc -l /tmp/pr-diff.patch
-
-      - name: レビューエージェント（コード品質）
-        id: agent
-        uses: anthropics/claude-code-action@v1
-        with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          claude_args: '--model ${{ env.MODEL }} --effort xhigh'
-          # 読み取り専用。書き込み権限は settings で機械的に落とす（設計 §7.2）。
-          settings: automation/settings/readonly.json
-          prompt: |
-            automation/agents/review-quality.md を読み、その指示に従うこと。
-            対象 Issue 番号: ${{ needs.context.outputs.issue }}
-            対象 PR 番号: ${{ needs.context.outputs.pr }}
-            差分: /tmp/pr-diff.patch
-
-      # readonly.json は Bash を全面拒否するため、エージェントは gh を叩けない。
-      # 設計 §3 が定める出力先（PR コメント）への転記はワークフローが行う。
-      - name: レビュー結果を転記し、マーカーを読む
-        id: mark
-        env:
-          GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-        run: |
-          set -uo pipefail
-          bash automation/scripts/post_agent_output.sh \
-            "${{ steps.agent.outputs.execution_file }}" \
-            pr "${{ needs.context.outputs.pr }}" \
-            "auto-03 / レビュー 5a コード品質" /tmp/review-quality.md
-          # マーカーが読めないときは安全側（findings）へ倒す。
-          RESULT=findings
-          if grep -q '<!--review kind=quality result=pass-->' /tmp/review-quality.md 2>/dev/null; then
-            RESULT=pass
-          fi
-          echo "result=${RESULT}" >> "$GITHUB_OUTPUT"
-          echo "5a: ${RESULT}"
-
-  # ── レビュー 5b: 仕様適合（設計 §3 #5b・§11.6）──────────────────
-  # commit-first を機械的に補強する。ワークツリーには**マージ先（main）の状態だけ**を展開し、
-  # 今回の実装を置かない。差分は /tmp/pr-diff.patch にだけ置く。
-  # プロンプトは「第1部（あるべき要件の列挙）を書き終えるまでこのファイルを開かない」と定めている。
-  # 差分を先に読むと合格率だけが上がって正答率が動かないため（設計 §11.6）。
-  review-spec:
-    needs: context
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    outputs:
-      result: ${{ steps.mark.outputs.result }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
-
-      - name: 差分をワークツリーの外へ取り出す
-        run: |
-          set -euo pipefail
-          git fetch --no-tags origin "${{ needs.context.outputs.branch }}"
-          git diff "origin/main...origin/${{ needs.context.outputs.branch }}" > /tmp/pr-diff.patch
-          wc -l /tmp/pr-diff.patch
-
-      - name: レビューエージェント（仕様適合）
-        id: agent
-        uses: anthropics/claude-code-action@v1
-        with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          claude_args: '--model ${{ env.MODEL }} --effort xhigh'
-          settings: automation/settings/readonly.json
-          prompt: |
-            automation/agents/review-spec.md を読み、その指示に従うこと。
-            対象 Issue 番号: ${{ needs.context.outputs.issue }}
-            対象 PR 番号: ${{ needs.context.outputs.pr }}
-            差分: /tmp/pr-diff.patch（第1部を書き終えるまで開かないこと）
-
-      - name: レビュー結果を転記し、マーカーを読む
-        id: mark
-        env:
-          GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-        run: |
-          set -uo pipefail
-          bash automation/scripts/post_agent_output.sh \
-            "${{ steps.agent.outputs.execution_file }}" \
-            pr "${{ needs.context.outputs.pr }}" \
-            "auto-03 / レビュー 5b 仕様適合" /tmp/review-spec.md
-          RESULT=findings
-          if grep -q '<!--review kind=spec result=pass-->' /tmp/review-spec.md 2>/dev/null; then
-            RESULT=pass
-          fi
-          echo "result=${RESULT}" >> "$GITHUB_OUTPUT"
-          echo "5b: ${RESULT}"
-
-  # ── レビュー 5c: 個人情報・機密（設計 §3 #5c）───────────────────
-  # gitleaks も pre-commit のパスガードも日本語の氏名・住所を検出できない（CLAUDE.md §3.1）。
-  # public リポジトリで一度 push したら取り消せない以上、ここが最後の防波堤になる。
-  review-privacy:
-    needs: context
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    outputs:
-      result: ${{ steps.mark.outputs.result }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.context.outputs.branch }}
-          fetch-depth: 0
-
-      - name: 差分を取り出す
-        run: |
-          set -euo pipefail
-          git diff origin/main...HEAD > /tmp/pr-diff.patch
-          wc -l /tmp/pr-diff.patch
-
-      - name: レビューエージェント（個人情報・機密）
-        id: agent
-        uses: anthropics/claude-code-action@v1
-        with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          claude_args: '--model ${{ env.MODEL }} --effort xhigh'
-          settings: automation/settings/readonly.json
-          prompt: |
-            automation/agents/review-privacy.md を読み、その指示に従うこと。
-            対象 Issue 番号: ${{ needs.context.outputs.issue }}
-            対象 PR 番号: ${{ needs.context.outputs.pr }}
-            差分: /tmp/pr-diff.patch
-
-      - name: レビュー結果を転記し、マーカーを読む
-        id: mark
-        env:
-          GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-        run: |
-          set -uo pipefail
-          bash automation/scripts/post_agent_output.sh \
-            "${{ steps.agent.outputs.execution_file }}" \
-            pr "${{ needs.context.outputs.pr }}" \
-            "auto-03 / レビュー 5c 個人情報・機密" /tmp/review-privacy.md
-          # reject を先に見る。実在の個人情報の疑いは修正エージェントに渡さず、人間へ上げる。
-          RESULT=findings
-          if grep -q '<!--reject phase=review kind=privacy-->' /tmp/review-privacy.md 2>/dev/null; then
-            RESULT=reject
-          elif grep -q '<!--review kind=privacy result=pass-->' /tmp/review-privacy.md 2>/dev/null; then
-            RESULT=pass
-          fi
-          echo "result=${RESULT}" >> "$GITHUB_OUTPUT"
-          echo "5c: ${RESULT}"
-
-  # ── レビュー3種の集計 ─────────────────────────────────────────
+  # ── レビュー・修正オーケストレータ（段7 ／ 2026-09-13）──────────────
+  #
+  # 5a・5b・5c は引き続き並列。観点を混ぜた1体より、観点を絞った3体のほうが
+  # 見落としが減る（設計 §3.0）。並列化はジョブではなくプロセス内で行う。
+  #
+  # 旧版はここに6ジョブ（review-quality / review-spec / review-privacy /
+  # verdict / blocked-privacy / fix）が並び、各ジョブが claude-code-action を呼んで
+  # 出力を PR コメントへ転記し、`<!--review kind=... result=...-->` を grep していた。
+  # 修正1回ごとにワークフローを一周していたため、型エラー1つ直すのに
+  # 再 checkout と文脈の読み直しが発生していた（設計 §12.1.8 #2）。
+  #
+  # 本版は automation/orchestrator/review.mjs が
+  #   5a/5b/5c 並列 → 修正 → verify.sh → テスト sha256 照合 → spec_ref の sha 再検証
+  # を1プロセスで回す。**ジョブ ID は verdict のまま**にしてある。
+  # 後続の risk / merge / report が `needs.verdict.outputs.findings` と
+  # `privacy_reject` を読んでおり、そこを変えずに中身だけ差し替えるため。
   verdict:
-    needs: [context, review-quality, review-spec, review-privacy]
-    if: always() && needs.context.result == 'success'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    outputs:
-      findings: ${{ steps.sum.outputs.findings }}
-      privacy_reject: ${{ steps.sum.outputs.privacy_reject }}
-    steps:
-      - name: 必須指摘の有無を判定する
-        id: sum
-        env:
-          Q: ${{ needs.review-quality.outputs.result }}
-          S: ${{ needs.review-spec.outputs.result }}
-          P: ${{ needs.review-privacy.outputs.result }}
-        run: |
-          set -euo pipefail
-          echo "5a=${Q:-未取得} / 5b=${S:-未取得} / 5c=${P:-未取得}"
-          PRIVACY_REJECT=false
-          if [ "${P:-}" = "reject" ]; then PRIVACY_REJECT=true; fi
-          # 「pass 以外はすべて指摘あり」とする。ジョブが落ちた・マーカーが読めなかった場合も
-          # 指摘ありとして扱う（安全側。設計 §4.1「高リスクを低と誤判定するのが唯一の致命的な失敗」）。
-          FINDINGS=true
-          if [ "${Q:-}" = "pass" ] && [ "${S:-}" = "pass" ] && [ "${P:-}" = "pass" ]; then
-            FINDINGS=false
-          fi
-          echo "findings=${FINDINGS}" >> "$GITHUB_OUTPUT"
-          echo "privacy_reject=${PRIVACY_REJECT}" >> "$GITHUB_OUTPUT"
-          echo "指摘あり: ${FINDINGS} / 個人情報での停止: ${PRIVACY_REJECT}"
-
-  # ── 停止: 実在の個人情報の疑い（設計 §7.1・CLAUDE.md §3.1）──────────
-  # 自動修正で扱ってよい事象ではない。git rm --cached では履歴に残り、
-  # public リポジトリでは一度 push した時点で取り消せないため。
-  blocked-privacy:
-    needs: [context, verdict]
-    if: always() && needs.verdict.outputs.privacy_reject == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - name: auto:blocked へ付け替えて通知
-        env:
-          GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
-          ISSUE: ${{ needs.context.outputs.issue }}
-          PR: ${{ needs.context.outputs.pr }}
-          REPO: ${{ github.repository }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          set -euo pipefail
-          gh issue edit "$ISSUE" --repo "$REPO" \
-            --remove-label "auto:review" --add-label "auto:blocked" || true
-          printf '%s\n\n%s\n\n%s\n\n%s\n' \
-            "@${OWNER} **レビュー 5c が実在の個人情報の疑いを検出したため停止しました。**" \
-            "PR #${PR} の 5c コメントを確認してください。自動修正には渡していません（public リポジトリでは push 済みの内容を取り消せないため・CLAUDE.md §3.1）。" \
-            "ダミーデータの誤検出だった場合は、その旨を Issue にコメントし、ラベルを \`auto:review\` に戻すと再開します。" \
-            "実行: ${RUN_URL}" > notice.md
-          gh issue comment "$ISSUE" --repo "$REPO" --body-file notice.md
-
-  # ── 修正（設計 §3 #6・§4.3・§6.2）──────────────────────────────
-  # レビューに指摘があるか、CI が赤いときに動く。
-  # push が pull_request(synchronize) を起こし、このワークフローが最初から回り直す。
-  fix:
-    needs: [context, verdict, ci-status, spec-guard]
+    needs: [context, spec-guard, ci-status]
     if: >-
       always()
       && needs.context.result == 'success'
       && needs.spec-guard.result == 'success'
-      && needs.verdict.outputs.privacy_reject != 'true'
-      && (needs.verdict.outputs.findings == 'true' || needs.ci-status.outputs.green != 'true')
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
+    outputs:
+      findings: ${{ steps.orc.outputs.findings }}
+      privacy_reject: ${{ steps.orc.outputs.privacy_reject }}
+      blocked: ${{ steps.orc.outputs.blocked }}
+      reason: ${{ steps.orc.outputs.reason }}
     steps:
-      # 設計 §6.2 のリトライ判定。5回に達したら通知して停止する（設計 §4.3）。
-      - name: リトライ回数の判定
-        env:
-          GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
-          ISSUE: ${{ needs.context.outputs.issue }}
-          REPO: ${{ github.repository }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          set -euo pipefail
-          COUNT="$(gh issue view "$ISSUE" --repo "$REPO" --json comments \
-            --jq '[.comments[].body | select(test("^<!--retry-->"))] | length')"
-          echo "これまでのリトライ: ${COUNT}回"
-          if [ "$COUNT" -ge 5 ]; then
-            gh issue comment "$ISSUE" --repo "$REPO" \
-              --body "@${OWNER} リトライが5回に達したため自動処理を停止しました。最後の実行: ${RUN_URL}"
-            gh issue edit "$ISSUE" --repo "$REPO" \
-              --remove-label "auto:review" --add-label "auto:blocked"
-            exit 1
-          fi
-          # 回数を数えるためのマーカーは機械が置く（エージェントに任せると数が揺れる）。
-          printf '%s\n\n%s\n' \
-            '<!--retry-->' \
-            "修正エージェントを起動します（$((COUNT + 1))回目）。実行: ${RUN_URL}" > retry.md
-          gh issue comment "$ISSUE" --repo "$REPO" --body-file retry.md
-
+      # PAT で checkout する。修正コミットの push が ci.yml を起動する必要があるため（設計 §8.1）。
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.context.outputs.branch }}
           fetch-depth: 0
           token: ${{ secrets.AUTOMATION_PAT }}
 
-      - name: 修正エージェント
-        id: agent
-        uses: anthropics/claude-code-action@v1
+      - uses: actions/setup-node@v4
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          claude_args: '--model ${{ env.MODEL }} --effort high'
-          settings: automation/settings/code.json
-          prompt: |
-            automation/agents/fix.md を読み、その指示に従うこと。
-            対象 Issue 番号: ${{ needs.context.outputs.issue }}
-            対象 PR 番号: ${{ needs.context.outputs.pr }}
+          node-version-file: .nvmrc
+          cache: npm
 
-      - name: 修正の出力を転記し、マーカーを読む
-        id: mark
+      - name: 依存をインストール
+        run: npm ci --no-audit --no-fund
+
+      - name: エージェント定義と段取りの検査
+        run: |
+          python3 automation/scripts/check_agents.py
+          python3 automation/scripts/check_stages.py
+
+      - name: レビュー・修正オーケストレータ
+        id: orc
         env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          ORC_MAX_TURNS: '60'
         run: |
-          set -uo pipefail
-          bash automation/scripts/post_agent_output.sh \
-            "${{ steps.agent.outputs.execution_file }}" \
-            pr "${{ needs.context.outputs.pr }}" \
-            "auto-03 / 修正" /tmp/fix-output.md
-          if grep -q '<!--blocked-->' /tmp/fix-output.md 2>/dev/null; then
-            echo "blocked=true" >> "$GITHUB_OUTPUT"
-            echo "::error::修正エージェントが停止しました"
-            exit 1
-          fi
+          node automation/orchestrator/review.mjs             --issue "${{ needs.context.outputs.issue }}"             --pr "${{ needs.context.outputs.pr }}"             --base origin/main
 
-      - name: 修正をコミットして push する
+      # 修正が入った場合のみ push する。push が ci.yml を起こし、
+      # pull_request(synchronize) でこのワークフローが再び回る（設計 §6.2 の修正ループ）。
+      - name: 修正を push する
+        if: always()
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          SPEC_CHANGED="$(git status --porcelain -- docs/spec | sed 's/^...//' || true)"
-          if [ -n "$SPEC_CHANGED" ]; then
-            echo "::error::自律ループは docs/spec/ を変更できません（設計 §0・§8.2）"
-            printf '%s\n' "$SPEC_CHANGED"
-            exit 1
-          fi
+          # 受入テストと docs/spec/ は触らせない。orchestrator 内でも見ているが、
+          # push の直前にもう一度見る（設計 §7.2 の二重化）。
+          for guarded in docs/spec tests; do
+            DIRTY="$(git status --porcelain -- "$guarded" | sed 's/^...//' || true)"
+            if [ -n "$DIRTY" ]; then
+              echo "::error::${guarded} が変更されています（設計 §0・§11.6）"
+              printf '%s\n' "$DIRTY"
+              exit 1
+            fi
+          done
           if git diff --quiet && [ -z "$(git ls-files --others --exclude-standard)" ]; then
-            echo "::error::修正エージェントが何も変更していません。指摘に対応できていない可能性があります"
-            exit 1
+            echo "修正なし。push しません"
+            exit 0
           fi
           git add -A
           git commit -F - <<'COMMIT_MSG'
-          fix: レビュー指摘とCI失敗に対応する (Issue #${{ needs.context.outputs.issue }})
+          fix: レビュー指摘への対応
 
-          レビュー 5a・5b・5c の指摘と CI の失敗を修正する。
-          対応・非対応の内訳は PR コメント「auto-03 / 修正」を参照。
-          根拠: docs/自律開発ループ設計.md §3 #6、CLAUDE.md §6.2
+          レビュー 5a/5b/5c の [必須] 指摘を修正し、verify.sh（型・lint・単体）を通した。
+          根拠: docs/自律開発ループ設計.md §3 #6・§12.1.2 ORC3
           COMMIT_MSG
-          # PAT で checkout してあるため、この push は ci.yml と本ワークフローを再び起動する（設計 §8.1）。
-          git push origin "HEAD:${{ needs.context.outputs.branch }}"
+          git push origin HEAD:"${{ needs.context.outputs.branch }}"
 
-      - name: 修正が停止した場合の通知
-        if: failure() && steps.mark.outputs.blocked == 'true'
+  # ── 停止: 個人情報の検出・修正の非収束・テスト改変など ────────────
+  blocked-review:
+    needs: [context, verdict]
+    if: always() && needs.verdict.outputs.blocked == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: auto:blocked へ付け替えて通知
         env:
           GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
           ISSUE: ${{ needs.context.outputs.issue }}
           REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REASON: ${{ needs.verdict.outputs.reason }}
         run: |
           set -euo pipefail
           gh issue edit "$ISSUE" --repo "$REPO" \
             --remove-label "auto:review" --add-label "auto:blocked" || true
-          printf '%s\n\n%s\n' \
-            "@${OWNER} 修正エージェントが停止しました。指摘どおり直すと振る舞い（誰に何が見えるか）が変わる可能性があります（設計 §7.1）。PR のコメントを確認してください。" \
-            "実行: ${RUN_URL}" > notice.md
+          {
+            echo "@${OWNER} 検証フェーズが停止しました。"
+            echo
+            echo "${REASON:-理由は PR / Issue のコメントを参照してください。}"
+            echo
+            echo '再開は `auto:blocked` を外し、`auto:review` を付け直してください。'
+            echo
+            echo "実行: ${RUN_URL}"
+          } > notice.md
           gh issue comment "$ISSUE" --repo "$REPO" --body-file notice.md
-
-  # ── リスク判定と、低リスク自動通過の6条件（設計 §4.1）────────────────
-  # ここで決まるのは1点だけ ── ゲート3を経由するか、省略できるか。
   risk:
     needs: [context, verdict, ci-status, spec-guard]
     if: >-

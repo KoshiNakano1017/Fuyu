@@ -23,8 +23,17 @@ on:
 
 # 設計 §8.3: 実装フェーズは1本に直列化する（マージ競合とレビュー負荷を避けるため）。
 # Issue 番号を含めないのは、Issue をまたいで直列化することが目的だから。
+# ⚠️ 2026-09-13 修正（Issue #4 の自己ロックと同型の不具合）
+# `issues: types:[labeled]` はラベル名で絞れないため、ラベルが動くたびに run が作られる。
+# 旧設定は空振り run も同じ concurrency グループへ入れており、
+# ワークフロー自身のラベル書き込みが生成した run が、pending 中の本番 run を
+# キャンセルしていた（GitHub は1グループにつき pending を1本しか保持しない）。
+# 実際に仕事をする run だけを本番グループへ入れ、空振りは run_id で隔離する。
 concurrency:
-  group: auto-implement
+  group: >-
+    ${{ github.event.label.name == 'auto:approved'
+        && 'auto-implement'
+        || format('auto-implement-noop-{0}', github.run_id) }}
   cancel-in-progress: false
 
 permissions:
@@ -49,8 +58,8 @@ jobs:
     outputs:
       branch: ${{ steps.branch.outputs.name }}
       pr: ${{ steps.pr.outputs.number }}
-      blocked: ${{ steps.tests-marker.outputs.blocked || steps.impl-marker.outputs.blocked }}
-      reason: ${{ steps.tests-marker.outputs.reason || steps.impl-marker.outputs.reason }}
+      blocked: ${{ steps.orc-tests.outputs.blocked || steps.orc-code.outputs.blocked }}
+      reason: ${{ steps.orc-tests.outputs.reason || steps.orc-code.outputs.reason }}
     steps:
       # PAT で checkout する。以降の push がこの資格情報を使うため、
       # push イベントが ci.yml を起動する（GITHUB_TOKEN では起動しない・設計 §8.1）。
@@ -91,42 +100,37 @@ jobs:
 
       # ── テスト設計: 仕様だけを見て受入テストを先に書く（設計 §3 #3・§11.6）──
       # 書き込み範囲は tests/ のみ。settings/test.json で機械的に制限する（設計 §7.2）。
-      - name: テスト設計エージェント
-        id: test-design
-        uses: anthropics/claude-code-action@v1
+      # ── 段7（2026-09-13）: エージェント2体の直接起動を、
+      #    実装オーケストレータ（automation/orchestrator/implement.mjs）へ置き換えた。
+      #    旧版は claude-code-action を2回呼び、その出力を Issue コメントへ転記して
+      #    `<!--tests:designed-->` / `<!--implemented-->` を grep していた。
+      #    マーカーが空振りすると判定を読めず、verify も CI 一周でしか回せなかった。
+      - uses: actions/setup-node@v4
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          claude_args: '--model ${{ env.MODEL }} --effort high'
-          settings: automation/settings/test.json
-          prompt: |
-            automation/agents/test-design.md を読み、その指示に従うこと。
-            対象 Issue 番号: ${{ github.event.issue.number }}
+          node-version-file: .nvmrc
+          cache: npm
 
-      # test.json は gh を許可していないため、エージェントは Issue に到達できない。
-      # 転記はワークフローが行う（auto-01 の「権限不足で出力先に届かない」不具合の再発防止）。
-      - name: テスト設計の出力を転記し、マーカーを読む
-        id: tests-marker
+      # --omit=optional は付けない。Agent SDK は実行バイナリを
+      # optionalDependencies で配るため、省くと起動できない。
+      - name: 依存をインストール
+        run: npm ci --no-audit --no-fund
+
+      - name: エージェント定義と段取りの検査
+        run: |
+          python3 automation/scripts/check_agents.py
+          python3 automation/scripts/check_stages.py
+
+      # テスト設計だけを先に走らせる。実装と同じプロセスで回さないのは、
+      # 受入テストを **単独のコミット** として git 履歴に残すため（設計 §11.6）。
+      # テストの sha256 は automation/state/issue-<n>.json に残り、次の起動へ引き継がれる。
+      - name: 実装オーケストレータ（テスト設計）
+        id: orc-tests
         env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-        run: |
-          set -uo pipefail
-          bash automation/scripts/post_agent_output.sh \
-            "${{ steps.test-design.outputs.execution_file }}" \
-            issue "${{ github.event.issue.number }}" \
-            "auto-02 / テスト設計" /tmp/test-design-output.md
-          if grep -q '<!--blocked-->' /tmp/test-design-output.md 2>/dev/null; then
-            echo "blocked=true" >> "$GITHUB_OUTPUT"
-            echo "reason=テスト設計が停止しました。完了条件を受入テストへ変換できていません（ゲート2からやり直してください）" >> "$GITHUB_OUTPUT"
-            echo "::error::テスト設計が停止しました"
-            exit 1
-          fi
-          if ! grep -q '<!--tests:designed-->' /tmp/test-design-output.md 2>/dev/null; then
-            echo "::warning::テスト設計の完了マーカーが見つかりません。出力の転記に失敗した可能性があります"
-          fi
-
-      # commit-first（設計 §11.6）。実装より前にテストを単独のコミットとして確定させる。
-      # 後段のコーディング・修正はこのコミットを書き換えない規律で動く。
+          ORC_MAX_TURNS: '40'
+        run: node automation/orchestrator/implement.mjs --issue "${{ github.event.issue.number }}" --phase tests
       - name: 受入テストだけを先にコミットする
         run: |
           set -euo pipefail
@@ -156,38 +160,18 @@ jobs:
           COMMIT_MSG
 
       # ── コーディング: 承認済みの段取りに従って実装し、先に置いたテストを通す ──
-      - name: コーディングエージェント
-        id: coding
-        uses: anthropics/claude-code-action@v1
-        with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          claude_args: '--model ${{ env.MODEL }} --effort xhigh'
-          settings: automation/settings/code.json
-          prompt: |
-            automation/agents/coding.md を読み、その指示に従うこと。
-            対象 Issue 番号: ${{ github.event.issue.number }}
-
-      - name: 実装の出力を転記し、マーカーを読む
-        id: impl-marker
+      # 実装と verify.sh のループを1プロセスで回す。
+      # 型・lint・単体が赤いあいだは **ワークフローを一周させずに** 直させる
+      # （設計 §12.1.8 #2：修正1回のコストをワークフロー1周からツール呼び出しへ）。
+      # テストの sha256 照合と、Write によるテスト改変の拒否もこの中で効く。
+      - name: 実装オーケストレータ（実装 → verify ループ）
+        id: orc-code
         env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-        run: |
-          set -uo pipefail
-          bash automation/scripts/post_agent_output.sh \
-            "${{ steps.coding.outputs.execution_file }}" \
-            issue "${{ github.event.issue.number }}" \
-            "auto-02 / 実装" /tmp/coding-output.md
-          if grep -q '<!--blocked-->' /tmp/coding-output.md 2>/dev/null; then
-            echo "blocked=true" >> "$GITHUB_OUTPUT"
-            echo "reason=実装が停止しました。段取りの前提が崩れています（ゲート2からやり直してください）" >> "$GITHUB_OUTPUT"
-            echo "::error::実装が停止しました"
-            exit 1
-          fi
-          if ! grep -q '<!--implemented-->' /tmp/coding-output.md 2>/dev/null; then
-            echo "::warning::実装の完了マーカーが見つかりません。出力の転記に失敗した可能性があります"
-          fi
-
+          ORC_MAX_TURNS: '60'
+        run: node automation/orchestrator/implement.mjs --issue "${{ github.event.issue.number }}" --phase code
       - name: 実装をコミットする
         run: |
           set -euo pipefail
