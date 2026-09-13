@@ -270,7 +270,7 @@ jobs:
       - name: レビュー・修正オーケストレータ
         id: orc
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           ORC_MAX_TURNS: '60'
@@ -564,7 +564,7 @@ jobs:
         id: agent
         uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           claude_args: '--model ${{ env.MODEL }} --effort medium'
           settings: automation/settings/pm.json
           prompt: |
