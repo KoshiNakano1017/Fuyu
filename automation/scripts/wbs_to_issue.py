@@ -333,6 +333,10 @@ def resolve_refs(summary: str, status: str, section: str) -> tuple[str, list[dic
 
 
 def build_issue(package_id: str, row: dict, matches: list[dict]) -> dict:
+    # 表示は **WBS 上の正規の ID** を使う。利用者の入力（`**2-1**` など）をそのまま
+    # 出すと、タイトルが `[auto] WBS **2-1** …` になり Markdown が二重に崩れる。
+    # 入力の揺れを吸収するのが normalize_id の役目であって、揺れを Issue へ持ち込まない。
+    display_id = strip_markup(row["_raw_id"]) or package_id
     name = strip_markup(pick(row, "作業パッケージ"))
     summary = pick(row, "概要")
     depends = pick(row, "依存", default="—")
@@ -371,14 +375,14 @@ def build_issue(package_id: str, row: dict, matches: list[dict]) -> dict:
         )
 
     body = f"""> [!note] この Issue は `WBS_Phase1.md` から自動生成されました
-> 生成元: **{package_id}**（{section} ／ L{row["_line"]}）／ 生成ワークフロー: `wbs-to-issue.yml`
+> 生成元: **{display_id}**（{section} ／ L{row["_line"]}）／ 生成ワークフロー: `wbs-to-issue.yml`
 > 転記のみを行っており、仕様判断はしていません（設計 §0・§10.1.5 導線1）。
 
 ## 目的
 
 {summary if summary else name}
 
-（WBS 作業パッケージ **{package_id} {name}**）
+（WBS 作業パッケージ **{display_id} {name}**）
 
 ## 根拠となる仕様
 
@@ -404,7 +408,7 @@ def build_issue(package_id: str, row: dict, matches: list[dict]) -> dict:
 
 ---
 
-## WBS の記録（参考・{package_id}）
+## WBS の記録（参考・{display_id}）
 
 | 項目 | 値 |
 | --- | --- |
@@ -428,7 +432,7 @@ def build_issue(package_id: str, row: dict, matches: list[dict]) -> dict:
 """
 
     return {
-        "title": f"[auto] WBS {package_id} {name}".strip(),
+        "title": f"[auto] WBS {display_id} {name}".strip(),
         "body": body,
         "labels": ["needs-spec"] if (blocked or not spec_ref_text) else [],
         "blocked": blocked,
@@ -444,6 +448,66 @@ def build_issue(package_id: str, row: dict, matches: list[dict]) -> dict:
             "other_tables": [m["_line"] for m in matches if m["_line"] != row["_line"]],
         },
     }
+
+
+def selftest(wbs_path: Path) -> int:
+    """2026-09-13 に踏んだ不具合が戻っていないかを、実物の WBS に対して検査する。
+
+    ここで固定するのは「過去に実際に壊れた振る舞い」だけである。CI から呼ばれ、
+    WBS の編集（表の追加・列名の変更）で静かに壊れたときに気づけるようにする。
+    """
+    failures: list[str] = []
+
+    def check(label: str, ok: bool, detail: str = "") -> None:
+        if not ok:
+            failures.append(f"{label}{f': {detail}' if detail else ''}")
+
+    packages = collect_packages(wbs_path)
+    check("作業パッケージを1件も読めていない", len(packages) >= 60, f"{len(packages)}件")
+
+    # ① 区切り行 `--:` で消えていた2表が読めること
+    for pid in ("0-1", "2-1", "2-6"):
+        row, _ = parse_wbs(wbs_path, pid)
+        check(f"①{pid} が見つからない（区切り行の判定漏れの再発）", row is not None)
+
+    # ② サマリー表ではなく作業パッケージの表が採用されること
+    for pid in ("0-1", "1-1", "1-2", "1-3", "7-1"):
+        row, matches = parse_wbs(wbs_path, pid)
+        if row is None:
+            check(f"②{pid} が見つからない", False)
+            continue
+        issue = build_issue(pid, row, matches)
+        name = issue["title"].removeprefix(f"[auto] WBS {pid}").strip()
+        check(f"②{pid} のタイトルにパッケージ名が無い（サマリー表を拾っている）", bool(name))
+        check(f"②{pid} が作業パッケージ列を持たない表から作られている",
+              "作業パッケージ" in row["_headers"])
+
+    # ③ 他ドキュメントの節を v13 として出力しないこと
+    for pid in ("1-3", "10-1", "8-3"):
+        row, matches = parse_wbs(wbs_path, pid)
+        if row is None:
+            continue
+        issue = build_issue(pid, row, matches)
+        for ref in issue["spec_ref"].split(" / "):
+            check(f"③{pid} の spec_ref に v13 以外の出典が混ざっている",
+                  not ref or ref.startswith("v13"), ref)
+
+    # 表記ゆれの吸収と、表示は正規の ID であること
+    for raw, want in (("**0-1**", "0-1"), ("０-１", "0-1"), ("§0-1", "0-1"), (" 2-1 ", "2-1")):
+        row, matches = parse_wbs(wbs_path, raw)
+        if row is None:
+            check(f"表記ゆれ '{raw}' を吸収できていない", False)
+            continue
+        title = build_issue(raw, row, matches)["title"]
+        check(f"'{raw}' のタイトルが正規の ID になっていない", title.startswith(f"[auto] WBS {want} "), title)
+
+    if failures:
+        print("セルフテスト失敗:", file=sys.stderr)
+        for f in failures:
+            print(f"  - {f}", file=sys.stderr)
+        return 3
+    print(f"セルフテスト通過（作業パッケージ {len(packages)} 件）")
+    return 0
 
 
 def main() -> int:
@@ -463,12 +527,20 @@ def main() -> int:
         dest="as_list",
         help="WBS 上の作業パッケージを一覧して終わる",
     )
+    parser.add_argument(
+        "--selftest",
+        action="store_true",
+        help="過去の不具合が再発していないかを実物の WBS で検査する（CI 用）",
+    )
     args = parser.parse_args()
 
     wbs_path = Path(args.wbs)
     if not wbs_path.is_file():
         print(f"WBS が見つかりません: {wbs_path}", file=sys.stderr)
         return 2
+
+    if args.selftest:
+        return selftest(wbs_path)
 
     if args.as_list:
         payload = {"ok": True, "packages": collect_packages(wbs_path)}
