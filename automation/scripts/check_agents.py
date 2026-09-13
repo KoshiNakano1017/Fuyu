@@ -53,6 +53,8 @@ WRITE_TOOLS = {"Write", "Edit", "NotebookEdit", "Bash"}
 # 設計 §3 の10体 ＋ §12.1.2 で追加した独立リスク判定。
 # 実装ループ側の6体は足場（§12 #2）が出来るまで着手しないため、未定義でも違反にしない。
 EXPECTED_AGENTS = {
+    # 起票支援（設計 §10.1.5 導線2）。auto が付く"前"に動くため、計画フェーズの外側にいる。
+    "issue-draft": "起票",
     "pm-define": "計画",
     "risk-classify": "計画",
     "research": "計画",

@@ -36,10 +36,17 @@ on:
         required: false
         type: boolean
         default: false
+      draft:
+        description: "起票支援エージェントに完了条件とスコープ外を起草させる（既定: する）"
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: read
   issues: write
+  # claude-code-action は OIDC トークンでの認証を必要とする（auto-01-plan.yml と同じ）
+  id-token: write
 
 jobs:
   create-issue:
@@ -145,7 +152,30 @@ jobs:
             --label "$LABELS")"
 
           echo "url=${URL}" >> "$GITHUB_OUTPUT"
+          echo "number=${URL##*/}" >> "$GITHUB_OUTPUT"
           echo "作成しました: ${URL}"
+
+      # ── 起票支援（設計 §10.1.5 導線2 ／ 2026-09-13 オーナー決定で有効化）────────
+      #
+      # 完了条件とスコープ外を、仕様を読んだうえで起草する。オーナーは起草を読んで
+      # `auto` を付ける。**その行為が承認である。**
+      #
+      # ⚠️ 設計は当初これを禁じていた（「起票の場で仕様を考えることになり、ゲート1が
+      #    PM の解釈とオーナーの意図の照合ではなく、PM の解釈と機械の解釈の照合になる」）。
+      #    2026-09-13 のオーナー決定でその制約を解いた。代わりに次の2点で歯止めを掛ける:
+      #      ① draft.json が docs/spec/ を物理的に書けなくする（仕様を作る側へ回らせない）
+      #      ② 仕様から読み取れない論点は埋めさせず、選択肢3つ＋推奨を出させる（§3.2）
+      #    詳細は設計 §10.1.5。
+      - name: 起票支援エージェント（完了条件・スコープ外の起草）
+        if: inputs.draft
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: '--model claude-opus-5 --effort high'
+          settings: automation/settings/draft.json
+          prompt: |
+            automation/agents/issue-draft.md を読み、その指示に従うこと。
+            対象 Issue 番号: ${{ steps.create.outputs.number }}
 
       - name: 実行サマリー
         run: |
@@ -159,13 +189,23 @@ jobs:
             echo "| 根拠となる仕様 | ${{ steps.wbs.outputs.spec_ref }} |"
             echo "| WBS 上のブロック | ${{ steps.wbs.outputs.blocked }} |"
             echo "| auto を付与したか | ${{ steps.gate.outputs.apply_auto }} |"
+            echo "| 完了条件を起草したか | ${{ inputs.draft }} |"
             echo
             if [ "${{ steps.gate.outputs.apply_auto }}" != "true" ]; then
               echo "### 次にやること"
               echo
-              echo "1. Issue の **完了条件** を「〜が〜できる」の形で埋める（自動では埋まりません）"
-              echo "2. **スコープ外** に、今回やらないことを書く"
-              echo "3. 起票前チェックの3条件を確認し、揃っていれば \`auto\` ラベルを手で付ける"
+              if [ "${{ inputs.draft }}" = "true" ]; then
+                echo "1. Issue を開き、**起草された完了条件とスコープ外**を読む"
+                echo "2. 起草エージェントのコメントで **根拠の節番号**を確認する"
+                echo "3. \`⚠️ 要オーナー確認\` が付いていれば、選択肢を1文字でコメントする"
+                echo "4. よければ \`auto\` ラベルを付ける ← **これが承認です**"
+                echo
+                echo "> 起草が違っていれば Issue 本文を直接編集してください。編集後に \`auto\` を付ければ反映されます。"
+              else
+                echo "1. Issue の **完了条件** を「〜が〜できる」の形で埋める（起草を無効にして実行しました）"
+                echo "2. **スコープ外** に、今回やらないことを書く"
+                echo "3. 起票前チェックの3条件を確認し、揃っていれば \`auto\` ラベルを手で付ける"
+              fi
               echo
               echo "\`auto\` を付けた時点で \`auto-01-plan.yml\`（計画フェーズ）が動きます。"
             fi

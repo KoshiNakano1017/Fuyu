@@ -1,0 +1,24 @@
+{
+  "$comment": "起票支援（完了条件・スコープ外の起草）用。リポジトリは読み取り専用のまま、Issue 本文の編集とコメントだけを許可する。仕様書を1文字も書き換えられないことが、このエージェントが『仕様を作る』側へ回らないための担保である（設計 §0）。",
+  "permissions": {
+    "allow": [
+      "Read",
+      "Glob",
+      "Grep",
+      "Bash(gh issue view:*)",
+      "Bash(gh issue comment:*)",
+      "Bash(gh issue edit:*)",
+      "Bash(python3 automation/scripts/spec_ref.py:*)"
+    ],
+    "deny": [
+      "Write",
+      "Edit",
+      "NotebookEdit",
+      "Bash(gh pr:*)",
+      "Bash(gh issue close:*)",
+      "Bash(gh label:*)",
+      "Bash(git:*)",
+      "Read(../../Knowledge/**)"
+    ]
+  }
+}

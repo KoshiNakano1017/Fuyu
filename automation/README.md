@@ -58,7 +58,8 @@
 | **Issue テンプレ** | `.github/ISSUE_TEMPLATE/auto-task.yml` | 🟢 完成 | 起票3条件を必須フィールド化 |
 | **起票導線** | `.github/workflows/wbs-to-issue.yml` | 🟢 完成 | **導線1（§10.1.5）**。WBS の作業パッケージ番号を渡すと Issue を生成。手動起動 |
 | | `automation/scripts/wbs_to_issue.py` | 🟢 完成 | 上記のパーサ。`python3 automation/scripts/wbs_to_issue.py 3-5b` で手元検証できる |
-| | 導線2（仕様ナビ）・導線3（QUESTIONS.md からの逆流） | 🔴 未着手 | 設計 §10.1.5 |
+| | `agents/issue-draft.md` ＋ `settings/draft.json` | 🟢 **完成（2026-09-13）** | **導線2（§10.1.5）**。WBS から生成した Issue に、仕様を読んで**完了条件とスコープ外を起草**する。オーナーは起草を読んで `auto` を付けるだけになる（`auto` を付ける行為が承認）。`draft.json` が `Write`/`Edit` を全面拒否するため **`docs/spec/` を1文字も書けない** |
+| | 導線3（QUESTIONS.md からの逆流） | 🔴 未着手 | 設計 §10.1.5 |
 | **正本参照** | `automation/scripts/spec_ref.py` | 🟢 完成 | **エージェント化 段1**（設計 §12.1.6）。`v13 §5.2.3` / `§9 #51` をパス・行範囲・本文・`sha256` へ解決する。解決できない参照は終了コード3で落ちるため、**ゲート1へ到達する前**に止められる。`python3 automation/scripts/spec_ref.py "v13 §5.2.3"` で手元検証できる |
 | **定義の検査** | `automation/scripts/check_agents.py` | 🟢 完成 | **エージェント化 段2**。frontmatter の `tools:`（ツール層）と `settings/*.json`（パス層）の対応を検査し、「`docs/spec/` を書けない」「`coding`/`fix` は `tests/` を書けない」を強制する。違反があれば終了コード3 |
 
