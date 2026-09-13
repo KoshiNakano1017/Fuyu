@@ -90,19 +90,48 @@ for ok in "${STEP_OKS[@]}"; do
 done
 
 if [ -n "$JSON_OUT" ]; then
-  {
-    printf '{"ok":%s,"steps":[' "$ALL_OK"
-    for i in "${!STEP_NAMES[@]}"; do
-      [ "$i" -gt 0 ] && printf ','
-      # jq でエスケープする。tail にはログがそのまま入るため自前の escape は危険。
-      printf '{"name":%s,"ok":%s,"code":%s,"tail":%s}' \
-        "$(printf '%s' "${STEP_NAMES[$i]}" | jq -R -s .)" \
-        "${STEP_OKS[$i]}" \
-        "${STEP_CODES[$i]}" \
-        "$(printf '%s' "${STEP_TAILS[$i]}" | jq -R -s .)"
-    done
-    printf ']}\n'
-  } > "$JSON_OUT"
+  # エスケープは node で行う。当初 jq を使っていたが、jq は入っていない環境があり
+  # （Git Bash・最小構成のコンテナ）、その場合に **壊れた JSON を書いたまま
+  # 「すべて緑」と報告していた**。node は npm ci 済みの前提で必ず在る。
+  #
+  # 値は環境変数で渡す。引数やヒアドキュメントに混ぜると、ログに含まれる
+  # 引用符・バックスラッシュ・改行でシェルの解釈が壊れる。
+  #
+  # 区切りは各要素の **前** に置く。コマンド置換は末尾の改行を落とすため、
+  # 後置区切り＋末尾要素の切り捨てだと最後の1件が消える（実際に消えた）。
+  #
+  # ⚠️ 継続行（\）の途中にコメントを挟まないこと。`\` の次の行が `#` で始まると
+  #    そこでコマンドが切れ、以降の変数代入が別コマンドになる。
+  #    実際に V_OK だけが node へ渡らず、全ステップ緑でも ok=false になった。
+  V_OK="$ALL_OK" \
+  V_NAMES="$(printf '%s\n' "${STEP_NAMES[@]}")" \
+  V_OKS="$(printf '%s\n' "${STEP_OKS[@]}")" \
+  V_CODES="$(printf '%s\n' "${STEP_CODES[@]}")" \
+  V_TAILS="$(printf '@@VERIFY_STEP_SEP@@\n%s\n' "${STEP_TAILS[@]}")" \
+  node -e '
+    const lines = (s) => (s ?? "").split("\n").filter((x) => x.length > 0);
+    const names = lines(process.env.V_NAMES);
+    const oks   = lines(process.env.V_OKS);
+    const codes = lines(process.env.V_CODES);
+    // 先頭が区切りなので split の第1要素は空。それだけを落とす。
+    const tails = (process.env.V_TAILS ?? "")
+      .split("@@VERIFY_STEP_SEP@@\n")
+      .slice(1)
+      .map((t) => t.replace(/\n$/, ""));
+    const steps = names.map((name, i) => ({
+      name,
+      ok: oks[i] === "true",
+      code: Number(codes[i] ?? -1),
+      tail: tails[i] ?? "",
+    }));
+    process.stdout.write(JSON.stringify({ ok: process.env.V_OK === "true", steps }));
+  ' > "$JSON_OUT"
+
+  # 書き出した JSON が実際に読めることを確かめる。読めなければ緑と言わない。
+  if ! node -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' "$JSON_OUT" 2>/dev/null; then
+    echo "::error::検証結果の JSON を書き出せませんでした（${JSON_OUT}）"
+    exit 1
+  fi
   echo "検証結果を ${JSON_OUT} へ書き出しました"
 fi
 
