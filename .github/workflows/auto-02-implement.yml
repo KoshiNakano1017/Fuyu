@@ -202,6 +202,46 @@ jobs:
           根拠: Issue #${{ github.event.issue.number }} の段取りコメント、docs/自律開発ループ設計.md §3 #4
           COMMIT_MSG
 
+      # ── WBS の進捗を反映する（設計 §10.1.5 導線5） ────────────────────────
+      #   書くのは**スクリプト**であってエージェントではない。エージェントの settings は
+      #   `Edit(docs/spec/**)` を deny したままで、権限を1つも広げずに進捗を反映できる。
+      #   コード実装とは**別コミット**にする（CLAUDE.md §5.2）。
+      #   マージ後ではなく PR 内で行うのは、ゲート3の差分レビューに出すため（設計 §10.1.5 導線5）。
+      - name: WBS の進捗を更新する
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
+          ISSUE: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          PKG="$(gh issue view "$ISSUE" --repo "$REPO" --json body --jq '.body' \
+            | grep -oE '<!--wbs:[^>]+-->' | head -1 | sed -E 's/<!--wbs:(.*)-->/\1/' || true)"
+
+          if [ -z "$PKG" ]; then
+            # 導線1 を通さずに手で立てた Issue はマーカーを持たない。
+            # **失敗させない。** WBS に対応する行が無いだけで、実装そのものは正当である。
+            echo "::notice::Issue #${ISSUE} に <!--wbs:...--> が無いため WBS は更新しません"
+            exit 0
+          fi
+
+          echo "WBS の進捗を更新する: ${PKG}"
+          PYTHONIOENCODING=utf-8 python3 automation/scripts/wbs_update.py \
+            --package "$PKG" --issue "$ISSUE"
+
+          if git diff --quiet -- docs/spec/WBS_Phase1.md; then
+            echo "::notice::WBS に変化なし（既に完了扱いでした）"
+            exit 0
+          fi
+
+          git add docs/spec/WBS_Phase1.md
+          git commit -F - <<COMMIT_MSG
+          docs: WBS ${PKG} の進捗を完了にする (Issue #${ISSUE})
+
+          実装のマージに伴う進捗の転記。実装 / 総合 / ステータスの3セルのみを更新している。
+          根拠: docs/自律開発ループ設計.md §10.1.5 導線5、§0（進捗セルは禁止対象ではない）
+          COMMIT_MSG
+
       - name: ブランチを push する
         run: |
           set -euo pipefail

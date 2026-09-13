@@ -135,6 +135,9 @@ jobs:
           # WBS の表を取りこぼす不具合（2026-09-13）の再発検査。
           # WBS 側の編集（表の追加・列名変更）で静かに壊れるため、実物に対して検査する。
           python3 automation/scripts/wbs_to_issue.py --selftest
+          # 導線4・導線5（設計 §10.1.5）の検査。
+          # 進捗セルの算術・依存解析・ガードの拒否条件を実物の WBS に対して確認する。
+          python3 automation/scripts/wbs_selftest.py
 
   build-and-test:
     name: Lint・型・テスト・ビルド

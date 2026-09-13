@@ -1,0 +1,134 @@
+# エピックの次の子 Issue を払い出す（設計 §10.1.5 導線4）
+#
+# トリガ : Issue に `auto:done` が付いたとき
+# 担当   : 次に出せる作業パッケージの決定はスクリプト（wbs_epic.py）。
+#          Issue の作成は wbs-to-issue.yml へ委譲する（経路を二重実装しない）
+# 設計   : docs/自律開発ループ設計.md §10.1.5「導線4」
+#
+# ── 同時在庫は1件（2026-09-13 オーナー決定）──
+#   §10.6（実装フェーズは直列）・§10.10.3（1日に承認する上限は3 Issue）に合わせる。
+#   一括ファンアウトは WBS の依存列も壊すため採用しない。
+#
+# ── 払い出しが止まる条件 ──
+#   ① 子が auto:blocked / auto:rejected（このワークフローは auto:done でしか起動しない）
+#   ② 次の作業パッケージの依存が未完 → wbs_epic.py が next を返さない
+#   ③ 親 Issue が閉じられている → 下の「親が開いているか」で停止
+#
+# ⚠️ `auto` を自動では付けない。起草のレビューを飛ばすと、設計 §10.1.5 導線2 の
+#    [!danger]（もっともらしく埋める方が空欄より危険）がレビューなしで通る。
+
+name: エピック → 次の子 Issue
+
+on:
+  issues:
+    types: [labeled]
+
+# §8.4 の自己キャンセル対策。`on: issues: types: [labeled]` はラベル名で絞れないため、
+# 実際に仕事をする run だけを本番グループへ入れ、空振りは run_id で隔離する。
+concurrency:
+  group: >-
+    ${{ github.event.label.name == 'auto:done'
+        && format('epic-next-{0}', github.event.issue.number)
+        || format('epic-next-noop-{0}', github.run_id) }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  dispense:
+    if: github.event.label.name == 'auto:done'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      # 完了した子 Issue が、どの機能領域の何番だったかを本文のマーカーから読む。
+      - name: 完了した作業パッケージを特定する
+        id: done
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
+          REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          BODY="$(gh issue view "$ISSUE" --repo "$REPO" --json body --jq '.body')"
+          PKG="$(printf '%s' "$BODY" | grep -oE '<!--wbs:[^>]+-->' | head -1 \
+            | sed -E 's/<!--wbs:(.*)-->/\1/' || true)"
+          if [ -z "$PKG" ]; then
+            echo "::notice::Issue #${ISSUE} は WBS 由来ではありません（マーカーなし）。何もしません"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "package=$PKG" >> "$GITHUB_OUTPUT"
+          echo "完了した作業パッケージ: $PKG"
+
+      # 親エピックは「同じ機能領域の auto:epic な Issue」で引く。
+      # 子に親番号を焼き込む方式は、手で起票した子を拾えないため採らない。
+      - name: 親エピックを探す
+        id: parent
+        if: steps.done.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
+          REPO: ${{ github.repository }}
+          PKG: ${{ steps.done.outputs.package }}
+        run: |
+          set -euo pipefail
+          AREA="${PKG%%-*}"
+          echo "機能領域: §${AREA}"
+          NUM="$(gh issue list --repo "$REPO" --label "auto:epic" --state open \
+            --json number,body \
+            --jq "[.[] | select(.body | test(\"<!--wbs-epic:${AREA}-->\"))] | .[0].number // empty")"
+          if [ -z "$NUM" ]; then
+            echo "::notice::§${AREA} の開いているエピックがありません。払い出しは行いません"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "epic=$NUM" >> "$GITHUB_OUTPUT"
+          echo "area=$AREA" >> "$GITHUB_OUTPUT"
+          echo "親エピック: #$NUM"
+
+      - name: 次に払い出す作業パッケージを決める
+        id: next
+        if: steps.done.outputs.skip != 'true' && steps.parent.outputs.skip != 'true'
+        env:
+          AREA: ${{ steps.parent.outputs.area }}
+        run: |
+          set -euo pipefail
+          PYTHONIOENCODING=utf-8 python3 automation/scripts/wbs_epic.py \
+            --area "$AREA" --next > /tmp/next.json
+          echo "next=$(jq -r '.next.id // empty' /tmp/next.json)" >> "$GITHUB_OUTPUT"
+          cat /tmp/next.json
+
+      - name: 次の子 Issue を払い出す
+        if: steps.next.outputs.next != ''
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh workflow run wbs-to-issue.yml --repo "$REPO" \
+            -f package="${{ steps.next.outputs.next }}" \
+            -f draft=true -f resolve=false -f start_loop=false
+          printf '%s\n\n%s\n' \
+            "\`${{ steps.done.outputs.package }}\` が完了したので、次の \`${{ steps.next.outputs.next }}\` を起票します。" \
+            "起草を読んだうえで **\`auto\` ラベル**を付けてください（これが承認です。設計 §10.1.5 導線4）。" \
+            > /tmp/comment.md
+          gh issue comment "${{ steps.parent.outputs.epic }}" --repo "$REPO" --body-file /tmp/comment.md
+
+      - name: 払い出せるものが無くなったことを通知する
+        if: steps.parent.outputs.skip != 'true' && steps.done.outputs.skip != 'true' && steps.next.outputs.next == ''
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          printf '%s\n\n%s\n%s\n' \
+            "\`${{ steps.done.outputs.package }}\` が完了しました。" \
+            "⚠️ **次に払い出せる作業パッケージがありません。** 残りはブロック中・依存待ち・対象外のいずれかです。" \
+            "ブロックが解けたら \`WBS → Issue 生成\` に機能領域（§${{ steps.parent.outputs.area }}）を入れて再実行すれば、続きから払い出します。" \
+            > /tmp/comment.md
+          gh issue comment "${{ steps.parent.outputs.epic }}" --repo "$REPO" --body-file /tmp/comment.md

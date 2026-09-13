@@ -60,6 +60,26 @@ BLOCKED_MARKERS = ("🔴", "ブロック中", "⏸", "保留")
 # 廃止・不要化・統合済みを示す記号。これらは起票させない。
 RETIRED_MARKERS = ("➖", "不要化", "廃止", "統合済み", "移送")
 
+
+def status_head(status: str) -> str:
+    """ステータス欄の**宣言部分**（最初の句点まで）を返す。
+
+    ⚠️ 旧実装はステータス欄の**全文**に対して上のマーカーを検索していたため、
+    宣言と本文の区別がつかなかった。WBS のステータス欄は
+    `🟢 着手可能。<経緯や申し送りの散文>` という構造をしており、散文側には
+    「〜を不要化した」「〜は廃止された」のような**別のものについての記述**が入る。
+
+    実害（2026-09-13 に検出）:
+      - `4-1`（🟢 着手可能）は散文に「録音・自動送信は**すべて不要化**した」とあるため
+        `retired` と誤判定され、**起票できない**状態だった
+      - `4-2`（🔴 ブロック中）も同様に `retired` へ倒れ、ブロック理由が霞んでいた
+
+    宣言部分だけを見れば、この2件は正しく「着手可能」「ブロック中」に戻る。
+    取り消し線つきの ID（`~~13-2~~`）による廃止判定は別途行うため、
+    本当に廃止された行の判定は変わらない（75行中、判定が変わるのは上記2行のみ）。
+    """
+    return status.split("。", 1)[0] if "。" in status else status
+
 # 「v13 §5.2.3」「§5.11.7」「§9 #46」のような節番号を拾う。
 SECTION_RE = re.compile(r"§\s?\d+(?:\.\d+)*[a-z]?(?:\s?#\d+)?")
 
@@ -190,7 +210,25 @@ def parse_wbs(path: Path, package_id: str) -> tuple[dict | None, list[dict]]:
 
     if not matches:
         return None, []
-    return max(matches, key=lambda r: r["_score"]), matches
+
+    best = max(matches, key=lambda r: r["_score"])
+
+    # ⚠️ 作業パッケージ表**以外**の表に同じ値の行があると、そこへ誤着弾する。
+    #    WBS には §16（QUESTIONS.md ブロッカー逆引き表: `# / 反映先 / 直した内容 / 状態`）や
+    #    §19（実装順序）のように、1列目が数字の表が複数ある。
+    #
+    #    実害（2026-09-13 に検出）: `4` を入力すると §16 の行に一致し、
+    #    **「[auto] WBS 4」という中身の無い Issue が作れてしまう**状態だった。
+    #    機能領域を指定したつもりの入力（設計 §10.1.5 導線4）が、
+    #    エピックではなく空の作業パッケージとして通ってしまう。
+    #
+    #    `table_score` が 0 の表は作業パッケージ列を持たない＝そもそも対象外である。
+    #    WBS 実物では「N-M 形式なのに最高スコアが 0」の ID は 0 件であり、
+    #    ここで弾いても正規の作業パッケージは1件も失われない。
+    if best["_score"] == 0:
+        return None, matches
+
+    return best, matches
 
 
 def collect_packages(path: Path) -> list[dict]:
@@ -346,8 +384,10 @@ def build_issue(package_id: str, row: dict, matches: list[dict]) -> dict:
     impl_pct = pick(row, "実装", default="—")
     section = row.get("_section", "")
 
-    retired = "~~" in row["_raw_id"] or any(m in status for m in RETIRED_MARKERS)
-    blocked = any(m in status for m in BLOCKED_MARKERS)
+    # マーカーは**宣言部分だけ**に対して探す（理由は status_head の docstring）。
+    declaration = status_head(status)
+    retired = "~~" in row["_raw_id"] or any(m in declaration for m in RETIRED_MARKERS)
+    blocked = any(m in declaration for m in BLOCKED_MARKERS)
     spec_ref_text, other_refs, other_refs_text = resolve_refs(summary, status, section)
 
     # 起票可能かの3条件（設計 §10.1.3）のうち、機械が判定できるのは1と2だけ。
@@ -374,7 +414,11 @@ def build_issue(package_id: str, row: dict, matches: list[dict]) -> dict:
             + "\n".join(f"> - `{r['source']} {r['ref']}`" for r in other_refs)
         )
 
-    body = f"""> [!note] この Issue は `WBS_Phase1.md` から自動生成されました
+    # 機械可読マーカー。導線5（§10.1.5）がマージ後にどの作業パッケージの進捗を
+    # 更新すべきかを、この1行から決める。人間可読の「生成元」行を正規表現で読むと、
+    # 装飾（`**4-1**`）や取り消し線で簡単に破綻するため、別に置く。
+    body = f"""<!--wbs:{display_id}-->
+> [!note] この Issue は `WBS_Phase1.md` から自動生成されました
 > 生成元: **{display_id}**（{section} ／ L{row["_line"]}）／ 生成ワークフロー: `wbs-to-issue.yml`
 > 転記のみを行っており、仕様判断はしていません（設計 §0・§10.1.5 導線1）。
 
