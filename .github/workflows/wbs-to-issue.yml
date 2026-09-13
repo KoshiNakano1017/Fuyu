@@ -1,8 +1,22 @@
 # WBS → Issue 生成（設計 §10.1.5 導線1）
 #
 # トリガ : 手動（workflow_dispatch）。作業パッケージ番号を渡す
-# 担当   : スクリプトによる転記のみ。エージェントは動かさない
+# 担当   : 転記はスクリプト（決定論）。エージェントは「番号の特定」と「起草」だけを担う
 # 設計   : docs/自律開発ループ設計.md §10.1.5「導線1: WBS → Issue 生成」
+#
+# ── 2026-09-13：入力が正しいのに起票できない不具合を修正した ──────────────
+#   `wbs_to_issue.py` に表の取りこぼしが3件あり、WBS から正しくコピペしても
+#   「見つかりません」または「タイトルが空・needs-spec」になっていた。
+#     ① 区切り行 `--:`（ダッシュ2本）を区切り行と認識せず、`§0-1` と `§2` の表が
+#        丸ごと消えていた（`2-1`〜`2-6` が起票不能）
+#     ② 冒頭の §S-2 サマリー表を本体の表より先に拾い、列が合わず全項目が空になった
+#        （0-1 / 1-1 / 1-2 / 1-3 / 7-1）
+#     ③ `CLAUDE.md §4.4` 等の他ドキュメントの節を `v13 §4.4` として出力していた
+#   **利用者の入力は最初から正しかった。** 修正の詳細はスクリプトの docstring を参照。
+#
+#   そのうえで、それでも一致しない入力に限り `wbs-resolve` エージェントが候補から
+#   特定する（2026-09-13 オーナー決定）。エージェントが返した番号は**必ず
+#   スクリプトへ渡し直して再検証する**ため、実在しない番号は通らない。
 #
 # ── このワークフローがやること / やらないこと ──
 #   やる     : WBS_Phase1.md の1行を読み、Issue テンプレート5項目のうち
@@ -28,9 +42,14 @@ on:
   workflow_dispatch:
     inputs:
       package:
-        description: "作業パッケージ番号（WBS の表の1列目と完全一致。例: 3-5b / 1-2 / 0-1 / 14-6）"
+        description: "作業パッケージ番号（例: 3-5b / 1-2 / 0-1 / 14-6）。太字・全角・§・空白は自動で吸収する"
         required: true
         type: string
+      resolve:
+        description: "番号が一致しないとき、エージェントに候補から特定させる（既定: する）"
+        required: false
+        type: boolean
+        default: true
       start_loop:
         description: "auto ラベルを付けて自律ループを即開始する（完了条件を自分で埋めてから使うこと）"
         required: false
@@ -55,38 +74,120 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # ── 段1: 決定論的に引く ────────────────────────────────────────
+      # 表記ゆれ（`**0-1**` / 全角 / `§` / 空白 / ハイフン異体字）はスクリプト側の
+      # normalize_id() が吸収する。ここで引けなければ本当に一致していない。
       - name: WBS から作業パッケージを読み出す
         id: wbs
         run: |
-          set -euo pipefail
+          set -uo pipefail
           PACKAGE='${{ inputs.package }}'
 
-          # スクリプトは JSON を1行で吐く。見つからなければ非ゼロで終了する。
-          if ! python3 automation/scripts/wbs_to_issue.py "$PACKAGE" > /tmp/issue.json; then
-            echo "::error::WBS から作業パッケージ '${PACKAGE}' を読み出せませんでした"
+          if python3 automation/scripts/wbs_to_issue.py "$PACKAGE" > /tmp/issue.json 2>/tmp/wbs.err; then
+            printf '%s' "$PACKAGE" > /tmp/package.txt
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "一致しました: $PACKAGE"
+          else
+            # exit 3。/tmp/issue.json には候補一覧が入っている（wbs-resolve が読む）
+            cat /tmp/wbs.err
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::'${PACKAGE}' は WBS 上のどの作業パッケージとも一致しませんでした"
+          fi
+
+      # ── 段2: それでも一致しないときだけエージェントを呼ぶ ──────────────
+      # 起票そのものはさせない（wbs-resolve.json に gh が無い）。決めるのは「どの行か」だけ。
+      - name: 曖昧一致エージェント（WBS 番号の特定）
+        id: resolver
+        if: steps.wbs.outputs.found == 'false' && inputs.resolve
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: '--model claude-opus-5 --effort medium'
+          settings: automation/settings/wbs-resolve.json
+          prompt: |
+            automation/agents/wbs-resolve.md を読み、その指示に従うこと。
+            入力された番号: ${{ inputs.package }}
+            候補一覧は /tmp/issue.json にある。
+
+      # ── 段3: エージェントの答えを決定論的に再検証する ────────────────────
+      # ここが要。エージェントは番号を1つ指すだけで、Issue の中身は必ず
+      # スクリプトが WBS から作り直す。実在しない番号を返しても通らない。
+      - name: 特定結果を取り込んで再検証する
+        if: steps.wbs.outputs.found == 'false' && inputs.resolve
+        run: |
+          set -uo pipefail
+          bash automation/scripts/post_agent_output.sh \
+            "${{ steps.resolver.outputs.execution_file }}" none "" "" /tmp/resolve.md
+
+          echo "── エージェントの回答 ──"
+          cat /tmp/resolve.md || true
+          echo "───────────────────"
+
+          RESOLVED="$(grep -oE '^WBS_RESOLVED:[[:space:]]*[^[:space:]]+' /tmp/resolve.md \
+                      | tail -1 | sed 's/^WBS_RESOLVED:[[:space:]]*//')"
+          if [ -z "$RESOLVED" ]; then
+            echo "::error::'${{ inputs.package }}' に対応する作業パッケージを特定できませんでした。上の回答にある指示のとおり入力し直してください"
             exit 1
           fi
 
-          jq -r '.title'                      /tmp/issue.json > /tmp/title.txt
-          jq -r '.body'                       /tmp/issue.json > /tmp/body.md
-          jq -r '.labels | join(",")'         /tmp/issue.json > /tmp/labels.txt
+          if ! python3 automation/scripts/wbs_to_issue.py "$RESOLVED" > /tmp/issue.json; then
+            echo "::error::エージェントが返した '${RESOLVED}' も WBS に存在しません。入力し直してください"
+            exit 1
+          fi
+          printf '%s' "$RESOLVED" > /tmp/package.txt
+          echo "::warning::入力 '${{ inputs.package }}' を作業パッケージ '${RESOLVED}' として解釈しました"
+
+      # エージェントを使わない設定で一致しなかった場合は、ここで素直に落とす。
+      - name: 一致しなかった場合は停止する
+        if: steps.wbs.outputs.found == 'false' && !inputs.resolve
+        run: |
+          echo "::error::'${{ inputs.package }}' は WBS に見つかりませんでした（resolve: false のため特定は行いません）"
+          jq -r '.candidates[]? | "  候補: \(.id)  \(.name)  — \(.why)"' /tmp/issue.json || true
+          exit 1
+
+      # ── 段4: Issue 本文を組み立てる（常に決定論） ──────────────────────
+      - name: Issue 本文を組み立てる
+        id: issue
+        run: |
+          set -euo pipefail
+          PACKAGE="$(cat /tmp/package.txt)"
+
+          jq -r '.title'              /tmp/issue.json > /tmp/title.txt
+          jq -r '.body'               /tmp/issue.json > /tmp/body.md
+          jq -r '.labels | join(",")' /tmp/issue.json > /tmp/labels.txt
+
+          # 入力と採用した番号が違う場合は、その事実を Issue 本文の先頭に残す。
+          # 「なぜこの Issue が立ったのか」を後から追えるようにするため（設計 §2）。
+          if [ "$PACKAGE" != '${{ inputs.package }}' ]; then
+            {
+              echo "> [!warning] 入力された番号は \`${{ inputs.package }}\` でした"
+              echo "> WBS 上で一致しなかったため、\`wbs-resolve\` エージェントが **\`${PACKAGE}\`** と判断しました。"
+              echo "> 違っていればこの Issue を閉じ、正しい番号で起票し直してください。"
+              echo
+              cat /tmp/body.md
+            } > /tmp/body.tmp && mv /tmp/body.tmp /tmp/body.md
+          fi
 
           {
-            echo "blocked=$(jq -r '.blocked'  /tmp/issue.json)"
-            echo "retired=$(jq -r '.retired'  /tmp/issue.json)"
-            echo "spec_ref=$(jq -r '.spec_ref' /tmp/issue.json)"
-            echo "reason=$(jq -r '.reason'    /tmp/issue.json)"
+            echo "package=${PACKAGE}"
+            echo "blocked=$(jq -r '.blocked'    /tmp/issue.json)"
+            echo "retired=$(jq -r '.retired'    /tmp/issue.json)"
+            echo "spec_ref=$(jq -r '.spec_ref'  /tmp/issue.json)"
+            echo "other_refs=$(jq -r '.other_refs' /tmp/issue.json)"
+            echo "reason=$(jq -r '.reason'      /tmp/issue.json)"
+            echo "matched_line=$(jq -r '.matched.line' /tmp/issue.json)"
           } >> "$GITHUB_OUTPUT"
 
           echo "タイトル: $(cat /tmp/title.txt)"
+          echo "採用した行: L$(jq -r '.matched.line' /tmp/issue.json)（$(jq -r '.matched.section' /tmp/issue.json)）"
 
       # 廃止・不要化・Phase 2 移送済みのパッケージは起票させない。
       # WBS 上で取り消し線になっているものを掘り起こすのは、ほぼ確実に操作ミスのため。
       - name: 廃止済みパッケージの起票を止める
-        if: steps.wbs.outputs.retired == 'true'
+        if: steps.issue.outputs.retired == 'true'
         run: |
           echo "::error::このパッケージは廃止・不要化・Phase 2 移送済みです。起票しません"
-          echo "理由: ${{ steps.wbs.outputs.reason }}"
+          echo "理由: ${{ steps.issue.outputs.reason }}"
           exit 1
 
       # start_loop が指定されていても、3条件のうち機械が見られる2つが
@@ -96,8 +197,8 @@ jobs:
         run: |
           set -euo pipefail
           START='${{ inputs.start_loop }}'
-          BLOCKED='${{ steps.wbs.outputs.blocked }}'
-          SPEC='${{ steps.wbs.outputs.spec_ref }}'
+          BLOCKED='${{ steps.issue.outputs.blocked }}'
+          SPEC='${{ steps.issue.outputs.spec_ref }}'
 
           if [ "$START" != "true" ]; then
             echo "既定どおり auto を付けずに起票します（完了条件を埋めてから手で付けてください）"
@@ -184,10 +285,17 @@ jobs:
             echo
             echo "| 項目 | 値 |"
             echo "| --- | --- |"
-            echo "| 作業パッケージ | \`${{ inputs.package }}\` |"
+            echo "| 入力 | \`${{ inputs.package }}\` |"
+            echo "| 採用した作業パッケージ | \`${{ steps.issue.outputs.package }}\`（WBS L${{ steps.issue.outputs.matched_line }}） |"
+            if [ "${{ steps.wbs.outputs.found }}" != "true" ]; then
+              echo "| 番号の特定 | ⚠️ **エージェントが特定しました**（入力と不一致） |"
+            fi
             echo "| Issue | ${{ steps.create.outputs.url }} |"
-            echo "| 根拠となる仕様 | ${{ steps.wbs.outputs.spec_ref }} |"
-            echo "| WBS 上のブロック | ${{ steps.wbs.outputs.blocked }} |"
+            echo "| 根拠となる仕様 | ${{ steps.issue.outputs.spec_ref }} |"
+            if [ -n "${{ steps.issue.outputs.other_refs }}" ]; then
+              echo "| 他ドキュメントへの参照 | ${{ steps.issue.outputs.other_refs }}（v13 の節ではありません） |"
+            fi
+            echo "| WBS 上のブロック | ${{ steps.issue.outputs.blocked }} |"
             echo "| auto を付与したか | ${{ steps.gate.outputs.apply_auto }} |"
             echo "| 完了条件を起草したか | ${{ inputs.draft }} |"
             echo

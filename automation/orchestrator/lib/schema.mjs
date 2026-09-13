@@ -59,6 +59,28 @@ export const PLAN_SCHEMA = {
     },
     changedFiles: { type: 'array', items: { type: 'string' } },
     testPlan: { type: 'string' },
+    // ── 完了条件（段取り＝pm-plan が埋める。2026-09-13 追加）─────────────
+    //
+    // ゲート2 は「作り方」を承認する場だったが、**何をもって完了とするか**が
+    // 提示されないままテスト設計へ渡っていた。完了条件がここに載ることで、
+    // オーナーはゲート2 で「作り方」と「完了の定義」を同時に承認できる。
+    // これが無いと、導出された完了条件が誰の承認も経ずに受入基準になる。
+    acceptance: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['criterion', 'origin'],
+        additionalProperties: false,
+        properties: {
+          criterion: { type: 'string', minLength: 1 },
+          // issue   = タスク定義／Issue 本文に書かれていた
+          // derived = 調査結果から導出した（ゲート2 でオーナーが承認する対象）
+          origin: { type: 'string', enum: ['issue', 'derived'] },
+          basis: { type: 'string' },
+          test: { type: 'string' },
+        },
+      },
+    },
     // 人間が読む本文。Issue コメントへそのまま出す。
     comment: { type: 'string', minLength: 1 },
   },
@@ -73,6 +95,31 @@ export const IMPLEMENT_SCHEMA = {
     blocked: { type: 'boolean' },
     blockedReason: { type: 'string' },
     changedFiles: { type: 'array', items: { type: 'string' } },
+    // ── 完了条件と受入テストの対応（テスト設計のみ埋める。2026-09-13 追加）──
+    //
+    // なぜ機械可読にするのか: 完了条件は本来ゲート1でオーナーが承認したものだが、
+    // タスク定義に検証可能な形で載っていない場合、テスト設計が調査結果から導出する
+    // （§10.1.3 条件3 の補遺）。**導出はゲート1・2 を通過した後に起きる。**
+    // つまり「機械が決めた完了条件」が誰の目にも触れずに受入基準になりうる。
+    // origin を必須にして、導出されたものを orchestrator 側で必ず検知・掲示する。
+    acceptance: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['criterion', 'origin'],
+        additionalProperties: false,
+        properties: {
+          criterion: { type: 'string', minLength: 1 },
+          // issue    = タスク定義／Issue 本文に書かれていたものをそのまま使った
+          // derived  = 調査結果と正本から導出した（オーナー未承認）
+          origin: { type: 'string', enum: ['issue', 'derived'] },
+          // 導出の根拠。origin=derived なら正本の節番号が必須（プロンプト側で要求）。
+          basis: { type: 'string' },
+          // 対応する受入テスト（`tests/quest.spec.ts`:`テスト名` の形）
+          test: { type: 'string' },
+        },
+      },
+    },
     comment: { type: 'string', minLength: 1 },
   },
 };

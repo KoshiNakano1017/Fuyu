@@ -1,0 +1,20 @@
+{
+  "$comment": "WBS 番号の曖昧一致（wbs-resolve）用。WBS を読んで入力に対応する作業パッケージを特定するだけの役で、リポジトリも GitHub も一切書き換えない。gh を持たせないのは、このエージェントに『Issue を起票する』余地を与えないため——起票そのものはワークフローが決定的に行う（設計 §10.1.5 導線1）。仕様書を書けないことは設計 §0 の担保でもある。",
+  "permissions": {
+    "allow": [
+      "Read",
+      "Glob",
+      "Grep",
+      "Bash(python3 automation/scripts/wbs_to_issue.py:*)"
+    ],
+    "deny": [
+      "Write",
+      "Edit",
+      "NotebookEdit",
+      "Bash(gh:*)",
+      "Bash(git:*)",
+      "Bash(curl:*)",
+      "Read(../../Knowledge/**)"
+    ]
+  }
+}

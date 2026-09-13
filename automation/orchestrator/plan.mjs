@@ -205,6 +205,12 @@ const plan = await step(
     '',
     '承認済みのタスク定義と調査結果から段取りを作ること。',
     'changedFiles（変更ファイル一覧）と testPlan（受入テスト方針）は必ず埋めること。',
+    '',
+    '`acceptance`（完了条件）も必ず埋めること。ゲート2 はこれを承認する場である。',
+    'タスク定義に書かれていたものは origin="issue"、',
+    'タスク定義に無い／検証可能でないため **調査結果から導出**したものは origin="derived" とし、',
+    '`basis` に根拠の節番号を必ず書くこと。調査結果に無いことを完了条件にしてはならない。',
+    '導出できる完了条件が1つも無ければ blocked=true で止めること。',
     '段取りの段階でリスクを **下げてはならない**（設計 §3.2.1）。',
     '',
     `現時点のリスク区分: ${risk}`,
@@ -245,6 +251,31 @@ if (plan.json.blocked) {
 risk = maxRisk(risk, plan.json.risk);
 
 // ── 5. 結果の確定 ────────────────────────────────────────────
+// 完了条件をゲート2 の承認対象として残す。ここで承認されたものが受入テストの基準になり、
+// 実装フェーズ（implement.mjs）はこれを test-design へ渡す。
+state.acceptance = plan.json.acceptance ?? [];
+state.acceptanceDerived = state.acceptance.some((a) => a.origin === 'derived');
+if (state.acceptance.length === 0) {
+  gh.warn('段取りに完了条件が含まれていません。ゲート2 で承認する完了の定義がない状態です');
+} else if (state.acceptanceDerived) {
+  const derived = state.acceptance.filter((a) => a.origin === 'derived');
+  await gh.comment(ISSUE, [
+    '## ⚠️ 完了条件のうち ' + derived.length + ' 件は調査結果からの導出です',
+    '',
+    'タスク定義に検証可能な完了条件が揃っていなかったため、段取りの作成時に導出しました。',
+    '**ゲート2 の承認は、この完了条件の承認を兼ねます。**',
+    '',
+    '| # | 完了条件 | 出どころ | 根拠 |',
+    '| --- | --- | --- | --- |',
+    ...state.acceptance.map(
+      (a, i) => `| ${i + 1} | ${a.criterion} | ${a.origin === 'derived' ? '**導出**' : 'タスク定義'} | ${a.basis ?? '—'} |`,
+    ),
+    '',
+    '根拠の節番号が実際にその内容を書いているかは **設計 §10.3 の最頻の事故ポイント**です。',
+    '節を開いて照合してから承認してください。違っていれば却下してください。',
+  ].join('\n'));
+}
+
 state.risk = risk;
 state.specRefs = plan.json.specRefs ?? research.json?.specRefs ?? [];
 await saveState(state);
