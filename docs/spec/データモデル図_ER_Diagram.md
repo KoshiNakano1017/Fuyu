@@ -4,9 +4,9 @@ doc_type: 設計
 status: "Draft"
 owner: プロジェクトオーナー
 date: "2026-08-17"
-updated: 2026-09-12
+updated: 2026-09-13
 tags: ["浮遊街アプリ", "ER図", "データモデル", "スキーマ設計", "Supabase"]
-doc_version: "1.2.0"
+doc_version: "1.3.0"
 ---
 
 # 浮遊街アプリ データモデル図（ER図）
@@ -42,8 +42,9 @@ erDiagram
         string role "ロール (admin/core_member/member/guest/custom)"
         string account_status "アカウント状態 (pre_registered/active/withdrawn)"
         string member_type "立場 (親方/街人コア/街人一般/ゲスト)。認可に使わない"
-        integer stay_tickets "集計キャッシュ"
-        integer uii_balance "集計キャッシュ(Phase2)"
+        integer stay_tickets "集計キャッシュ・直接UPDATE禁止"
+        integer total_stay_days "集計キャッシュ・直接UPDATE禁止"
+        integer uii_balance "集計キャッシュ(Phase2)・直接UPDATE禁止"
         integer earned_xp "獲得XP"
         timestamp created_at "作成日時"
         timestamp updated_at "更新日時"
@@ -78,7 +79,7 @@ erDiagram
         uuid member_id FK "変更された会員"
         string old_role "変更前ロール"
         string new_role "変更後ロール"
-        uuid operator_id "操作者・member_idと別人であること(CHECK)"
+        uuid operator_id FK "操作者・member_idと別人であること(CHECK)"
         string reason "変更理由・必須"
         timestamp changed_at "変更日時"
     }
@@ -486,7 +487,8 @@ erDiagram
 
     USERS |o..o{ LODGING_REGISTER_ENTRIES : "listed_in (SET NULL)"
     BOOKINGS |o..o{ LODGING_REGISTER_ENTRIES : "records (SET NULL)"
-    USERS ||--o{ MEMBER_ROLE_CHANGES : "role_changed"
+    USERS ||--o{ MEMBER_ROLE_CHANGES : "role_changed (member_id / RESTRICT)"
+    USERS ||--o{ MEMBER_ROLE_CHANGES : "operated (operator_id / RESTRICT)"
 
 ```
 
@@ -509,6 +511,12 @@ erDiagram
 - `account_status`: ライフサイクル (`pre_registered` → `active` → `withdrawn`)
 - ⚠️ **個人情報は無いが、残高・XP を含むため他者へは公開しない。** 他者向け表示は `v_member_public`
   ビュー（`member_id` / `display_name` / `member_type` の3列のみ）を経由する（[[DB物理設計]] §6-4）
+- 🔒 **★2026-09-05 オーナー決定：自分自身の権限（`role`）は、誰も変更できない。**
+  `BEFORE UPDATE` のガードトリガーが `role` / `auth_user_id` / `member_type` の**自己変更を拒否**し、
+  `account_status` の自己変更は **`active → withdrawn`（退会）だけ**を許す（自力での `active` 化を塞ぐ）。
+  `member_id` は自他を問わず変更不可。他人の `role` 変更は `admin` のみ可で、**`operator_id` と `reason` が必須**。
+  `stay_tickets` / `total_stay_days` / `uii_balance` の集計キャッシュは**自他を問わず直接更新できない**（別トリガー）。
+  詳細は [[DB物理設計]] §6-6b ／ [[会員データモデル_ユーザーテーブル定義]] §5.2a
 
 #### **MEMBER_PROFILES_PRIVATE** - 個人情報（★2026-09-05 新設）
 - **主キー兼外部キー**: `member_id` → `USERS`（**1対1**・`ON DELETE CASCADE`）
@@ -740,6 +748,20 @@ erDiagram
 
 ### 🔐 監査関連
 
+#### **MEMBER_ROLE_CHANGES** - 権限変更履歴（★2026-09-05 新設）
+- **外部キー**: `member_id` → `USERS`（変更された会員）、`operator_id` → `USERS`（変更した操作者）。
+  いずれも **`ON DELETE RESTRICT`**（会員行の物理削除そのものを止める役割を兼ねる）
+- `role` 変更の**一次記録**。書き込むのは `AFTER UPDATE OF role` トリガーだけであり、**アプリは INSERT しない**
+- ⚠️ **自己変更を止めているのは `BEFORE UPDATE` のガードトリガーであって、本テーブルの `CHECK` ではない。**
+  **`CHECK (member_id <> operator_id)`** は「自己変更はトリガーで拒否済みだから記録として存在しえない」ことを
+  **制約でも二重に表明した**もの（[[DB物理設計]] §6-6b⑤）。防御の本体をここだと読み違えないこと
+- `CHECK` は3本：`old_role <> new_role` ／ `member_id <> operator_id` ／ `btrim(reason) <> ''`
+- **アクセス規則**: SELECT は `admin` のみ。INSERT / UPDATE / DELETE は**ポリシーを1本も作らない＝全拒否**。
+  本人にも見せない（自分の降格理由は運営の判断であり、`MEMBER_NOTES` と同じ扱い）
+- ⚠️ **`AUDIT_LOGS` では代替しない。** 本テーブルは **DB が強制する一次記録**であり、
+  汎用監査ログは**アプリ層の記録**である。汎用ログを整備する場合、本テーブルはその**投影元**として残す
+  （[[DB物理設計]] §6-6b⑤）。**ただし両者の正本関係の確定は未了・要確認**
+
 #### **AUDIT_LOGS** - 監査ログ
 - **外部キー**: `user_id` → `USERS`（実施者）
 - **全操作の追跡**
@@ -748,6 +770,10 @@ erDiagram
 - `changes`: 変更内容（JSON形式）
 - `reason`: 実施理由（編集理由必須 §5.6.4）
 - 会計済み伝票の遡及修正は警告レベル（§5.6.5）で記録
+- ⚠️ **`role` 変更については本テーブルを一次記録として当てにしない。** DB が強制する一次記録は `MEMBER_ROLE_CHANGES` であり、
+  **アプリが書き忘れても記録が残る**という保証はトリガー側にしか無い。
+  本テーブルを整備する場合は `MEMBER_ROLE_CHANGES` からの投影先になるが、
+  **両者の正本関係の確定は [[DB物理設計]] §6-6b⑤ のスコープ外・要確認**
 
 ---
 
@@ -782,6 +808,8 @@ erDiagram
 | `USERS` | `MEMBER_PROFILES_PRIVATE` | **1:1**（会員1人＝個人情報1件。`member_id` が PK 兼 FK・`ON DELETE CASCADE`） |
 | `USERS` | `MEMBER_IDENTIFIERS` | 1:N（メール・電話・LINE・Discord を複数持てる） |
 | `USERS` | `MEMBER_NOTES` | 1:N（運営メモは追記されていく） |
+| `USERS` | `MEMBER_ROLE_CHANGES` | 1:N（`member_id`＝変更された会員 ／ `operator_id`＝操作者 の**2本の線**。ともに `ON DELETE RESTRICT`） |
+| `USERS` | `LODGING_REGISTER_ENTRIES` | 0..1:N（法定名簿。会員でない宿泊者もいるため `member_id` は NULL 可・`ON DELETE SET NULL`） |
 | `USERS` | `MEMBERSHIPS` | 1:N（複数の会員権期を持つ可能性） |
 | `MEMBERSHIPS` | `STAY_TICKETS` | 1:N（会員権に紐づく宿泊券複数枚） |
 | `STAY_TICKETS` | `STAY_TICKET_TRANSACTIONS` | 1:N（1枚の券の消費履歴） |
@@ -832,6 +860,21 @@ CREATE POLICY mpp_select_staff ON member_profiles_private
 >    方式選定の理由は [[DB物理設計]] §6-3
 > 3. **`SECURITY DEFINER` 関数を経由しないと無限再帰する。** `members` のポリシーから `members` を
 >    参照すると `42P17 infinite recursion detected in policy` になる
+
+> [!danger] ★2026-09-05：RLS と列単位 GRANT だけでは「自分を admin にする」を止められない
+> 「自分の行だけ更新できる」ポリシーから見ると、**自分の `role` を `'admin'` に書き換えるのは完全に正当な操作**である。
+> 列単位 `GRANT` で `role` を除外すればこれを塞げるが、**効くのは `authenticated`（PostgREST 越しの一般セッション）だけ**である。
+>
+> 管理操作は Edge Function / Server Actions から **`service_role`** で走る。`service_role` は **`BYPASSRLS` を持ち、
+> テーブル権限も全開**であるため、**ポリシーにも列単位 GRANT にも一切引っかからない**。
+>
+> **`service_role` でも必ず発火する関門はトリガーだけである。**
+> したがって権限列の防御は **`BEFORE UPDATE` トリガー ＋ 列単位 GRANT 除外の二重**で実装する
+> （[[DB物理設計]] §6-6b ／ [[会員データモデル_ユーザーテーブル定義]] §5.2a）。
+>
+> ⚠️ 実装時の注意: `service_role` 経由では `auth.uid()` が `NULL` になり操作者を特定できないため、
+> 呼び出し側が `set_config('app.operator_id', <操作者のmember_id>, true)` で**申告しないと権限列の UPDATE は拒否される**。
+> `role` 変更にはさらに `app.change_reason` も必須。**申告を省略できる設計にすると、`service_role` 経路で防御が丸ごと無効化される。**
 
 ### 2. **監査ログ（AUDIT_LOGS）の必須化**
 
@@ -1255,8 +1298,8 @@ WHERE DATE(ms.session_date) = CURRENT_DATE
 
 ---
 
-Last Updated: 2026-08-20  
-Version: 1.1.0 (Draft)  
+Last Updated: 2026-09-13  
+Version: 1.3.0 (Draft)  
 Status: 実装前レビュー待ち
 
 **注記**: このER図は論理設計レベルです。物理実装時は、インデックス・パーティショニング・キャッシュ戦略等をDB物理設計に従って調整してください。
@@ -1269,6 +1312,7 @@ Status: 実装前レビュー待ち
 | --- | --- | --- |
 | **1.1.0** | **2026-08-20** | **正本 v1.15.0（2026-08-13 レビュー未反映分の一括反映）を反映**。①`ORDERS` に **`serving_status`（未提供／提供済み）・`served_at`・`served_by`** を追加。**決済ステータスとは独立した2軸**であり、同一カラムへ統合しない（正本 §5.4.1／§9 #39）。②`QUEST_COMPLETIONS` を**二段階承認**へ変更：`status` を `報告済み/コアメンバー確認済/承認完了/差戻し` とし、**`reviewed_by`（コアメンバー確認者）と `approved_by`（最終承認者＝admin）を別カラムで保持**。`review_skipped`・`rejection_reason` も追加（正本 §5.3.2／§9 #34）。③**`WORK_LOG_REVIEWS` を新設**（2人目以降の確認ログ）。④**`EUMO_GRANTS` を新設**：`未送付→送付済→受領確認済` を追跡し、**送付と受領を別状態で保持**（正本 §5.3.1／§9 #35）。⑤**`MENU_ITEMS`・`ACCOMMODATION_RATES` を新設**：Uii価格は保存せず都度算出、宿泊料金は**適用期間付きの履歴管理**（正本 §5.4.2／§9 #40）。⑥リレーションに `QUEST_COMPLETIONS→EUMO_GRANTS`（最終承認時に起票）・`MENU_ITEMS→ORDER_ITEMS`（注文時点の単価をコピー）・`ACCOMMODATION_RATES→BOOKINGS`（適用期間で解決）を追加。 |
 | **1.2.0** | **2026-09-12** | **2026-09-05 の会員スキーマ決定を反映**（オーナー決定：食い違いは新しい方を正とする）。①**`LODGING_REGISTER_ENTRIES` を新設**：旅館業法の法定名簿。前泊地・後泊地の「物理カラム未定義」を解消した（[[DB物理設計]] §3-13）。氏名・住所は**当時値のスナップショット**であり `MEMBER_PROFILES_PRIVATE` への参照にしない（参照にすると住所変更で過去の名簿が書き換わり、法定記録の遡及改変になる）。`member_id` は **`ON DELETE SET NULL`**（`CASCADE` にすると退会で法定記録が消える）。②**`MEMBER_ROLE_CHANGES` を新設**：`role` 変更の一次記録。`CHECK (member_id <> operator_id)` により**自己変更の記録を物理的に作れない**（§6-6b⑤）。汎用 `AUDIT_LOGS` では代替せず、その投影元として残す。③`MEMBER_PROFILES_PRIVATE` に **`full_name_normalized`（生成列）** を追加し、照合キーをカナから正規化本名へ変更（§3-14④）。④不整合表を更新：**立場（`MEMBER_TYPES`）は解消済み**（エンティティは既に削除済みだった）。⚠️ `STAY_TICKETS.remaining_quantity` と `BOOKINGS`/`check_ins` の統合は**別論点として未解消のまま残している**。 |
+| **1.3.0** | **2026-09-13** | **権限ガードトリガー（[[DB物理設計]] §6-6b）を反映**。1.2.0 は `MEMBER_ROLE_CHANGES` の**エンティティ図だけ**を入れ、**それを強制する仕組み・エンティティ説明・リレーション表への記載が抜けていた**。①**「重要な設計ポイント §1」に警告を新設**：自分の行だけ更新できるポリシーから見ると**自分を `admin` にするのは正当な操作**であり、列単位 GRANT は `authenticated` にしか効かず、**`service_role` は `BYPASSRLS` で両方を迂回する**。**必ず発火する関門はトリガーだけ**であるため `BEFORE UPDATE` トリガー ＋ GRANT 除外の二重で塞ぐ。②**`MEMBER_ROLE_CHANGES` のエンティティ説明を新設**（`CHECK (member_id <> operator_id)`／SELECT は `admin` のみ・書き込みは全拒否／`ON DELETE RESTRICT`）。③`USERS` の説明に**自己変更のガード対象**（`role`／`auth_user_id`／`member_type` は自己変更禁止、`account_status` は退会のみ可、`member_id` は自他とも不可）と集計キャッシュ3列の直接更新禁止を追記し、`total_stay_days` をエンティティ図へ補った。④`AUDIT_LOGS` に**`role` 変更の正本は `MEMBER_ROLE_CHANGES` である**ことを明記。⑤リレーション表に **1.2.0 で新設したまま載っていなかった `MEMBER_ROLE_CHANGES`・`LODGING_REGISTER_ENTRIES` の2行を追加**。⑥実装注意として `app.operator_id` / `app.change_reason` の申告が必須である旨を明記。 |
 | 1.0.0 | 2026-08-17 | 初版作成（論理設計レベル）。 |
 
 > [!important] 残枠は**エンティティを持たない**
