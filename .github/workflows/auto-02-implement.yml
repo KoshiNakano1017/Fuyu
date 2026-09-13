@@ -126,7 +126,7 @@ jobs:
       - name: 実装オーケストレータ（テスト設計）
         id: orc-tests
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           ORC_MAX_TURNS: '40'
@@ -167,7 +167,7 @@ jobs:
       - name: 実装オーケストレータ（実装 → verify ループ）
         id: orc-code
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           ORC_MAX_TURNS: '60'

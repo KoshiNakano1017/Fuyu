@@ -97,7 +97,7 @@ jobs:
       - name: 計画オーケストレータ
         id: orc
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           ORC_MAX_TURNS: '40'
