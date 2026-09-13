@@ -28,6 +28,7 @@ import { runAgent } from './lib/runAgent.mjs';
 import { loadState, saveState, addUsage, recordAttempt } from './lib/state.mjs';
 import * as gh from './lib/gh.mjs';
 import { IMPLEMENT_SCHEMA, validate, outputInstruction, extractJson } from './lib/schema.mjs';
+import { section, stripTemplate, hasDerived, formatApproved, acceptanceRows } from './lib/acceptance.mjs';
 
 const args = new Map();
 for (let i = 2; i < process.argv.length; i += 2) {
@@ -106,18 +107,85 @@ async function hashTests() {
   return out;
 }
 
+/**
+ * テスト設計へ渡す材料を Issue から集める。
+ *
+ * ⚠️ なぜオーケストレータが集めるのか（2026-09-13 修正）
+ * `test-design` の frontmatter は `tools: Read, Glob, Grep, Write, Edit` で
+ * **Bash を持たない**。実装を見せないための制限（設計 §3 #3）だが、副作用として
+ * `gh issue view` も打てない。にもかかわらず定義側の手順1は「Issue のコメントを
+ * 新しい順に読み、タスク定義（完了条件）と段取りを読む」と指示していた。
+ * **この手順は実行不能で、テスト設計は完了条件を見ないままテストを書いていた。**
+ *
+ * 権限を緩めて直すと §3 #3 の隔離（実装を見ない）が壊れる。plan.mjs が調査結果を
+ * pm-plan へ渡しているのと同じく、材料はオーケストレータが渡す（設計 §12.1.4）。
+ */
+async function collectTestContext(issue) {
+  let data;
+  try {
+    data = await gh.issueJson(issue, 'body,comments');
+  } catch (e) {
+    gh.warn(`Issue の取得に失敗しました（${e.message}）。テスト設計は仕様のみで進みます`);
+    return { acceptance: '', definition: '', research: '' };
+  }
+  const comments = (data.comments ?? []).map((c) => c.body ?? '');
+  // 同じ見出しが複数回出る場合は **最後のもの** を採る（作り直しが後勝ちになるため）。
+  const lastWith = (needle) => [...comments].reverse().find((b) => b.includes(needle)) ?? '';
+
+  return {
+    acceptance: stripTemplate(section(data.body ?? '', '完了条件')),
+    definition: lastWith('## タスク定義'),
+    research: lastWith('## 調査結果'),
+  };
+}
+
 // ── 1. テスト設計（仕様だけを見る・commit-first）────────────────
 if (PHASE === 'tests' || PHASE === 'all') {
+const ctx = await collectTestContext(ISSUE);
+
+// ゲート2 でオーナーが承認した完了条件（plan.mjs が state へ残す）。
+// **これが受入基準の正**であり、Issue 本文よりも優先する。
+// ここが空のときだけ、テスト設計が調査結果から導出する（設計 §10.1.3 条件3 の補遺）。
+const approvedAcceptance = formatApproved(state.acceptance);
+if (approvedAcceptance) {
+  gh.notice(`ゲート2 で承認された完了条件 ${state.acceptance.length} 件をテスト設計へ渡します`);
+}
+
+if (!ctx.acceptance && !ctx.definition && !approvedAcceptance) {
+  gh.warn('Issue に完了条件もタスク定義も見つかりません。調査結果からの導出に頼ることになります');
+}
+
 const tests = await step(
   'test-design',
   [
     `対象 Issue 番号: ${ISSUE}`,
     '',
-    '**実装を見ずに、仕様と Issue の完了条件だけを見て受入テストを書くこと**（設計 §11.6 の commit-first）。',
+    '**実装を見ずに、仕様と完了条件だけを見て受入テストを書くこと**（設計 §11.6 の commit-first）。',
     'src/ や app/ のファイルは読まないこと。書き込めるのは tests/ 配下のみ。',
+    '',
+    '**承認済みの完了条件があるなら、それをそのまま使うこと**（origin="issue" として扱う）。',
+    '承認済みが「なし」で、かつ完了条件が穴埋めのままの場合にかぎり、**下の調査結果から導出**すること',
+    '（定義の「完了条件の導出」に従う）。調査結果に無いことを完了条件にしてはならない。',
+    '導出できる完了条件が1つも無ければ blocked=true で止まること。',
     '',
     'CLAUDE.md §4.4 が必ずテストを要求する領域（認可・金額計算・個人情報）が',
     'タスクに含まれる場合、その3点は必ずテストで固定すること。',
+    '',
+    '`acceptance` には、テストへ落とした完了条件を **1行1件** で必ず並べること。',
+    'タスク定義・Issue 本文に書かれていたものは origin="issue"、',
+    '下の調査結果から導出したものは origin="derived" とし、`basis` に根拠の節番号を書くこと。',
+    '',
+    '── 完了条件（ゲート2 で承認済み。これが受入基準の正）──',
+    approvedAcceptance || '（承認済みの完了条件なし）',
+    '',
+    '── Issue 本文の完了条件（参考）──',
+    ctx.acceptance || '（記載なし）',
+    '',
+    '── タスク定義（PM が作成。ゲート1 で承認済み）──',
+    (ctx.definition || '（記載なし）').slice(0, 4000),
+    '',
+    '── 調査結果（調査エージェントが集めた一次情報）──',
+    (ctx.research || '（記載なし）').slice(0, 6000),
   ].join('\n'),
   IMPLEMENT_SCHEMA,
 );
@@ -125,6 +193,45 @@ const tests = await step(
 if (!tests.ok) await stop('テスト設計', 'テスト設計の構造化出力を読み取れませんでした。', (tests.errors ?? []).join('\n'));
 await gh.comment(ISSUE, tests.json.comment);
 if (tests.json.blocked) await stop('テスト設計', tests.json.blockedReason ?? '仕様が未確定です。');
+
+// ── 完了条件の出どころを記録し、導出されたものは必ず掲示する ──────────
+//
+// 設計 §10.1.3 条件3 は「完了条件が検証可能」を起票の条件に挙げ、機械が埋めることを
+// 禁じていた。2026-09-13 のオーナー決定でテスト設計による導出を認めたが、**導出は
+// ゲート1・2 を通過した後に起きる**。つまり誰も承認していない基準で受入テストが固まる。
+// 黙って進めると「機械が決めた完了」が既成事実になるため、ここで必ず可視化する。
+const acceptance = tests.json.acceptance ?? [];
+const derived = acceptance.filter((a) => a.origin === 'derived');
+const anyDerived = hasDerived(acceptance);
+state.acceptance = acceptance;
+state.acceptanceDerived = anyDerived;
+
+if (acceptance.length === 0) {
+  gh.warn('テスト設計が完了条件の一覧を返しませんでした。何を基準にテストを書いたか追跡できません');
+} else if (derived.length > 0) {
+  gh.warn(`完了条件 ${derived.length} 件を調査結果から導出しました（オーナー未承認）`);
+  const rows = acceptanceRows(derived);
+  const fromIssue = acceptance.filter((a) => a.origin === 'issue').length;
+  await gh.comment(ISSUE, [
+    '## ⚠️ 完了条件を調査結果から導出しました',
+    '',
+    `タスク定義に検証可能な完了条件が揃っていなかったため、テスト設計エージェントが`,
+    `**調査結果と正本から ${derived.length} 件を導出**しました`,
+    `（タスク定義から採ったもの: ${fromIssue} 件）。`,
+    '',
+    '> [!warning] これはゲート1・2 の承認を経ていません',
+    '> 受入テストはこの基準で固定されます（設計 §11.6 の commit-first）。',
+    '> **導出が意図と違う場合は、ラベルを `auto:blocked` へ戻してください。**',
+    '',
+    '| # | 導出した完了条件 | 根拠 | 受入テスト |',
+    '| --- | --- | --- | --- | --- |',
+    ...rows,
+    '',
+    '根拠の節番号が実際にその内容を書いているかは、**設計 §10.3 の最頻の事故ポイント**です。',
+    '節を開いて照合してください。',
+  ].join('\n'));
+}
+await gh.setOutput('acceptance_derived', String(derived.length > 0));
 
 // テストのハッシュを固定する。以降、これが変わっていたら止める。
 state.testHashes = await hashTests();

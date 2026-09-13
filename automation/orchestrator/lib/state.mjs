@@ -32,6 +32,11 @@ const EMPTY = {
   tokens: { input: 0, output: 0, costUsd: 0 },
   testHashes: {},
   specRefs: [],
+  // テスト設計が受入テストの基準にした完了条件と、その出どころ（設計 §10.1.3 条件3 の補遺）。
+  // acceptanceDerived=true は「ゲート1・2 を経ていない基準でテストが固定された」という印で、
+  // ゲート3（マージ前）でオーナーが見直す材料になる。
+  acceptance: [],
+  acceptanceDerived: false,
   updatedAt: null,
 };
 
