@@ -6,12 +6,12 @@
   "phase": "review",
   "risk": "high",
   "attempts": {
-    "infra": 0,
+    "infra": 1,
     "verify": 0,
     "review": 0
   },
   "lastFingerprint": {
-    "infra": null,
+    "infra": "1b5b09699adcadf0",
     "verify": null,
     "review": null
   },
@@ -21,9 +21,9 @@
     "review": 0
   },
   "tokens": {
-    "input": 444,
-    "output": 321920,
-    "costUsd": 30.4710115
+    "input": 550,
+    "output": 396532,
+    "costUsd": 38.777848999999996
   },
   "testHashes": {
     "e2e/smoke.spec.ts": "ed6ce8db5e0004a2",
@@ -218,5 +218,5 @@
     }
   ],
   "acceptanceDerived": true,
-  "updatedAt": "2026-09-14T07:38:02.564Z"
+  "updatedAt": "2026-09-14T07:50:35.167Z"
 }
