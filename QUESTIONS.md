@@ -61,6 +61,61 @@
 
 ---
 
+## ⚡ [2026-09-14] `role` / `member_type` の値域が派生文書2件で正本 v13 §2 より狭いまま（v13 §2・§7）
+- ステータス: 未回答（正本優先で進行中・ブロッカーではない）
+- 優先度: 低〜中（放置すると `2-2` 以降の実装者が `custom` 無し4値・`街人`3値の記述を根拠にしうる）
+- 背景: Issue #29（WBS `2-1`）の段取り作成時に判明。調査メモ「矛盾」表 #1・#2。
+  正本 v13 §2（L133・L163-168）と §7（L2141-2142）は `role` を**5値**
+  （`admin` / `core_member` / `member` / `guest` / `custom`）、`member_type` を**4値**
+  （`親方` / `街人（コア）` / `街人（一般）` / `ゲスト`）と定める。一方
+  `会員データモデル_ユーザーテーブル定義.md` §5.2 は `role` 4値（`custom` なし）・`member_type` 3値
+  （`親方` / `街人` / `ゲスト`）のままであり、`DB物理設計.md` §6-9⑥⑦ は両件を「未決」として列挙したままである。
+- 採用した内容: 2026-09-14 のオーナー回答（Issue #29 論点2＝5値 / 論点3＝4値）と `CLAUDE.md` §1.1
+  「矛盾時は正本が勝つ」により、**正本 v13 §2 の値域を採用して進行**（`2-1` のマイグレーションで
+  `role` は5値・`member_type` は4値の `CHECK` を書く）。
+- 派生文書側の訂正要否: `会員データモデル_ユーザーテーブル定義.md` §5.2 の列表と
+  `DB物理設計.md` §6-9⑥⑦ の未決リストを正本に合わせて訂正するか。オーナー判断待ち。
+  なお §6-9⑥ の「`custom` の権限内容が未定義のため、ポリシーは暫定で `member` 相当として扱う」は
+  オーナー回答も同じ扱いを認めているため、そのまま残してよい。
+- 関連ファイル: v13 §2・§7、`docs/spec/basic-design/backend/会員データモデル_ユーザーテーブル定義.md` §5.2、
+  `docs/spec/detailed-design/DB物理設計.md` §6-9⑥⑦、Issue #29
+
+## ⚡ [2026-09-14] `members.auth_user_id` の外部キーに `ON DELETE` 句の指定が無い（v13 §7）
+- ステータス: 未回答（正本の記述どおりに実装して進行中・ブロッカーではない）
+- 優先度: 低（`auth.users` の行を削除する運用が Phase 1 に無ければ実害は出ない）
+- 背景: Issue #29（WBS `2-1`）の段取り作成時に判明。調査メモ「仕様に記載が無い点」。
+  正本 v13 §7 は「`uuid` UNIQUE NULL / `REFERENCES auth.users(id)`」まで、
+  `会員データモデル §5.2`・`DB物理設計 §2` も
+  `ALTER TABLE members ADD COLUMN auth_user_id uuid UNIQUE REFERENCES auth.users(id);` までで、
+  `ON DELETE` を書いていない（PostgreSQL の既定は `NO ACTION`）。
+  `member_profiles_private.member_id` には `ON DELETE CASCADE`、`member_role_changes` の2 FK には
+  `ON DELETE RESTRICT` が明記されているのと対照的である。
+  `DB物理設計 §6-8④` は CI のテストユーザーを `supabase.auth.admin.createUser()` で毎回作るとしており、
+  テストの後始末で `auth.users` の行を消す経路が生じうる（既定の `NO ACTION` では
+  `members.auth_user_id` が残っていると削除が失敗する）。
+- 採用した内容: **記述どおり `ON DELETE` 句を書かない**（＝ `NO ACTION`）。正本・派生文書とも
+  明示していないものを段取りで補うのは仕様策定に当たるため（設計 §0）。
+- 検討の要否: `auth.users` の削除時に `members.auth_user_id` を `NULL` に戻す
+  （`ON DELETE SET NULL`）ほうが、`account_status = 'withdrawn'` かつ `auth_user_id` 任意という
+  v13 §7 のアカウント状態表と整合するか。オーナー判断待ち。
+  変更する場合は既存マイグレーションを書き換えず追加マイグレーションで行う（`CLAUDE.md` §4.5）。
+- 関連ファイル: v13 §7、`docs/spec/basic-design/backend/会員データモデル_ユーザーテーブル定義.md` §5.2、
+  `docs/spec/detailed-design/DB物理設計.md` §2・§6-8④、Issue #29
+
+## ⚡ [2026-09-14] `oyakata_member_no` が `DB物理設計.md` §6-6b① にだけ現れ、列定義がどこにも無い
+- ステータス: 未回答（`2-1` では列として作らずに進行中・ブロッカーではない）
+- 優先度: 低（登場箇所が列単位 GRANT 除外の文脈のみで、GRANT/REVOKE は `2-2` の範囲）
+- 背景: Issue #29（WBS `2-1`）の段取り作成時に判明。調査メモ「派生文書どうしの食い違い」。
+  `DB物理設計.md` §6-6b① の可否表は `oyakata_member_no` という列名を挙げるが、
+  `会員データモデル §5.2a` の warning が「本リポジトリの設計文書に `oyakata_member_no` の列定義は1件もない」
+  「専用列を持たせるのか接頭辞で足りるのかは未決」と自ら指摘している。正本 v13 §7 にも記述が無い
+  （`grep` 済み）。同ノートは `legacy_member_no` に `OYA-` 接頭辞を付ける形で親方会員番号を実現している。
+- 採用した内容: `2-1` の `members` に **`oyakata_member_no` 列を作らない**（`会員データモデル §5.2` の列表に無いため）。
+- 派生文書側の訂正要否: `DB物理設計.md` §6-6b① の可否表から当該行を削除するか、
+  逆に列として新設するか。`2-2`（列単位 GRANT）の着手前に決まっていればよい。オーナー判断待ち。
+- 関連ファイル: `docs/spec/detailed-design/DB物理設計.md` §6-6b①、
+  `docs/spec/basic-design/backend/会員データモデル_ユーザーテーブル定義.md` §5.2・§5.2a、Issue #29
+
 ## [2026-09-14] ⚡ 出典表記に助詞を挟む形（`` `画面設計.md` に §2-4 ``）を `wbs_to_issue.py` が拾えない
 
 - ステータス: 未回答（⚡ 非ブロック）

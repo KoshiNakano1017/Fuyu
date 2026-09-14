@@ -1,0 +1,200 @@
+{
+  "version": 1,
+  "issue": 29,
+  "pr": null,
+  "branch": null,
+  "phase": "plan",
+  "risk": "high",
+  "attempts": {
+    "infra": 0,
+    "verify": 0,
+    "review": 0
+  },
+  "lastFingerprint": {
+    "infra": null,
+    "verify": null,
+    "review": null
+  },
+  "repeatedFingerprint": {
+    "infra": 0,
+    "verify": 0,
+    "review": 0
+  },
+  "tokens": {
+    "input": 116,
+    "output": 82782,
+    "costUsd": 7.192458500000001
+  },
+  "testHashes": {},
+  "specRefs": [
+    {
+      "ref": "v13 §2",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "82-182"
+    },
+    {
+      "ref": "v13 §5.2",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "395-665"
+    },
+    {
+      "ref": "v13 §5.9",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "1497-1587"
+    },
+    {
+      "ref": "v13 §5.9.3",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "1533-1540"
+    },
+    {
+      "ref": "v13 §7",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "2066-2336"
+    },
+    {
+      "ref": "v13 §8",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "2338-2371"
+    },
+    {
+      "ref": "会員データモデル §5.2 / §5.2a / §5.2b",
+      "path": "docs/spec/basic-design/backend/会員データモデル_ユーザーテーブル定義.md"
+    },
+    {
+      "ref": "DB物理設計 §1-5/§1-6/§1-8/§2/§6-2/§6-6b/§6-7/§6-8/§6-9",
+      "path": "docs/spec/detailed-design/DB物理設計.md"
+    }
+  ],
+  "acceptance": [
+    {
+      "criterion": "supabase/migrations/ に会員スキーマのマイグレーションが追加され、members の列構成が 会員データモデル_ユーザーテーブル定義.md §5.2 の列表と一致する",
+      "origin": "issue",
+      "test": "members の列名と型の一覧が 会員データモデル §5.2 の列表と完全に一致する"
+    },
+    {
+      "criterion": "members に full_name / full_name_kana / address / hometown / birth_ym の5列が1つも存在しない",
+      "origin": "issue",
+      "test": "members に個人情報5列が1列も存在しない"
+    },
+    {
+      "criterion": "members.auth_user_id が uuid・UNIQUE・NULL 許容・REFERENCES auth.users(id) である",
+      "origin": "issue",
+      "test": "members.auth_user_id は uuid・NULL 許容・UNIQUE 制約を持ち、auth.users(id) を参照する"
+    },
+    {
+      "criterion": "members.account_status が pre_registered / active / withdrawn の3値に制約され、それ以外の値の INSERT が失敗する",
+      "origin": "issue",
+      "test": "account_status に3値以外を入れた INSERT は失敗する（対で: 3値はいずれも INSERT できる）"
+    },
+    {
+      "criterion": "members.role の CHECK が custom を含む5値、member_type の CHECK が4値（親方 / 街人（コア） / 街人（一般） / ゲスト）である",
+      "origin": "issue",
+      "basis": "v13 §2（2026-09-14 オーナー回答 論点2＝5値・論点3＝4値／CLAUDE.md §1.1）",
+      "test": "role は custom を含む5値を INSERT でき6値目は拒否される／member_type は4値を INSERT でき『街人』は拒否される"
+    },
+    {
+      "criterion": "member_profiles_private が存在し、member_id が主キーかつ REFERENCES members(member_id) ON DELETE CASCADE であり、列構成が §5.2b の表（full_name_normalized を除く）と一致する",
+      "origin": "issue",
+      "basis": "会員データモデル §5.2b（full_name_normalized の除外は 2026-09-14 オーナー回答 論点4）",
+      "test": "member_profiles_private.member_id は主キーであり、親の members 行を削除すると同行も消える"
+    },
+    {
+      "criterion": "member_role_changes が存在し、CHECK (old_role <> new_role)・CHECK (member_id <> operator_id)・CHECK (btrim(reason) <> '') の3制約を持つ",
+      "origin": "issue",
+      "test": "member_role_changes は old_role = new_role / member_id = operator_id / 空白のみの reason をそれぞれ拒否する"
+    },
+    {
+      "criterion": "操作者＝対象本人である role の変更が 42501 で拒否される",
+      "origin": "issue",
+      "test": "本人による自分の role の UPDATE は 42501 で拒否される"
+    },
+    {
+      "criterion": "他人の role を変更する UPDATE は、app.change_reason が未設定のとき 23514 で拒否される",
+      "origin": "issue",
+      "test": "他人の role を app.change_reason 未設定で UPDATE すると 23514 で拒否される（対で: 理由を設定すれば成功する）"
+    },
+    {
+      "criterion": "auth.uid() も app.operator_id も得られない経路からの権限列（role / auth_user_id / account_status / member_type）の UPDATE が 42501 で拒否される",
+      "origin": "issue",
+      "test": "auth.uid() も app.operator_id も無いセッションからの権限列 UPDATE は 42501 で拒否される"
+    },
+    {
+      "criterion": "操作者＝対象本人である auth_user_id の変更が拒否される",
+      "origin": "issue",
+      "test": "本人による自分の auth_user_id の UPDATE は拒否される"
+    },
+    {
+      "criterion": "すでに非 NULL である auth_user_id の付け替えが拒否される",
+      "origin": "issue",
+      "test": "すでに非 NULL の auth_user_id を別の値へ付け替える UPDATE は拒否される（対で: NULL からの初回設定は成功する）"
+    },
+    {
+      "criterion": "操作者＝対象本人である account_status の変更は active → withdrawn のみ成功し、pre_registered → active は拒否される",
+      "origin": "issue",
+      "test": "本人による active → withdrawn の変更は成功し、pre_registered → active は拒否される"
+    },
+    {
+      "criterion": "操作者＝対象本人である member_type の変更が拒否される",
+      "origin": "issue",
+      "test": "本人による自分の member_type の UPDATE は拒否される"
+    },
+    {
+      "criterion": "nickname など権限列以外だけを変える UPDATE は、app.operator_id の申告なしで成功する",
+      "origin": "issue",
+      "test": "nickname だけを変える UPDATE は app.operator_id の申告なしで成功する"
+    },
+    {
+      "criterion": "他人の role を理由付きで変更すると、member_role_changes に old_role / new_role / operator_id / reason を持つ行が1行記録される",
+      "origin": "issue",
+      "test": "admin が他人の role を理由付きで変更すると member_role_changes に1行だけ記録され、その行の内容が UPDATE と一致する"
+    },
+    {
+      "criterion": "members に対する FORCE ROW LEVEL SECURITY が設定されていない",
+      "origin": "issue",
+      "test": "members の pg_class.relforcerowsecurity が false である"
+    },
+    {
+      "criterion": "本パッケージで作成した全テーブルについて pg_class.relrowsecurity = true である",
+      "origin": "issue",
+      "test": "作成した3テーブルの relrowsecurity がすべて true である（§6-8② のメタテストで0行）"
+    },
+    {
+      "criterion": "DB物理設計.md §6-2① の RLS ヘルパ関数4本（current_member_id() / current_member_role() / is_staff() / is_admin()）が定義され、authenticated にのみ EXECUTE が付与されている。あわせて current_operator_id() を定義する",
+      "origin": "issue",
+      "basis": "DB物理設計 §6-2①・§6-6b②（2026-09-14 オーナー回答 論点1＝A の申し送り）",
+      "test": "ヘルパ関数5本が public に存在し、EXECUTE が authenticated にのみ付与されている（anon / PUBLIC には無い）"
+    },
+    {
+      "criterion": "上記のトリガー挙動が自動テストで検証される",
+      "origin": "issue",
+      "test": "受入テスト全24本が CI のジョブとして実行され、失敗時にジョブが赤くなる"
+    },
+    {
+      "criterion": "テストで使う会員データが、実在の会員データを一切参照しない自作フィクスチャである",
+      "origin": "issue",
+      "basis": "CLAUDE.md §3.2・§7.1、DB物理設計 §6-8④",
+      "test": "フィクスチャが @example.invalid のメールと架空氏名だけを使い、Knowledge/ 配下を1件も参照しない"
+    },
+    {
+      "criterion": "上記の自動テストを実行できる DB テスト基盤（ローカルの Supabase スタック設定と、それを起動して回す CI ジョブ）が存在し、CI で実際に走る",
+      "origin": "derived",
+      "basis": "DB物理設計 §6-8①③④（テスト3層と JWT の用意方法を定める）／CLAUDE.md §6.2。調査が supabase/config.toml の不在・ci.yml に Postgres も supabase CLI も無いこと・tests/rls/ の不在を確認",
+      "test": "CI に tests/rls/ を実行するジョブが存在し、ローカルスタック起動を含めて成功する"
+    },
+    {
+      "criterion": "current_operator_id() が、app.operator_id を uuid として解釈できないとき 22023 を、auth.uid() 由来の操作者と申告された操作者が食い違うとき 42501 を投げる",
+      "origin": "derived",
+      "basis": "DB物理設計 §6-6b②",
+      "test": "current_operator_id() は uuid 不正のとき 22023 を、操作者の食い違いのとき 42501 を投げる（2本）"
+    },
+    {
+      "criterion": "既存の 0100_rag_pgvector_knowledge_chunks.sql が1行も変更されていない",
+      "origin": "derived",
+      "basis": "CLAUDE.md §4.5「既存マイグレーションを書き換えない」／同ファイルが『採番 0100 は 0001〜0099 をベーススキーマ用に空けておくため』と明記",
+      "test": "0100_rag_pgvector_knowledge_chunks.sql の差分が0行である"
+    }
+  ],
+  "acceptanceDerived": true,
+  "updatedAt": "2026-09-14T03:18:28.153Z"
+}

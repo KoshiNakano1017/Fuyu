@@ -15,6 +15,22 @@
 
 ## バックログ
 
+## [2026-09-14 03:10] ロール・アカウントステータス スキーマ設計（Issue #29 ／ WBS 2-1） — IN PROGRESS
+
+**2026-09-14 03:20（段取り）: IN PROGRESS。** 調査で停止事由は出ず、完了条件21件を受入テスト21件へ
+1対1で変換した（ゲート2 待ち）。種類A の矛盾2件（`role` / `member_type` の値域）は正本 v13 §2 優先で
+解決済みのため止めない。`auth_user_id` の `ON DELETE` 未記載・`oyakata_member_no` の列定義不在と
+あわせて、`QUESTIONS.md` へ ⚡ 非ブロックで3件記録した。
+**DB を起動するテスト基盤（`supabase/config.toml`・CI ジョブ・`tests/rls/`）がリポジトリに無い**ため、
+完了条件「トリガー挙動が自動テストで検証される」を満たすには最小限の土台の新設が要る。段取りに明記した。
+
+リスク区分: **高**（認可・ロール判定／個人情報／DBマイグレーション／Supabase Auth 連携 — ゲート1・2・3）。
+範囲は 2026-09-14 オーナー回答のとおり **A案**：`members` ＋ `member_profiles_private` ＋ `member_role_changes`
+＋ ガードトリガー2本 ＋ `current_operator_id()` ＋ RLS ヘルパ関数4本（`current_member_id()` /
+`current_member_role()` / `is_staff()` / `is_admin()`）＋ 各テーブルの `ENABLE ROW LEVEL SECURITY`。
+`role` は5値・`member_type` は4値（正本 v13 §2 優先）、`full_name_normalized` と
+`normalize_person_name()` は今回作らず `10-1` へ送る。RLS ポリシー本体と GRANT/REVOKE は `2-2`。
+
 ## [2026-09-13 09:10] 朝会テキスト投入UI（Issue #23 ／ WBS 4-1） — BLOCKED
 
 **2026-09-13 09:30（段取り）: 再び BLOCKED。** 完了条件の切れ目（4-1／4-2）は解決済みだが、
