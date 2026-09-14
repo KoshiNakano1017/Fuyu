@@ -1,0 +1,54 @@
+# ローカルの Supabase スタック設定（`supabase start` が読む）。
+#
+# なぜ必要か: WBS 2-1 の受入テストは `members.auth_user_id` の FK 先である `auth.users` と、
+#   `auth.uid()` を前提にする（DB物理設計 §6-8③④）。素の PostgreSQL コンテナでは代替できないため、
+#   ローカルも CI も同じローカルスタックへそろえる。
+#
+# ⚠️ ここに書いてよいのは「ローカルスタックの起動条件」だけである。
+#   本番・dev プロジェクトの URL やキーは書かない（CLAUDE.md §3.1・§3.2）。
+#   DB テストの接続先は環境変数 `SUPABASE_DB_URL` で与える（tests/db/helpers/psql.ts）。
+
+project_id = "fuyuugai-app"
+
+[api]
+enabled = true
+port = 54321
+# PostgREST が公開するスキーマ。`rag` は絶対に足さない
+# （足すと GRANT の設定ミスが Data API 経由で露出する／0100 のコメント参照）
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 15
+
+[db.pooler]
+enabled = false
+
+[auth]
+enabled = true
+site_url = "http://127.0.0.1:3000"
+additional_redirect_urls = ["http://127.0.0.1:3000"]
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+enable_signup = true
+
+[auth.email]
+enable_signup = true
+# ローカルはメール確認を挟まない。テストユーザーを作ってすぐ使えるようにするため
+enable_confirmations = false
+
+# 以下はローカルの DB テストに要らないため止めておく（起動を速く保つ）。
+[studio]
+enabled = false
+
+[storage]
+enabled = false
+
+[realtime]
+enabled = false
+
+[analytics]
+enabled = false

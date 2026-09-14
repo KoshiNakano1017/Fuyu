@@ -197,6 +197,88 @@ jobs:
           retention-days: 1
 
   # ───────────────────────────────────────────
+  # DB テスト（WBS 2-1 — RLS の有効化・権限列のガードトリガー）
+  #
+  # CLAUDE.md §4.4 が必ずテストを要求する「認可」の領域であり、
+  # 守っているのは «自分で自分を admin にできない» という一点である（DB物理設計 §6-6b）。
+  # service_role は RLS も GRANT も迂回するため、関門はトリガーしかなく、
+  # そのトリガーは DB を起動しなければ1行も検証できない。
+  #
+  # tests/db/** は接続先（SUPABASE_DB_URL）が無い環境では自分を skip する。
+  # skip は緑に見えるため、**このジョブが接続先を必ず与えることが検証の前提**になる
+  # （tests/db-test-infra.test.ts が別の層でそれを固定している）。
+  # ───────────────────────────────────────────
+  db-test:
+    name: DBテスト（RLS・ガードトリガー）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Supabase 設定の有無を確認
+        id: check
+        run: |
+          if [ -f package.json ] && [ -f supabase/config.toml ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "ローカルスタック未設定のためスキップします"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.exists == 'true'
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: 依存関係のインストール
+        if: steps.check.outputs.exists == 'true'
+        run: npm ci
+
+      - uses: supabase/setup-cli@v1
+        if: steps.check.outputs.exists == 'true'
+        with:
+          version: latest
+
+      - name: 前提の揃っていないマイグレーションを退避
+        if: steps.check.outputs.exists == 'true'
+        run: |
+          set -euo pipefail
+          # 0100 は public.work_categories（別の作業パッケージの成果物）を参照しており、
+          # それ単体では適用できない（同ファイル冒頭が自らそう明記している）。
+          # 残したまま supabase start するとマイグレーション適用が落ち、DB テストが1本も走らない。
+          #
+          # ⚠️ リポジトリのファイルは書き換えない（CLAUDE.md §4.5「既存マイグレーションを書き換えない」）。
+          #    ここで行うのはランナー上の一時退避だけであり、前提テーブルが揃った時点でこの手順は消える。
+          mkdir -p "$RUNNER_TEMP/deferred-migrations"
+          mv supabase/migrations/0100_rag_pgvector_knowledge_chunks.sql "$RUNNER_TEMP/deferred-migrations/"
+
+      - name: ローカルスタックを起動（auth.users が要るため素の Postgres では代替できない）
+        if: steps.check.outputs.exists == 'true'
+        run: supabase start
+
+      - name: DB テストの接続先を解決
+        if: steps.check.outputs.exists == 'true'
+        run: |
+          set -euo pipefail
+          psql --version
+          # 接続文字列を YAML へ直書きせず CLI から取得する（CLAUDE.md §3.2）。
+          # 本番・dev の値は使わない。ここで得られるのはローカルスタックの値だけである
+          DB_URL="$(supabase status -o env | sed -n 's/^DB_URL="\(.*\)"$/\1/p')"
+          [ -n "$DB_URL" ] || { echo "::error::ローカルスタックの接続先を取得できませんでした"; exit 1; }
+          echo "::add-mask::$DB_URL"
+          echo "SUPABASE_DB_URL=$DB_URL" >> "$GITHUB_ENV"
+
+      - name: DB テスト実行
+        if: steps.check.outputs.exists == 'true'
+        # --runInBand: 各試験が BEGIN 〜 ROLLBACK で同じ DB を使うため、並列に流すと
+        #   フィクスチャの一意制約（auth_user_id の UNIQUE 等）どうしがぶつかる
+        run: npx jest tests/db --runInBand
+
+      - name: ローカルスタックの停止
+        if: always() && steps.check.outputs.exists == 'true'
+        run: supabase stop --no-backup
+
+  # ───────────────────────────────────────────
   # E2E テスト（CLAUDE.md §6.2 — 2026-08-22 R2 回答で追加）
   #
   # 認可・金額計算・個人情報の3点は CLAUDE.md §4.4 が必ずテストを要求する領域であり、

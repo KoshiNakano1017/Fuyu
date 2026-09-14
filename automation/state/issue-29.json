@@ -21,9 +21,9 @@
     "review": 0
   },
   "tokens": {
-    "input": 172,
-    "output": 143836,
-    "costUsd": 11.1864915
+    "input": 280,
+    "output": 186046,
+    "costUsd": 16.432748500000002
   },
   "testHashes": {
     "e2e/smoke.spec.ts": "ed6ce8db5e0004a2",
@@ -218,5 +218,5 @@
     }
   ],
   "acceptanceDerived": true,
-  "updatedAt": "2026-09-14T07:02:38.126Z"
+  "updatedAt": "2026-09-14T07:15:49.559Z"
 }
