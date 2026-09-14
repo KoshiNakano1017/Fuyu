@@ -144,13 +144,26 @@ jobs:
           fi
           # 設計 §3 #3 の書き込み範囲（tests/ のみ）を機械的にも確認する。
           # settings による制限との二重化（設計 §7.2 の考え方）。
-          OUTSIDE="$(printf '%s\n' "$CHANGED" | sed 's/^...//' | grep -v '^tests/' || true)"
+          #
+          # ⚠️ 2026-09-14 修正: automation/state/ を除外する。
+          #   このガードは旧構成（claude-code-action を直接叩く）の前提で書かれており、
+          #   「tests/ 以外の差分＝テスト設計エージェントの越境」と見なしてよかった。
+          #   段7 で実装オーケストレータへ移行した結果、implement.mjs 自身が
+          #   automation/state/issue-<n>.json を必ず書くようになり（設計 §6.3 の
+          #   「再開は PR ＋ Issue ＋ state から復元できること」）、**正当な実装が
+          #   必ずここで落ちる**ようになった。Issue #29 が実際にこれで停止した。
+          #   state はエージェントの成果物ではなくオーケストレータの記録なので、
+          #   越境判定の対象から外す。tests/ 以外の**コード**が混ざる検査は維持する。
+          OUTSIDE="$(printf '%s\n' "$CHANGED" | sed 's/^...//' \
+            | grep -v '^tests/' | grep -v '^automation/state/' || true)"
           if [ -n "$OUTSIDE" ]; then
             echo "::error::テスト設計が tests/ の外を変更しました（設計 §3 #3）"
             printf '%s\n' "$OUTSIDE"
             exit 1
           fi
           git add tests
+          # state はオーケストレータの記録。次回起動が再開に使うため一緒に残す。
+          git add automation/state 2>/dev/null || true
           git commit -F - <<'COMMIT_MSG'
           test: Issue #${{ github.event.issue.number }} の受入テストを追加する
 
