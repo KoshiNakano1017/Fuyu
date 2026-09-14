@@ -91,11 +91,36 @@ PAREN_RE = re.compile(r"[（(]([^）)]*)[）)]")
 
 # § の直前に置かれた出典名。`（CLAUDE.md §4.4 が…）` の `CLAUDE.md` を捕まえる。
 # 出典が付かない § は正本（v13）を指す、という WBS の記法に従う。
+#
+# ⚠️ 2026-09-14 修正（起票支援エージェントが Issue #27 の起草時に検出）
+#   旧実装は装飾を剥がさずに末尾一致を見ていたため、WBS 内の8件を誤判定していた。
+#     `` `DB物理設計.md` §6-6b `` … `.md` の後ろにバッククォートがあり語尾一致が外れる
+#     `会員データモデル §5.2a`     … 「モデル」が語尾リストに無い
+#   いずれも出典なし＝**正本 v13 として扱われる**。
+#
+#   実害は「存在しない節」より「存在する別の節」にある。
+#   `v13 §5.2a` は実在しないので spec_ref.py が止めるが、`v13 §6`（権限マトリクス）は
+#   **実在するのですり抜ける**。スキーマ設計の根拠として権限マトリクスが載り、
+#   設計 §10.3 が「最頻の事故ポイント」と呼ぶ状態がそのまま Issue に固定される。
+#   再発検査は wbs_selftest.py が実物の WBS に対して行う。
+SOURCE_SUFFIX = r"(?:\.md|設計|仕様|規約|ガイド|モデル|定義|マニュアル)"
 SOURCE_BEFORE_RE = re.compile(
     r"(?:^|[\s（(、。，／/｜|【\[])"
-    r"(?P<src>[^\s（()）、。，／/｜|【】\[\]]{1,48}?(?:\.md|設計|仕様|規約|ガイド))"
+    r"(?P<src>[^\s（()）、。，／/｜|【】\[\]]{1,48}?" + SOURCE_SUFFIX + r")"
     r"\s*$"
 )
+
+# 出典名にかかる装飾。Markdown の強調・コード・取り消し線は文書名の一部ではない。
+SOURCE_MARKUP_RE = re.compile(r"[`*~＊]+")
+
+
+def strip_source_markup(text: str) -> str:
+    """出典名の判定を装飾に邪魔させない。
+
+    `` `DB物理設計.md` `` → `DB物理設計.md`、`**CLAUDE.md` → `CLAUDE.md`。
+    位置は使わず出典名の照合にしか使わないため、長さが変わっても差し支えない。
+    """
+    return SOURCE_MARKUP_RE.sub("", text)
 
 # 正本を指す出典表記。これらは「他ドキュメント」ではなく v13 として扱う。
 SPEC_ALIASES = ("v13", "正本", "総合要件定義")
@@ -316,7 +341,8 @@ def extract_spec_refs(*texts: str) -> list[dict]:
             ref = re.sub(r"\s+", " ", match.group()).strip()
 
             source = "v13"
-            before = SOURCE_BEFORE_RE.search(text[: match.start()])
+            # 装飾を剥がしてから出典名を探す（strip_source_markup の docstring を参照）。
+            before = SOURCE_BEFORE_RE.search(strip_source_markup(text[: match.start()]))
             if before:
                 candidate = before.group("src").strip()
                 if not any(alias in candidate for alias in SPEC_ALIASES):

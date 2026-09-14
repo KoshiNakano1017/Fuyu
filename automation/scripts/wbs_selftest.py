@@ -1,7 +1,7 @@
 """導線4・導線5（設計 §10.1.5）の再発検査。実物の WBS に対して実行する。
 
 `wbs_to_issue.py --selftest` と同じ思想で、**WBS 側の編集で静かに壊れる**ものを拾う。
-ここで守っているのは次の4点である。
+ここで守っているのは次の6点である。
 
 1. **総合% の算術** — 総合 ＝ 設計 × 0.4 ＋ 実装 × 0.6（WBS L95）。
    既存行と計算が一致しなくなったら、重みが変わったか列がずれている。
@@ -9,11 +9,17 @@
 3. **廃止・ブロック判定の範囲** — 散文に出てくる「不要化」で誤判定しない
    （2026-09-13 に `4-1` が起票不能だった不具合の再発検査）。
 4. **ガードの拒否条件** — 対象外の行・対象外の列・行の増減を確実に弾く。
+5. **機能領域の振り分け** — `4` が作業パッケージ表以外へ着弾しない（導線4）。
+6. **出典名の抽出** — 装飾に壊されない（2026-09-14 の不具合の再発検査）。
+
+5 と 6 はいずれも「**間違った結果が正しい顔で通る**」型の不具合だった。
+5 は空の Issue が作れ、6 は v13 に実在する別の節が根拠として載る。
+存在しない節なら `spec_ref.py` が止めるが、存在する節は止まらない。
 """
 
 from __future__ import annotations
 
-import sys
+import re, sys
 import tempfile
 from pathlib import Path
 
@@ -136,6 +142,57 @@ def main() -> int:
     for package_input in ("4-1", "0-1", "3-5b", "14-6"):
         row, _ = wbs_to_issue.parse_wbs(WBS, package_input)
         check(row is not None, f"作業パッケージ '{package_input}' を引けません")
+
+    # ── 6. 出典名の抽出が装飾に壊されないこと（2026-09-14 の不具合の再発検査）──
+    #   `` `DB物理設計.md` §6-6b `` を「出典なし＝正本 v13」と誤判定すると、
+    #   **v13 に実在する別の §6（権限マトリクス）が根拠として Issue に載る**。
+    #   存在しない節なら spec_ref.py が止めるが、存在する節はすり抜けるため、
+    #   設計 §10.3 が「最頻の事故ポイント」と呼ぶ状態がゲート1まで温存される。
+    from wbs_to_issue import extract_spec_refs
+
+    for text, want_source in [
+        ("`DB物理設計.md` §6-6b のトリガー", "DB物理設計.md"),
+        ("**CLAUDE.md §6.2** のとおり", "CLAUDE.md"),
+        ("会員データモデル §5.2a を参照", "会員データモデル"),
+        ("`非機能要件詳細.md` §7-2", "非機能要件詳細.md"),
+        ("v13 §5.10.2 に定義", "v13"),
+        ("正本 §4 のスコープ", "v13"),
+    ]:
+        refs = extract_spec_refs(text)
+        got = refs[0]["source"] if refs else "(なし)"
+        check(
+            got == want_source,
+            f"出典の抽出が誤っています: {text!r} → {got!r}（期待 {want_source!r}）",
+        )
+
+    # 実物の WBS に対する検査。`.md` を含む語が § の直前にあるのに v13 扱いなら、
+    # それは装飾か語尾リストの取りこぼしであり、偽陽性の根拠が混入する。
+    from wbs_to_issue import SECTION_RE, SOURCE_BEFORE_RE, SPEC_ALIASES, strip_source_markup
+
+    leaked = []
+    for package in packages.values():
+        blob = " ".join([package.get(W.COL_SUMMARY), package.status])
+        for match in SECTION_RE.finditer(blob):
+            before = strip_source_markup(blob[: match.start()])
+            found = SOURCE_BEFORE_RE.search(before)
+            source = "v13"
+            if found:
+                candidate = found.group("src").strip()
+                if not any(alias in candidate for alias in SPEC_ALIASES):
+                    source = candidate
+            # **直前のトークン**が `.md` を含むのに v13 と判定されたら取りこぼし。
+            # 後方30文字などの広い窓にすると、`（QUESTIONS.md 2026-09-05 起票分）。§9 #54`
+            # のように「別の話として出てきた .md」まで拾って誤検知する（2-3 で踏んだ）。
+            #
+            # ⚠️ 既知の未対応: `` `画面設計.md` に **§2-4** `` のように助詞を挟む形は
+            #    このガードでも SOURCE_BEFORE_RE でも拾えない（18-2 に実在）。
+            #    助詞を許すと「CLAUDE.md に書いてある v13 §4」まで誤って出典化するため、
+            #    隣接形だけを対象にしている。別途の課題として QUESTIONS.md へ起票済み。
+            tail = re.split(r"[\s（(、。，／/｜|【\[]", before.rstrip())
+            adjacent = tail[-1] if tail else ""
+            if source == "v13" and ".md" in adjacent:
+                leaked.append(f"{package.id}: …{adjacent!r} → v13 {match.group()}")
+    check(not leaked, "出典を取りこぼした参照があります: " + " / ".join(leaked[:3]))
 
     if failures:
         print("セルフテスト失敗:", file=sys.stderr)
