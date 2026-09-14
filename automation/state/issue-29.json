@@ -1,31 +1,36 @@
 {
   "version": 1,
   "issue": 29,
-  "pr": null,
+  "pr": 33,
   "branch": null,
-  "phase": "plan",
+  "phase": "review",
   "risk": "high",
   "attempts": {
-    "infra": 0,
+    "infra": 19,
     "verify": 0,
     "review": 0
   },
   "lastFingerprint": {
-    "infra": null,
+    "infra": "1b5b09699adcadf0",
     "verify": null,
     "review": null
   },
   "repeatedFingerprint": {
-    "infra": 0,
+    "infra": 18,
     "verify": 0,
     "review": 0
   },
   "tokens": {
-    "input": 116,
-    "output": 82782,
-    "costUsd": 7.192458500000001
+    "input": 550,
+    "output": 396532,
+    "costUsd": 38.777848999999996
   },
-  "testHashes": {},
+  "testHashes": {
+    "e2e/smoke.spec.ts": "ed6ce8db5e0004a2",
+    "tests/acceptance.test.ts": "ba0921981b4630b7",
+    "tests/supabase-env.test.ts": "2854c57b5940bac5",
+    "tests/uii.test.ts": "b5791629644723f4"
+  },
   "specRefs": [
     {
       "ref": "v13 §2",
@@ -70,131 +75,148 @@
     {
       "criterion": "supabase/migrations/ に会員スキーマのマイグレーションが追加され、members の列構成が 会員データモデル_ユーザーテーブル定義.md §5.2 の列表と一致する",
       "origin": "issue",
-      "test": "members の列名と型の一覧が 会員データモデル §5.2 の列表と完全に一致する"
+      "basis": "会員データモデル §5.2",
+      "test": "tests/db/members-schema.test.ts:members の列構成が 会員データモデル §5.2 の列表と一致する"
     },
     {
       "criterion": "members に full_name / full_name_kana / address / hometown / birth_ym の5列が1つも存在しない",
       "origin": "issue",
-      "test": "members に個人情報5列が1列も存在しない"
+      "basis": "v13 §7・DB物理設計 §2",
+      "test": "tests/db/members-schema.test.ts:members に個人情報5列（full_name / full_name_kana / address / hometown / birth_ym）が1つも存在しない"
     },
     {
       "criterion": "members.auth_user_id が uuid・UNIQUE・NULL 許容・REFERENCES auth.users(id) である",
       "origin": "issue",
-      "test": "members.auth_user_id は uuid・NULL 許容・UNIQUE 制約を持ち、auth.users(id) を参照する"
+      "basis": "v13 §7・会員データモデル §5.2a",
+      "test": "tests/db/members-schema.test.ts:auth_user_id の型が uuid である ／ auth_user_id が NULL を許容する（NULL = アプリ未登録／§5.2a） ／ auth_user_id に UNIQUE 制約がある（1つの Auth アカウントが2会員に紐づくのを防ぐ／§5.2a） ／ auth_user_id が auth.users(id) を参照する"
     },
     {
       "criterion": "members.account_status が pre_registered / active / withdrawn の3値に制約され、それ以外の値の INSERT が失敗する",
       "origin": "issue",
-      "test": "account_status に3値以外を入れた INSERT は失敗する（対で: 3値はいずれも INSERT できる）"
+      "basis": "v13 §2 アカウント状態",
+      "test": "tests/db/members-schema.test.ts:pre_registered / active / withdrawn の3値は INSERT できる ／ 3値以外の account_status を INSERT すると 23514 で拒否される"
     },
     {
       "criterion": "members.role の CHECK が custom を含む5値、member_type の CHECK が4値（親方 / 街人（コア） / 街人（一般） / ゲスト）である",
       "origin": "issue",
       "basis": "v13 §2（2026-09-14 オーナー回答 論点2＝5値・論点3＝4値／CLAUDE.md §1.1）",
-      "test": "role は custom を含む5値を INSERT でき6値目は拒否される／member_type は4値を INSERT でき『街人』は拒否される"
+      "test": "tests/db/members-schema.test.ts:admin / core_member / member / guest / custom の5値は INSERT できる ／ 5値以外の role を INSERT すると 23514 で拒否される ／ 親方 / 街人（コア） / 街人（一般） / ゲスト の4値は INSERT できる ／ 4値以外の member_type を INSERT すると 23514 で拒否される"
     },
     {
       "criterion": "member_profiles_private が存在し、member_id が主キーかつ REFERENCES members(member_id) ON DELETE CASCADE であり、列構成が §5.2b の表（full_name_normalized を除く）と一致する",
       "origin": "issue",
       "basis": "会員データモデル §5.2b（full_name_normalized の除外は 2026-09-14 オーナー回答 論点4）",
-      "test": "member_profiles_private.member_id は主キーであり、親の members 行を削除すると同行も消える"
+      "test": "tests/db/members-schema.test.ts:列構成が 会員データモデル §5.2b の表（full_name_normalized を除く）と一致する ／ member_id が主キーである（PK 兼 FK ＝ 1対1／§5.2b） ／ member_id が members(member_id) を ON DELETE CASCADE で参照する"
     },
     {
       "criterion": "member_role_changes が存在し、CHECK (old_role <> new_role)・CHECK (member_id <> operator_id)・CHECK (btrim(reason) <> '') の3制約を持つ",
       "origin": "issue",
-      "test": "member_role_changes は old_role = new_role / member_id = operator_id / 空白のみの reason をそれぞれ拒否する"
+      "basis": "DB物理設計 §6-6b⑤・会員データモデル §5.9",
+      "test": "tests/db/members-schema.test.ts:3つの CHECK をすべて満たす行は INSERT できる ／ old_role と new_role が同じ行は 23514 で拒否される ／ member_id と operator_id が同じ行（自己変更の記録）は 23514 で拒否される ／ reason が空白だけの行は 23514 で拒否される"
     },
     {
       "criterion": "操作者＝対象本人である role の変更が 42501 で拒否される",
       "origin": "issue",
-      "test": "本人による自分の role の UPDATE は 42501 で拒否される"
+      "basis": "DB物理設計 §6-6b③①／v13 §7",
+      "test": "tests/db/members-guard-trigger.test.ts:操作者＝対象本人である role の変更は 42501 で拒否される ／（許可側）他人の role を理由付きで変更する UPDATE は成功する"
     },
     {
       "criterion": "他人の role を変更する UPDATE は、app.change_reason が未設定のとき 23514 で拒否される",
       "origin": "issue",
-      "test": "他人の role を app.change_reason 未設定で UPDATE すると 23514 で拒否される（対で: 理由を設定すれば成功する）"
+      "basis": "DB物理設計 §6-6b③①",
+      "test": "tests/db/members-guard-trigger.test.ts:他人の role を変更する UPDATE は app.change_reason が未設定のとき 23514 で拒否される ／ app.change_reason が空白だけのときも 23514 で拒否される"
     },
     {
       "criterion": "auth.uid() も app.operator_id も得られない経路からの権限列（role / auth_user_id / account_status / member_type）の UPDATE が 42501 で拒否される",
       "origin": "issue",
-      "test": "auth.uid() も app.operator_id も無いセッションからの権限列 UPDATE は 42501 で拒否される"
+      "basis": "DB物理設計 §6-6b②③",
+      "test": "tests/db/members-guard-trigger.test.ts:role の UPDATE が 42501 で拒否される ／ auth_user_id の UPDATE が 42501 で拒否される ／ account_status の UPDATE が 42501 で拒否される ／ member_type の UPDATE が 42501 で拒否される"
     },
     {
       "criterion": "操作者＝対象本人である auth_user_id の変更が拒否される",
       "origin": "issue",
-      "test": "本人による自分の auth_user_id の UPDATE は拒否される"
+      "basis": "DB物理設計 §6-6b③②",
+      "test": "tests/db/members-guard-trigger.test.ts:操作者＝対象本人である auth_user_id の変更は拒否される"
     },
     {
       "criterion": "すでに非 NULL である auth_user_id の付け替えが拒否される",
       "origin": "issue",
-      "test": "すでに非 NULL の auth_user_id を別の値へ付け替える UPDATE は拒否される（対で: NULL からの初回設定は成功する）"
+      "basis": "DB物理設計 §6-6b③②",
+      "test": "tests/db/members-guard-trigger.test.ts:すでに非 NULL である auth_user_id の付け替えは拒否される ／（許可側）NULL の auth_user_id へ他人が値を入れる（名寄せ成立）UPDATE は成功する"
     },
     {
       "criterion": "操作者＝対象本人である account_status の変更は active → withdrawn のみ成功し、pre_registered → active は拒否される",
       "origin": "issue",
-      "test": "本人による active → withdrawn の変更は成功し、pre_registered → active は拒否される"
+      "basis": "DB物理設計 §6-6b③③",
+      "test": "tests/db/members-guard-trigger.test.ts:操作者＝対象本人である account_status の変更は active → withdrawn なら成功する ／ 操作者＝対象本人である account_status の pre_registered → active は 42501 で拒否される"
     },
     {
       "criterion": "操作者＝対象本人である member_type の変更が拒否される",
       "origin": "issue",
-      "test": "本人による自分の member_type の UPDATE は拒否される"
+      "basis": "DB物理設計 §6-6b③④",
+      "test": "tests/db/members-guard-trigger.test.ts:操作者＝対象本人である member_type の変更は 42501 で拒否される ／（許可側）他人の member_type を変更する UPDATE は成功する"
     },
     {
       "criterion": "nickname など権限列以外だけを変える UPDATE は、app.operator_id の申告なしで成功する",
       "origin": "issue",
-      "test": "nickname だけを変える UPDATE は app.operator_id の申告なしで成功する"
+      "basis": "DB物理設計 §6-6b③（権限列が1つも変わっていなければ何もしない分岐）",
+      "test": "tests/db/members-guard-trigger.test.ts:nickname だけを変える UPDATE は app.operator_id の申告なしで成功する"
     },
     {
       "criterion": "他人の role を理由付きで変更すると、member_role_changes に old_role / new_role / operator_id / reason を持つ行が1行記録される",
       "origin": "issue",
-      "test": "admin が他人の role を理由付きで変更すると member_role_changes に1行だけ記録され、その行の内容が UPDATE と一致する"
+      "basis": "DB物理設計 §6-6b⑤",
+      "test": "tests/db/members-guard-trigger.test.ts:他人の role を理由付きで変更すると member_role_changes に1行だけ記録される"
     },
     {
       "criterion": "members に対する FORCE ROW LEVEL SECURITY が設定されていない",
       "origin": "issue",
-      "test": "members の pg_class.relforcerowsecurity が false である"
+      "basis": "DB物理設計 §6-2① の danger（付けると 42P17 で全クエリが落ちる）",
+      "test": "tests/db/rls-and-helper-functions.test.ts:members に FORCE ROW LEVEL SECURITY が設定されていない"
     },
     {
       "criterion": "本パッケージで作成した全テーブルについて pg_class.relrowsecurity = true である",
       "origin": "issue",
-      "test": "作成した3テーブルの relrowsecurity がすべて true である（§6-8② のメタテストで0行）"
+      "basis": "DB物理設計 §1-8・§6-7（検査 SQL は §6-8②）",
+      "test": "tests/db/rls-and-helper-functions.test.ts:本パッケージで作成した全テーブルで RLS が有効である"
     },
     {
       "criterion": "DB物理設計.md §6-2① の RLS ヘルパ関数4本（current_member_id() / current_member_role() / is_staff() / is_admin()）が定義され、authenticated にのみ EXECUTE が付与されている。あわせて current_operator_id() を定義する",
       "origin": "issue",
       "basis": "DB物理設計 §6-2①・§6-6b②（2026-09-14 オーナー回答 論点1＝A の申し送り）",
-      "test": "ヘルパ関数5本が public に存在し、EXECUTE が authenticated にのみ付与されている（anon / PUBLIC には無い）"
+      "test": "tests/db/rls-and-helper-functions.test.ts:ヘルパ関数4本と current_operator_id() が定義されている ／ authenticated に EXECUTE が付与されている ／ anon には EXECUTE が付与されていない ／ PUBLIC には EXECUTE が付与されていない"
     },
     {
       "criterion": "上記のトリガー挙動が自動テストで検証される",
       "origin": "issue",
-      "test": "受入テスト全24本が CI のジョブとして実行され、失敗時にジョブが赤くなる"
+      "basis": "CLAUDE.md §4.4／DB物理設計 §6-8③",
+      "test": "tests/db/members-guard-trigger.test.ts（完了条件8〜16 の16テスト。許可側・拒否側を対で実装）"
     },
     {
       "criterion": "テストで使う会員データが、実在の会員データを一切参照しない自作フィクスチャである",
       "origin": "issue",
       "basis": "CLAUDE.md §3.2・§7.1、DB物理設計 §6-8④",
-      "test": "フィクスチャが @example.invalid のメールと架空氏名だけを使い、Knowledge/ 配下を1件も参照しない"
+      "test": "tests/fixtures-are-synthetic.test.ts:すべてのフィクスチャのメールアドレスが @example.invalid である ／ フィクスチャのニックネームがすべて「テスト」で始まる架空の名前である ／ フィクスチャ定義が実データの置き場を1つも参照していない"
     },
     {
       "criterion": "上記の自動テストを実行できる DB テスト基盤（ローカルの Supabase スタック設定と、それを起動して回す CI ジョブ）が存在し、CI で実際に走る",
       "origin": "derived",
-      "basis": "DB物理設計 §6-8①③④（テスト3層と JWT の用意方法を定める）／CLAUDE.md §6.2。調査が supabase/config.toml の不在・ci.yml に Postgres も supabase CLI も無いこと・tests/rls/ の不在を確認",
-      "test": "CI に tests/rls/ を実行するジョブが存在し、ローカルスタック起動を含めて成功する"
+      "basis": "DB物理設計 §6-8①③④／CLAUDE.md §6.2（ゲート2 承認済みの完了条件22）",
+      "test": "tests/db-test-infra.test.ts:ローカルの Supabase スタック設定 supabase/config.toml が存在する ／ CI のワークフローが DB テストの接続先 SUPABASE_DB_URL を与えている ／ CI のワークフローまたは npm スクリプトが tests/db を実行対象にしている ／ CI のワークフローが DB テストの接続先に本番の環境変数を使っていない"
     },
     {
       "criterion": "current_operator_id() が、app.operator_id を uuid として解釈できないとき 22023 を、auth.uid() 由来の操作者と申告された操作者が食い違うとき 42501 を投げる",
       "origin": "derived",
-      "basis": "DB物理設計 §6-6b②",
-      "test": "current_operator_id() は uuid 不正のとき 22023 を、操作者の食い違いのとき 42501 を投げる（2本）"
+      "basis": "DB物理設計 §6-6b②（ゲート2 承認済みの完了条件23）",
+      "test": "tests/db/current-operator-id.test.ts:app.operator_id を uuid として解釈できないとき 22023 を投げる ／ auth.uid() 由来の操作者と申告された操作者が食い違うとき 42501 を投げる ／（許可側）一致すれば その member_id を返す ／ ログインセッションだけでも その member_id を返す ／ 両方無ければ NULL を返す"
     },
     {
       "criterion": "既存の 0100_rag_pgvector_knowledge_chunks.sql が1行も変更されていない",
       "origin": "derived",
-      "basis": "CLAUDE.md §4.5「既存マイグレーションを書き換えない」／同ファイルが『採番 0100 は 0001〜0099 をベーススキーマ用に空けておくため』と明記",
-      "test": "0100_rag_pgvector_knowledge_chunks.sql の差分が0行である"
+      "basis": "CLAUDE.md §4.5（ゲート2 承認済みの完了条件24）",
+      "test": "tests/migrations-baseline.test.ts:0100_rag_pgvector_knowledge_chunks.sql の行数が変わっていない ／ 0100_rag_pgvector_knowledge_chunks.sql の SQL 文が1つも増減・変更されていない"
     }
   ],
   "acceptanceDerived": true,
-  "updatedAt": "2026-09-14T03:18:28.153Z"
+  "updatedAt": "2026-09-14T08:09:11.901Z"
 }
