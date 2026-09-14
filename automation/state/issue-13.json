@@ -1,0 +1,93 @@
+{
+  "version": 1,
+  "issue": 13,
+  "pr": null,
+  "branch": null,
+  "phase": "plan",
+  "risk": "mid",
+  "attempts": {
+    "infra": 0,
+    "verify": 0,
+    "review": 0
+  },
+  "lastFingerprint": {
+    "infra": null,
+    "verify": null,
+    "review": null
+  },
+  "repeatedFingerprint": {
+    "infra": 0,
+    "verify": 0,
+    "review": 0
+  },
+  "tokens": {
+    "input": 106,
+    "output": 50356,
+    "costUsd": 4.665689
+  },
+  "testHashes": {},
+  "specRefs": [
+    {
+      "ref": "v13 §5.5",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "906-954"
+    },
+    {
+      "ref": "v13 §9 #41",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "2417"
+    },
+    {
+      "ref": "prototype MONEY_SIZES / moneyHtml",
+      "path": "docs/design/prototype_v15.html",
+      "lines": "2700-2725"
+    },
+    {
+      "ref": "画面設計.md §6 確認事項 #8（種類A の矛盾・正本優先で解決）",
+      "path": "docs/spec/detailed-design/画面設計.md",
+      "lines": "502"
+    }
+  ],
+  "acceptance": [
+    {
+      "criterion": "`Money` で Uii の金額が、円の金額より大きいフォントサイズで表示される",
+      "origin": "issue",
+      "test": "Money は Uii のフォントサイズを円のフォントサイズより大きく描画する"
+    },
+    {
+      "criterion": "円の金額が Uii より淡い色（コントラストの低い色）で表示される",
+      "origin": "issue",
+      "test": "Money は円の文字色に Uii より淡い色（text-stone-400）を当てる"
+    },
+    {
+      "criterion": "円の併記が消えていない（出力に `¥3,000` が引き続き含まれる）",
+      "origin": "issue",
+      "test": "Money の出力に円の併記 ¥3,000 が含まれる"
+    },
+    {
+      "criterion": "`toUii` が返す換算結果が変更前と一致する（`tests/uii.test.ts` の7件が変更なしで通る）",
+      "origin": "issue",
+      "test": "（既存）tests/uii.test.ts の7件が変更なしで通る"
+    },
+    {
+      "criterion": "出力テキストが `2,400 Uii（¥3,000）` の順序・書式（3桁区切り・全角括弧・`¥`）のまま変わらない",
+      "origin": "derived",
+      "basis": "v13 §5.5（表記例「2,400 Uii（¥3,000）」）／v13 §9 #41「計算ロジックは変更せず、表示順序のみの変更」",
+      "test": "Money は 2,400 Uii（¥3,000） のテキストを順序・書式どおり出力する"
+    },
+    {
+      "criterion": "主副の表現が `Money` の内部で完結し、`Money` の利用側にサイズ・色の指定を書かずに主副が付く",
+      "origin": "derived",
+      "basis": "v13 §5.5「表示は共通コンポーネント1箇所に集約し、画面ごとに順序を書かない」／v13 §9 #41",
+      "test": "Money は priceYen だけで主副の付いた出力を返す"
+    },
+    {
+      "criterion": "円側の色が既存トークンおよび Tailwind 既定パレットの範囲で表現され、`globals.css` に新規トークンが追加されていない",
+      "origin": "derived",
+      "basis": "docs/design/prototype_v15.html L2700-2725（正本 v13 に配色・文字サイズの規定が無く、src/app/globals.css 冒頭が「プロトタイプが唯一の配色の根拠なので、ここで色を新規に定義しない」と定める）",
+      "test": "globals.css に差分が無いことを diff で確認する"
+    }
+  ],
+  "acceptanceDerived": true,
+  "updatedAt": "2026-09-14T07:27:57.615Z"
+}
