@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "issue": 31,
+  "pr": null,
+  "branch": null,
+  "phase": "plan",
+  "risk": null,
+  "attempts": {
+    "infra": 1,
+    "verify": 0,
+    "review": 0
+  },
+  "lastFingerprint": {
+    "infra": "d808fdb6bc8d646b",
+    "verify": null,
+    "review": null
+  },
+  "repeatedFingerprint": {
+    "infra": 0,
+    "verify": 0,
+    "review": 0
+  },
+  "tokens": {
+    "input": 72,
+    "output": 29412,
+    "costUsd": 3.0574565000000002
+  },
+  "testHashes": {},
+  "specRefs": [],
+  "acceptance": [],
+  "acceptanceDerived": false,
+  "updatedAt": "2026-09-15T15:27:34.383Z"
+}
