@@ -19,3 +19,24 @@
 *.gif     binary
 *.webp    binary
 *.ico     binary
+
+# ── 追記専用の台帳は union マージで解決する（2026-09-15 の停止を受けて追加）──
+#
+# 計画フェーズ（auto-01-plan.yml）は **Issue ごとに並列**で走る設計だが
+# （concurrency.group が `auto-plan-<issue番号>`／設計 §10.10.3「計画は並列、実装は直列」）、
+# 台帳の更新は **main へ直接 push** する。そのため複数の計画フェーズが同時に
+# QUESTIONS.md や TASKS.md へ追記すると、push ステップの rebase が競合し
+# `could not apply ...` で**ワークフローごと落ちる**。
+#
+# 実害（2026-09-15）: 5件を同時に流した結果、計画フェーズが連鎖的に失敗し、
+# ラベルが `auto:planning` のまま24時間放置された。設計 §10.10.3 の
+# 「1日3件まで」は承認負荷の話だと解釈していたが、**この競合も同時に防いでいた**。
+#
+# これらは「各フェーズが自分のブロックを追記する」台帳であり、
+# 両方の追記を残すのが正しい。union は競合ハンクの**両側を残す**。
+#
+# ⚠️ union は同一行を両者が書き換えた場合に行が重複する。
+#    台帳が壊れていないかは CI の docs-policy ジョブと人間のレビューで見る。
+TASKS.md        merge=union
+QUESTIONS.md    merge=union
+LOOP_LOG.md     merge=union
