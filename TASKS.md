@@ -15,6 +15,24 @@
 
 ## バックログ
 
+## [2026-09-15 00:00] Supabase RLSポリシー設計（Issue #35 ／ WBS 2-2） — BLOCKED
+
+**リスク区分: 高**（ゲート1・2・3／承認3回）。認可・ロール判定（v13 §5.9.3）、個人情報の入出力
+（`member_profiles_private` の実名・住所）、DBマイグレーションの3つに該当する。
+
+起票3条件のうち**3つ目（完了条件が検証可能）が欠けている**ため、タスク定義を作らずに停止した。
+完了条件「`admin` のセッションから `member_role_changes` を SELECT できる」が、`DB物理設計.md`
+§6-6b⑥（`mrc_select_admin` を `TO authenticated` で定義）と §6-6②（`GRANT SELECT` の一覧に
+`member_role_changes` が無い）の食い違いにより、期待値が「1行」と「0行」に反転する。
+§6-6 自身が「`GRANT` が無ければポリシーは届かない」と述べており、どちらが意図かは仕様から決まらない。
+`QUESTIONS.md`「[2026-09-15] `member_role_changes` を `authenticated` へ `GRANT SELECT` するか」へ起票（推奨 A）。
+
+範囲は 2026-09-15 のオーナー回答で **A案**（`members`・`member_profiles_private`・`member_role_changes`
+の3テーブル ＋ `anon` 権限ゼロの GRANT/REVOKE ＋ メタテストの CI 常設）に確定済み。
+あわせてオーナー申し送りにより `member_invitations` の RLS ポリシー本体も本パッケージの範囲だが、
+同テーブルの DDL は `2-1b`（Issue #39・TODO）の成果物でありリポジトリに未着手のため、
+**本パッケージは `2-1b` のマージ後に着手する**（依存の追加）。
+
 ## [2026-09-15 00:00] ログイン導線・セッション・ロールガード（Issue #39 ／ WBS 2-1b） — TODO
 
 **リスク区分: 高**（ゲート1・2・3／承認3回）。認可・ロール判定（v13 §5.9.3・§8）、個人情報の入出力

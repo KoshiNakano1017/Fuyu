@@ -61,6 +61,39 @@
 
 ---
 
+## [2026-09-15] `member_role_changes` を `authenticated` へ `GRANT SELECT` するか（v13 §5.9.3 ／ `DB物理設計.md` §6-6②・§6-6b⑥）
+- ステータス: 未回答
+- 優先度: 高（Issue #35 ／ WBS `2-2` のタスク定義を止めている。`admin` が `member_role_changes` を
+  読めるかどうかで受入テストの期待値が「1行」と「0行」に反転するため、PM が推測で埋められない）
+- 背景: Issue #35（WBS `2-2` Supabase RLSポリシー設計）のタスク定義時に判明。
+  `DB物理設計.md` §6-6b⑥ は `CREATE POLICY mrc_select_admin ON member_role_changes FOR SELECT
+  TO authenticated USING ( (SELECT public.is_admin()) );` を定義しており、**`authenticated` ロールの
+  セッションから `admin` が読む**ことを前提にしている。一方、同じ §6 の GRANT 方針 §6-6② の
+  `GRANT SELECT ... TO authenticated` の列挙に **`member_role_changes` は含まれていない**
+  （`members` / `member_profiles_private` / `member_identifiers` ほか14件と、行を RLS で0件に絞る
+  `member_notes` / `morning_meetings` / `work_log_reviews` の3件のみ）。
+  §6-6 の冒頭は「**`GRANT` が無ければポリシーを書いても届かず、ポリシーが無ければ `GRANT` があっても0行になる**」と
+  自ら述べているため、この2節は同時には成立しない。Issue #35 の完了条件
+  「`admin` のセッションから `member_role_changes` を SELECT できる」は前者の読みに立っている。
+  `role` 変更の監査記録（誰が誰を昇格・降格させたか）は §6-6b⑥ 自身が「運営の中でも限定情報」と
+  位置づけており、`authenticated` への権限付与は認可に直接関わる判断であるため、
+  `CLAUDE.md` §7「推測で実装しない」に従い停止した。
+- 選択肢:
+  - A. §6-6② の書き漏れとみなし、`GRANT SELECT ON member_role_changes TO authenticated` を追加する。
+    行の絞り込みは `mrc_select_admin`（`is_admin()`）が担い、`admin` 以外は0行になる
+  - B. GRANT は与えず、監査記録の閲覧は `service_role`（Edge Function / Server Actions）経由に限定する。
+    §6-6b⑥ の `mrc_select_admin` は将来の閲覧UIに備えた先置きとして残し、
+    Issue #35 の完了条件を「`authenticated` のどのロールからも0行（または権限エラー）」へ差し替える
+  - C. `mrc_select_admin` も置かず `member_role_changes` を完全な全拒否（`service_role` 専用）とし、
+    閲覧の設計は監査ログ閲覧画面の作業パッケージへ送る
+- 推奨: A（理由: ①§6-6b⑥ が `TO authenticated` と明示的に書いており、B・C では書かれたポリシーが
+  到達不能なコードとして残る。②A でも実際に読めるのは `is_admin()` が真のセッションだけで、
+  `core_member`・一般会員・本人には0行が返る（§6-6b⑥ の「本人にも開かない」を満たす）。
+  ③`anon` は §6-6① の `REVOKE ALL` で権限ゼロのままであり、公開面は広がらない。
+  ただし**監査記録をクライアント経由で読ませてよいか**は運営判断であり、B を採る場合の実害も小さい）
+- 関連ファイル: v13 §5.9.3、`docs/spec/detailed-design/DB物理設計.md` §6-6②・§6-6b⑤⑥、
+  `supabase/migrations/0001_members_schema.sql`、Issue #35
+
 ## ⚡ [2026-09-14] 通貨表示の共通コンポーネント化が正本 v13 §5.5 では確定・`画面設計.md` §6 #8 では未決のまま（v13 §5.5・§9 #41）
 - ステータス: 未回答（正本優先で進行中・ブロッカーではない）
 - 優先度: 低（`Money.tsx` は既に実在するため実装は止まらない。放置すると、`画面設計.md` を先に読んだ
