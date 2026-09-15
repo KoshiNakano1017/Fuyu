@@ -201,8 +201,10 @@ describeDb("member_profiles_private（完了条件6）", () => {
   });
 
   test("member_id が members(member_id) を ON DELETE CASCADE で参照する", () => {
+    // confdeltype は "char" 型（1バイト内部型）。text との || は候補が複数あって
+    // 曖昧になり 42725 で落ちるため、明示的に text へ落としてから連結する。
     const reference = query(`
-      SELECT c.confrelid::regclass::text || '/' || c.confdeltype
+      SELECT c.confrelid::regclass::text || '/' || c.confdeltype::text
       FROM   pg_constraint c
       WHERE  c.conrelid = 'public.member_profiles_private'::regclass AND c.contype = 'f';
     `);
