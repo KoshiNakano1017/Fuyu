@@ -185,7 +185,9 @@ describeDb("role 変更の監査記録（完了条件16）", () => {
         declareOperatorSql(ADMIN.memberId),
         declareReasonSql("現場運営を担うため"),
         `UPDATE public.members SET role = 'core_member' WHERE member_id = '${SELF.memberId}';`,
-        `SELECT format('%s|%s|%s|%s|%s', count(*), min(old_role), min(new_role), min(operator_id), min(reason))
+        // 1行しか無いことを count(*) で確かめたうえで、その1行の値を min() で取り出す。
+        // operator_id は uuid だが PostgreSQL に min(uuid) は無いため text へ落とす。
+        `SELECT format('%s|%s|%s|%s|%s', count(*), min(old_role), min(new_role), min(operator_id::text), min(reason))
          FROM   public.member_role_changes
          WHERE  member_id = '${SELF.memberId}';`,
       ),
