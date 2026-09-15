@@ -81,6 +81,32 @@ def main() -> int:
         check(package.is_dropped is want_dropped, f"{package_id}: is_dropped={package.is_dropped} — {note}")
         check(package.is_blocked is want_blocked, f"{package_id}: is_blocked={package.is_blocked} — {note}")
 
+    # ── 3b. 取り消し線で撤回された宣言を拾わないこと（2026-09-15 の不具合）──
+    #   WBS は改訂の経緯を `~~旧~~ → **新**` で残す（CLAUDE.md §2.4）。
+    #   `🟢 ~~ブロック中~~ → **2026-09-05 ブロック解除**：…` を「ブロック中」と読むと、
+    #   **解除済みの作業パッケージが払い出し対象から外れる**。
+    #   実害: 2-2・2-4・8-1・10-1 の4件。とくに 2-2（RLS ポリシー設計）は
+    #   2-1 完了で着手可能になった要のパッケージで、ここが止まると 2-3・8-1 も開かない。
+    from wbs_to_issue import BLOCKED_MARKERS, status_declaration
+
+    for status, want, note in [
+        ("🟢 ~~ブロック中~~ → **2026-09-05 ブロック解除**：A案で確定。", False, "撤回済みの宣言を拾っている"),
+        ("🔴 **ブロック中**：非同期ジョブ実行基盤が未決。", True, "現行のブロック宣言を見落としている"),
+    ]:
+        got = any(m in status_declaration(status) for m in BLOCKED_MARKERS)
+        check(got is want, f"ブロック判定が誤っています: {status[:28]!r} → {got} — {note}")
+
+    for package_id, want_blocked in [("2-2", False), ("2-4", False), ("1-5", True), ("4-2", True)]:
+        package = packages.get(normalize_id(package_id))
+        if package is None:
+            failures.append(f"{package_id} が WBS に見つかりません（検査を更新してください）")
+            continue
+        check(
+            package.is_blocked is want_blocked,
+            f"{package_id}: is_blocked={package.is_blocked}（期待 {want_blocked}）— 宣言部の取り消し線の扱い",
+        )
+
+
     # ── 4. ガードの拒否条件 ───────────────────────────────────────────
     base_text = WBS.read_text(encoding="utf-8")
     with tempfile.TemporaryDirectory() as tmp:

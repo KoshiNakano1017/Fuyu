@@ -61,6 +61,21 @@ BLOCKED_MARKERS = ("🔴", "ブロック中", "⏸", "保留")
 RETIRED_MARKERS = ("➖", "不要化", "廃止", "統合済み", "移送")
 
 
+# 取り消し線で消された「旧い値」。WBS は改訂の経緯を `~~旧~~ → **新**` の形で
+# セル内に残す（CLAUDE.md §2.4「決定を覆すときは元の行を消さず取り消し線で上書きする」）。
+# 判定の前にこれを落とさないと、**撤回済みの宣言を現行の宣言として読む**。
+SUPERSEDED_RE = re.compile(r"~~.*?~~", re.DOTALL)
+
+
+def strip_superseded(cell: str) -> str:
+    """取り消し線で消された「旧い値」を落とす。
+
+    `strip_markup` は `~~` という**記号だけ**を消すため、`~~1-4~~ **なし**` は
+    `1-4 なし` になり、**取り消したはずの値が生き返る**。
+    """
+    return SUPERSEDED_RE.sub(" ", cell)
+
+
 def status_head(status: str) -> str:
     """ステータス欄の**宣言部分**（最初の句点まで）を返す。
 
@@ -77,8 +92,30 @@ def status_head(status: str) -> str:
     宣言部分だけを見れば、この2件は正しく「着手可能」「ブロック中」に戻る。
     取り消し線つきの ID（`~~13-2~~`）による廃止判定は別途行うため、
     本当に廃止された行の判定は変わらない（75行中、判定が変わるのは上記2行のみ）。
+
+    ⚠️ 2026-09-15 追記: 宣言部分に**取り消し線で消された古い宣言**が残る形
+    （`🟢 ~~ブロック中~~ → **2026-09-05 ブロック解除**：…`）があり、
+    句点で切るだけでは撤回済みの語を拾ってしまう。CLAUDE.md §2.4 が
+    「決定を覆すときは元の行を消さず取り消し線で上書きする」と定めているため、
+    この形は WBS 全体に現れる。判定前に `strip_superseded()` で取り消し線を
+    落とすこと（`status_declaration()` を使う）。
     """
     return status.split("。", 1)[0] if "。" in status else status
+
+
+def status_declaration(status: str) -> str:
+    """ステータス欄の宣言部分から、**取り消し線で撤回された語を除いた**もの。
+
+    廃止・ブロックの判定はこちらを使う。`status_head()` だけでは
+    `🟢 ~~ブロック中~~ → **2026-09-05 ブロック解除**` を「ブロック中」と読む。
+
+    実害（2026-09-15 に検出）: `2-2`・`2-4`・`8-1`・`10-1` の4件が、
+    ステータス欄に「ブロック解除」と明記されているにもかかわらず
+    `blocked` と判定され、**導線4の払い出し対象から外れていた**。
+    とくに `2-2`（RLS ポリシー設計）は `2-1` 完了で着手可能になった直後の
+    要のパッケージであり、ここが払い出されないと `2-3`・`8-1` も開かない。
+    """
+    return strip_superseded(status_head(status))
 
 # 「v13 §5.2.3」「§5.11.7」「§9 #46」のような節番号を拾う。
 SECTION_RE = re.compile(r"§\s?\d+(?:\.\d+)*[a-z]?(?:\s?#\d+)?")
@@ -411,7 +448,7 @@ def build_issue(package_id: str, row: dict, matches: list[dict]) -> dict:
     section = row.get("_section", "")
 
     # マーカーは**宣言部分だけ**に対して探す（理由は status_head の docstring）。
-    declaration = status_head(status)
+    declaration = status_declaration(status)
     retired = "~~" in row["_raw_id"] or any(m in declaration for m in RETIRED_MARKERS)
     blocked = any(m in declaration for m in BLOCKED_MARKERS)
     spec_ref_text, other_refs, other_refs_text = resolve_refs(summary, status, section)

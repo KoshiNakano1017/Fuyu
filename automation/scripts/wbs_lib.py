@@ -24,8 +24,10 @@ from wbs_to_issue import (  # 表パーサと判定マーカーは wbs_to_issue 
     iter_rows,
     normalize_id,
     split_row,
+    status_declaration,
     status_head,
     strip_markup,
+    strip_superseded,
     table_score,
 )
 
@@ -51,24 +53,12 @@ IMPL_WEIGHT = 0.6
 #: 「依存なし」を表す綴り。正規化後に比較する。
 NO_DEPENDENCY = {"なし", "無し", "-", "—", "–", "", "n/a", "none"}
 
-_SUPERSEDED_RE = re.compile(r"~~.*?~~", re.DOTALL)
 _PCT_RE = re.compile(r"(\d{1,3})\s*%")
 
 
 def _drop_leading_arrow(text: str) -> str:
     """`~~旧~~ → **新**` から旧を落としたあとに残る、先頭の改訂矢印を取る。"""
     return re.sub(r"^[\s→⇒⟶:：]+", "", text).strip()
-
-
-def strip_superseded(cell: str) -> str:
-    """取り消し線で消された「旧い値」を落とす。
-
-    WBS は改訂の経緯を `~~旧~~ → **新**` の形でセル内に残している。
-    `wbs_to_issue.strip_markup` は `~~` という**記号だけ**を消すため、
-    `~~1-4~~ **なし**` は `1-4 なし` になり、**取り消したはずの依存が生き返る**。
-    ID の突き合わせ用途では無害だったが、依存解決では順序を狂わせる。
-    """
-    return _SUPERSEDED_RE.sub(" ", cell)
 
 
 def parse_deps(cell: str) -> list[str]:
@@ -167,9 +157,10 @@ class Package:
         """ステータス欄が明示的にブロックを宣言しているか。
 
         依存が未完なだけの行はここでは False（それは `deps` 側で判定する）。
-        判定は**宣言部分だけ**に対して行う（`wbs_to_issue.status_head` の docstring）。
+        判定は**宣言部分から取り消し線を除いたもの**に対して行う
+        （`wbs_to_issue.status_declaration` の docstring）。
         """
-        return any(m in status_head(self.status) for m in BLOCKED_MARKERS)
+        return any(m in status_declaration(self.status) for m in BLOCKED_MARKERS)
 
     @property
     def is_dropped(self) -> bool:
@@ -179,7 +170,9 @@ class Package:
         ここで独自の語彙（「Phase 2」「スコープ外」など）を足すと、
         導線1 では起票できるのに導線4 では飛ばされる、という食い違いが生まれる。
         """
-        return "~~" in self.raw_id or any(m in status_head(self.status) for m in RETIRED_MARKERS)
+        return "~~" in self.raw_id or any(
+            m in status_declaration(self.status) for m in RETIRED_MARKERS
+        )
 
     def cells_by_column(self) -> dict[str, str]:
         return {h: (self.cells[i] if i < len(self.cells) else "") for i, h in enumerate(self.headers)}
