@@ -122,11 +122,29 @@ jobs:
           git commit -m "docs: 計画フェーズによる TASKS.md／QUESTIONS.md／state の更新 (Issue #${{ github.event.issue.number }})"
           # エージェントのステップを経由すると checkout の認証情報が失われるため張り直す。
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
+          # 台帳は main へ直接 push するが、計画フェーズは Issue ごとに並列で走る
+          # （concurrency.group が `auto-plan-<issue番号>`／設計 §10.10.3）。
+          # 同時に追記が走ると rebase が競合するため、次の2段で受け止める。
+          #   1. `.gitattributes` の `merge=union` が、追記どうしの競合を自動解決する
+          #   2. それでも解決できなければ rebase を中断し、次の試行へ回す
+          #      （中断しないと .git/rebase-merge が残り、以後の git 操作が全部失敗する）
+          #
+          # 2026-09-15: この中断が無かったため、5件同時実行で計画フェーズが連鎖的に
+          # 失敗し、ラベルが `auto:planning` のまま24時間放置された。
+          pushed=false
           for i in 1 2 3 4 5; do
-            git push origin HEAD:main && break
-            git fetch origin main && git rebase origin/main
+            if git push origin HEAD:main; then pushed=true; break; fi
+            git fetch origin main
+            if ! git rebase origin/main; then
+              git rebase --abort || true
+              echo "::warning::rebase が競合したため中断した（試行 $i）"
+            fi
             sleep $((i * 3))
           done
+          if [ "$pushed" != true ]; then
+            echo "::error::台帳の push が5回とも失敗した。同時実行数を減らすこと（設計 §10.10.3）"
+            exit 1
+          fi
 
   # ── 停止: 仕様が未確定 ────────────────────────────────────
   blocked:
