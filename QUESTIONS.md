@@ -118,8 +118,15 @@
 - 関連ファイル: v13 §6、`docs/spec/detailed-design/DB物理設計.md` §6-9②・§6-7、Issue #31
 
 ## [2026-09-15] `member_role_changes` を `authenticated` へ `GRANT SELECT` するか（v13 §5.9.3 ／ `DB物理設計.md` §6-6②・§6-6b⑥）
-- ステータス: 未回答
-- 優先度: 高（Issue #35 ／ WBS `2-2` のタスク定義を止めている。`admin` が `member_role_changes` を
+- ステータス: 回答済み（2026-09-15）
+- 回答: **A**。`DB物理設計.md` §6-6② の書き漏れとみなし、`GRANT SELECT ON member_role_changes TO authenticated`
+  を追加する。行の絞り込みは `mrc_select_admin`（`is_admin()`）が担う。オーナー補足：B（`service_role` 経由に
+  限定）は「`service_role` は RLS も GRANT も迂回するため必ず発火する関門はトリガーだけ」という §6-6b の
+  設計思想に反し、読み取りのためだけに `service_role` 経路を増やすのは境界を薄くする。C は権限変更履歴を
+  誰も読めないまま残し、`2-1` で `member_role_changes` を作った意味が失われる。
+  **`is_admin()` で絞る点が要件**（`core_member` へ開くと運営内部の人事的情報が広がるため、
+  v13 §8 の最小権限に沿って `admin` のみ）。
+- 優先度: 高（Issue #35 ／ WBS `2-2` のタスク定義を止めていた。`admin` が `member_role_changes` を
   読めるかどうかで受入テストの期待値が「1行」と「0行」に反転するため、PM が推測で埋められない）
 - 背景: Issue #35（WBS `2-2` Supabase RLSポリシー設計）のタスク定義時に判明。
   `DB物理設計.md` §6-6b⑥ は `CREATE POLICY mrc_select_admin ON member_role_changes FOR SELECT

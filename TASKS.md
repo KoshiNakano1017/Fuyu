@@ -35,16 +35,18 @@ staff 向けポリシー）は本タスクで作る。マイグレーション�
 正本より緩い認可が先に固定される」へ起票済み。
 
 ## [2026-09-15 00:00] Supabase RLSポリシー設計（Issue #35 ／ WBS 2-2） — BLOCKED
+## [2026-09-15 00:00] Supabase RLSポリシー設計（Issue #35 ／ WBS 2-2） — TODO
 
 **リスク区分: 高**（ゲート1・2・3／承認3回）。認可・ロール判定（v13 §5.9.3）、個人情報の入出力
 （`member_profiles_private` の実名・住所）、DBマイグレーションの3つに該当する。
 
-起票3条件のうち**3つ目（完了条件が検証可能）が欠けている**ため、タスク定義を作らずに停止した。
-完了条件「`admin` のセッションから `member_role_changes` を SELECT できる」が、`DB物理設計.md`
-§6-6b⑥（`mrc_select_admin` を `TO authenticated` で定義）と §6-6②（`GRANT SELECT` の一覧に
-`member_role_changes` が無い）の食い違いにより、期待値が「1行」と「0行」に反転する。
-§6-6 自身が「`GRANT` が無ければポリシーは届かない」と述べており、どちらが意図かは仕様から決まらない。
-`QUESTIONS.md`「[2026-09-15] `member_role_changes` を `authenticated` へ `GRANT SELECT` するか」へ起票（推奨 A）。
+起票3条件はすべて充足。節番号は正本 v13 §5.9.3（L1618-）を実文で確認し、RLS によるテーブル単位・
+行単位のサーバサイド認可を必須要件と定めていることを検証済み。
+2026-09-15 のオーナー回答で**唯一のブロッカーが決着**した（`member_role_changes` は **A案** ＝
+§6-6② の書き漏れとみなし `GRANT SELECT ... TO authenticated` を追加し、行は `mrc_select_admin` の
+`is_admin()` で `admin` のみに絞る）。これにより完了条件「`admin` のセッションから
+`member_role_changes` を SELECT できる」／「`core_member`・一般会員からは0行」が対の受入テストとして成立する。
+`QUESTIONS.md` の該当項目は「回答済み（2026-09-15）」へ更新済み。
 
 範囲は 2026-09-15 のオーナー回答で **A案**（`members`・`member_profiles_private`・`member_role_changes`
 の3テーブル ＋ `anon` 権限ゼロの GRANT/REVOKE ＋ メタテストの CI 常設）に確定済み。
