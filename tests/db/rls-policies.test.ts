@@ -96,15 +96,13 @@ describeDb("members の UPDATE（§6-2② ＋ §6-6 の列単位 GRANT）", () =
   });
 
   test("authenticated から members を DELETE できない（§1-3 物理削除の禁止）", () => {
-    const affected = query(`
+    // GRANT に DELETE が無いため 42501（permission denied）で弾かれる。
+    // ポリシー不在による「0行」より手前で止まっており、**より強く守られている**。
+    const state = sqlstateOf(`
       ${asMember}
-      WITH removed AS (
-        DELETE FROM public.members WHERE member_id = '${TEST_MEMBERS.self.memberId}' RETURNING 1
-      )
-      SELECT count(*) FROM removed;
+      DELETE FROM public.members WHERE member_id = '${TEST_MEMBERS.self.memberId}';
     `);
-    // GRANT に DELETE が無ければ 42501、ポリシーが無ければ 0行。どちらでも「消せない」。
-    expect(affected).toBe("0");
+    expect(state).toBe("42501");
   });
 });
 
@@ -134,15 +132,14 @@ describeDb("member_profiles_private（PII-A ／ §6-8⑤）", () => {
   });
 
   test("authenticated から DELETE できない（匿名化は UPDATE で行う）", () => {
-    const affected = query(`
+    // GRANT に DELETE が無いため 42501 で弾かれる。退会30日後の匿名化は
+    // 「行を消す」のではなく「値をダミーへ UPDATE する」で行う（§6-2③）。
+    const state = sqlstateOf(`
       ${asMember}
-      WITH removed AS (
-        DELETE FROM public.member_profiles_private
-        WHERE member_id = '${TEST_MEMBERS.self.memberId}' RETURNING 1
-      )
-      SELECT count(*) FROM removed;
+      DELETE FROM public.member_profiles_private
+      WHERE member_id = '${TEST_MEMBERS.self.memberId}';
     `);
-    expect(affected).toBe("0");
+    expect(state).toBe("42501");
   });
 });
 
