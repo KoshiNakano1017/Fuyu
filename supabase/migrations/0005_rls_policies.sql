@@ -162,6 +162,23 @@ CREATE POLICY invitations_select_staff ON public.member_invitations
 -- 守っている次元が違う。
 -- =============================================================================
 
+-- ★★ まず authenticated から**既定の広い権限を剥がす**。これが抜けると以下が起きる。
+--
+--   Supabase は新規テーブルへ既定で anon **と authenticated** に広い権限を与える（§6-6 冒頭）。
+--   剥がさずに列単位 GRANT を足しても、**既定のテーブル全体 UPDATE が残ったまま**なので
+--   列の限定がまったく効かない。つまり **一般会員が自分の role を admin へ書き換えられる**。
+--
+--   2026-09-16、この REVOKE を書き忘れた版が実際に DB テストで捕まった
+--   （「★ 一般会員は自分を admin へ昇格できない」が Received: null ＝ UPDATE 成功）。
+--   §6-2② の danger は「GRANT UPDATE を全列にするな」と書いているが、
+--   **既定の GRANT を剥がさなければ列指定そのものが無意味**という一段手前の話がある。
+--
+--   対象を4テーブルに限定するのは、0100（RAG の pgvector）へ巻き込みたくないため。
+REVOKE ALL ON public.members                 FROM authenticated;
+REVOKE ALL ON public.member_profiles_private FROM authenticated;
+REVOKE ALL ON public.member_role_changes     FROM authenticated;
+REVOKE ALL ON public.member_invitations      FROM authenticated;
+
 GRANT SELECT ON public.members                 TO authenticated;
 GRANT SELECT ON public.member_profiles_private TO authenticated;
 GRANT SELECT ON public.member_role_changes     TO authenticated;  -- 行は RLS で admin 以外0件
