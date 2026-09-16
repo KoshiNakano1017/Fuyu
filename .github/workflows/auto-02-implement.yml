@@ -21,18 +21,36 @@ on:
   issues:
     types: [labeled]
 
-# 設計 §8.3: 実装フェーズは1本に直列化する（マージ競合とレビュー負荷を避けるため）。
-# Issue 番号を含めないのは、Issue をまたいで直列化することが目的だから。
-# ⚠️ 2026-09-13 修正（Issue #4 の自己ロックと同型の不具合）
-# `issues: types:[labeled]` はラベル名で絞れないため、ラベルが動くたびに run が作られる。
-# 旧設定は空振り run も同じ concurrency グループへ入れており、
-# ワークフロー自身のラベル書き込みが生成した run が、pending 中の本番 run を
-# キャンセルしていた（GitHub は1グループにつき pending を1本しか保持しない）。
-# 実際に仕事をする run だけを本番グループへ入れ、空振りは run_id で隔離する。
+# ⚠️ 2026-09-16 改訂: 全体直列化をやめ、**Issue 単位の並列**にする。
+#
+# ── 旧設定が何を壊していたか ──────────────────────────────────
+# 旧: group: 'auto-implement'（Issue 番号を含まないリテラル）
+# 意図は「実装フェーズを1本に直列化してマージ競合を避ける」ことだったが、
+# GitHub の concurrency は **1グループにつき pending を1本しか保持しない**。
+# `cancel-in-progress: false` が守るのは in-progress の run だけである。
+#
+# したがって3件目が `auto:approved` に到達すると、待機していた2件目の run が
+# 黙って追い出される。ラベルの付け替えはジョブ**内部**で起きるため
+# （下の「ラベルを auto:implementing に付け替え」ステップ）、追い出された Issue は
+# `auto:approved` のまま、コメントもラベル変化も残さず永久に停止する。
+# `blocked` ジョブ（needs.implement.result != 'success'）も発火しない。
+#
+# 実害: Issue #9 が 2026-09-03 から13日間 `auto:approved` で放置された。
+# これは「オーナーの承認待ち」ではなく、**仕事が黙って落ちていた**状態である。
+#
+# ── 直列化の目的は別の手段で満たす ────────────────────────────
+# マージ競合の回避は、直列化ではなく次の3点で担保する。
+#   1. 1 Issue = 1 ブランチ = 1 PR（この命名規約は維持する）
+#   2. auto-03 の squash merge は main 上で逐次に起きる。競合すれば CI が赤くなり
+#      修正ループへ入るため、競合が黙って通ることはない
+#   3. 払い出しは WBS の依存順（automation/scripts/wbs_epic.py の classify）に従うため、
+#      同時に走る作業パッケージは原則として依存関係を持たない
+#
+# 空振り run の隔離（2026-09-13 の修正）は引き続き必要なので残す。
 concurrency:
   group: >-
     ${{ github.event.label.name == 'auto:approved'
-        && 'auto-implement'
+        && format('auto-implement-{0}', github.event.issue.number)
         || format('auto-implement-noop-{0}', github.run_id) }}
   cancel-in-progress: false
 
@@ -60,6 +78,7 @@ jobs:
       pr: ${{ steps.pr.outputs.number }}
       blocked: ${{ steps.orc-tests.outputs.blocked || steps.orc-code.outputs.blocked }}
       reason: ${{ steps.orc-tests.outputs.reason || steps.orc-code.outputs.reason }}
+      blocked_kind: ${{ steps.orc-tests.outputs.blocked_kind || steps.orc-code.outputs.blocked_kind }}
     steps:
       # PAT で checkout する。以降の push がこの資格情報を使うため、
       # push イベントが ci.yml を起動する（GITHUB_TOKEN では起動しない・設計 §8.1）。
@@ -312,24 +331,53 @@ jobs:
             --remove-label "auto:implementing" --add-label "auto:review"
 
   # ── 停止: 実装フェーズにゲートは無いので、失敗はすべてオーナーへ委ねる ──
+  # ── 停止: 事由で行き先を分ける（2026-09-16 改訂）─────────────
+  # spec         → auto:blocked  オーナー判断が要る。枯渇レポートに載る
+  # infra/credit → auto:retry    スイーパーが時間をおいて自動再開する
+  #
+  # ⚠️ ジョブ失敗（ガードに引っかかった等）は blocked_kind が空になる。
+  # その場合は再実行で直る可能性があるため auto:retry 側へ倒す。
+  # 仕様の未確定はオーケストレータが必ず blocked_kind=spec を立てる。
   blocked:
     needs: implement
     if: always() && needs.implement.result != 'success' && needs.implement.result != 'skipped'
     runs-on: ubuntu-latest
     steps:
-      - name: auto:blocked へ付け替えて通知
+      - name: 停止事由に応じてラベルを付け替え、通知する
         env:
           GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
           ISSUE: ${{ github.event.issue.number }}
           REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           REASON: ${{ needs.implement.outputs.reason }}
+          KIND: ${{ needs.implement.outputs.blocked_kind }}
         run: |
           set -euo pipefail
+          KIND="${KIND:-infra}"
+          if [ "$KIND" = "spec" ]; then
+            NEW_LABEL="auto:blocked"
+          else
+            NEW_LABEL="auto:retry"
+          fi
           gh issue edit "$ISSUE" --repo "$REPO" \
-            --remove-label "auto:implementing" --add-label "auto:blocked" || true
-          printf '%s\n\n%s\n\n%s\n' \
-            "@${OWNER} 実装フェーズが停止しました。" \
-            "理由: ${REASON:-ワークフローの失敗（実行ログを確認してください）}" \
-            "実行: ${RUN_URL}" > notice.md
+            --remove-label "auto:implementing" --add-label "$NEW_LABEL" || true
+
+          if [ "$NEW_LABEL" = "auto:retry" ]; then
+            cat > notice.md <<'EOF'
+          ## ⏳ 実装フェーズが一時的な事由で停止しました
+
+          仕様の問題ではありません。**オーナーの操作は不要です。**
+          スイーパー（`auto-05-sweep.yml`）が時間をおいて自動で再開します。
+
+          <!--retry:from=auto:approved-->
+          EOF
+            printf '\n事由: `%s`\n理由: %s\n実行: %s\n' \
+              "$KIND" "${REASON:-ワークフローの失敗（実行ログを確認してください）}" "$RUN_URL" >> notice.md
+          else
+            printf '%s\n\n%s\n\n%s\n\n%s\n' \
+              "@${OWNER} 実装フェーズが停止しました。**仕様が未確定のため、オーナーの判断が要ります。**" \
+              "理由: ${REASON:-（理由の記録がありません）}" \
+              "再開するには \`auto:blocked\` を外し、\`auto:approved\` を付け直してください。" \
+              "実行: ${RUN_URL}" > notice.md
+          fi
           gh issue comment "$ISSUE" --repo "$REPO" --body-file notice.md

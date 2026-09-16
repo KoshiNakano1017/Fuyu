@@ -15,7 +15,7 @@ import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { loadAgent } from './lib/agents.mjs';
 import { runAgent } from './lib/runAgent.mjs';
-import { loadState, saveState, addUsage, recordAttempt } from './lib/state.mjs';
+import { loadState, saveState, addUsage, recordAttempt, classifyBlock } from './lib/state.mjs';
 import * as gh from './lib/gh.mjs';
 import {
   REVIEW_SCHEMA, IMPLEMENT_SCHEMA, validate, outputInstruction, extractJson,
@@ -51,6 +51,9 @@ async function stop(kind, message, detail) {
   await gh.comment(ISSUE, body);
   await gh.setOutput('blocked', 'true');
   await gh.setMultilineOutput('reason', message);
+  // spec = オーナー判断が要る / credit・infra = スイーパーが自動再開する
+  await gh.setOutput('blocked_kind', classifyBlock(kind, `${message}
+${detail ?? ''}`));
   process.exit(0);
 }
 

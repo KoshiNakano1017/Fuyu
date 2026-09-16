@@ -1,0 +1,101 @@
+# 自律ループ 05 スイーパー（2026-09-16 新設）
+#
+# トリガ : 定時（30分ごと）＋ 手動
+# 担当   : automation/scripts/sweep.py
+# 設計   : docs/自律開発ループ設計.md §4.3・§5・§10.6
+#
+# ── なぜ要るのか ────────────────────────────────────────────
+# auto-01〜04 はすべて `issues: types: [labeled]` 駆動であり、
+# **ラベルが付いた瞬間だけ**が前進の契機だった。run が死ぬと Issue は静止し、
+# 復帰の手段はオーナーの手動操作しか無い。
+#
+# 実測（2026-09-16）:
+#   ・#9  が `auto:approved` のまま 13日間放置（concurrency の pending 追い出し）
+#   ・#31 が session limit で停止し、仕様の質問と同じ `auto:blocked` で滞留
+#   ・依存が解けた作業パッケージ 14件が ready のまま未起票
+#
+# いずれも「オーナーの判断待ち」ではなく **仕事が黙って落ちていた**。
+# このワークフローが定時に拾い直す。
+#
+# ── 安全側の設計 ────────────────────────────────────────────
+#   ・`auto:blocked`（仕様が未確定）には触れない。オーナーの専権事項（設計 §0）
+#   ・対象ワークフローが実行中なら回収を見送る（二重起動でブランチを壊さない）
+#   ・払い出しは WBS の依存順。ブロック中・オーナーの手作業は出さない
+
+name: 自律ループ 05 スイープ
+
+on:
+  schedule:
+    # 30分ごと。ジョブの timeout（最大90分）より短いが、sweep.py 側が
+    # 「実行中のワークフローがあれば見送る」ため二重起動にはならない。
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: '操作せず、何をするかだけ出す'
+        type: boolean
+        default: false
+      max_inflight:
+        description: '同時に走らせる Issue の上限'
+        type: string
+        default: '3'
+
+# スイーパー自身は必ず1本。重なると同じ Issue を二重に付け替える。
+concurrency:
+  group: auto-sweep
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+  actions: write        # wbs-to-issue.yml を workflow_dispatch するため
+  pull-requests: read
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # 新しい停止状態のラベルを用意する。既にあれば何もしない。
+      # ここで作るのは、ラベルが存在しないと gh issue edit --add-label が失敗し、
+      # 停止の通知そのものが落ちるため（通知が落ちると滞留の原因が見えなくなる）。
+      - name: ラベルを用意する
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mk() {
+            gh label create "$1" --repo "$REPO" --color "$2" --description "$3" 2>/dev/null \
+              || echo "  既存: $1"
+          }
+          mk "auto:retry"        "fbca04" "基盤エラー・クレジット切れ。スイーパーが自動再開する"
+          mk "auto:waiting-dep"  "c5def5" "上流の作業パッケージ待ち。オーナー判断は不要"
+          mk "auto:needs-review" "d93f0b" "オーナーが異議を出した。区分によらずゲート3を経由する"
+
+      - name: スイープ
+        id: sweep
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PYTHONIOENCODING: utf-8
+        run: |
+          set -euo pipefail
+          ARGS=""
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            ARGS="--dry-run"
+          fi
+          python3 automation/scripts/sweep.py \
+            --max-inflight "${{ inputs.max_inflight || '3' }}" $ARGS
+
+      - name: 結果の要約
+        if: always()
+        run: |
+          echo "動かした件数: ${{ steps.sweep.outputs.moved || '不明' }}"
+          echo "枯渇: ${{ steps.sweep.outputs.exhausted || '不明' }}"
