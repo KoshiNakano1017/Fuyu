@@ -1587,6 +1587,19 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES    FROM anon;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON SEQUENCES FROM anon;
 
 -- ② authenticated：SELECT はテーブル単位、書き込みは列単位で与える
+--
+-- ★★ 先に既定の広い権限を剥がす。これが無いと以下の GRANT は**すべて無意味**になる。
+--    Supabase は新規テーブルへ既定で anon **と authenticated** に広い権限を与える
+--    （本節冒頭の important を参照）。剥がさずに列単位 GRANT を足しても、
+--    既定のテーブル全体 UPDATE が残ったままなので列の限定が効かない。
+--    つまり **一般会員が自分の role を 'admin' へ書き換えられる**。
+--
+--    2026-09-16、この REVOKE を書かずに §6-2② の GRANT だけを実装した版が
+--    DB テストで捕まった（「一般会員は自分を admin へ昇格できない」が
+--    Received: null ＝ UPDATE 成功）。§6-2② の danger は
+--    「GRANT UPDATE を全列にするな」と書いているが、**その一段手前**にこの話がある。
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM authenticated;
+
 GRANT SELECT ON members, member_profiles_private, member_identifiers,
                 check_ins, orders, order_items, quests, v_member_public,
                 v_room_availability, menu_items, accommodation_rates,
