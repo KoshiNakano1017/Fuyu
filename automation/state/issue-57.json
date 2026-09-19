@@ -21,13 +21,13 @@
     "review": 0
   },
   "tokens": {
-    "input": 20,
-    "output": 8480,
-    "costUsd": 0.7042455000000001
+    "input": 36,
+    "output": 16484,
+    "costUsd": 1.4147215000000002
   },
   "testHashes": {},
   "specRefs": [],
   "acceptance": [],
   "acceptanceDerived": false,
-  "updatedAt": "2026-09-19T00:38:41.726Z"
+  "updatedAt": "2026-09-19T00:48:31.419Z"
 }
