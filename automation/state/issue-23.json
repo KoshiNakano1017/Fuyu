@@ -1,9 +1,9 @@
 {
   "version": 1,
   "issue": 23,
-  "pr": null,
+  "pr": 79,
   "branch": null,
-  "phase": "implement",
+  "phase": "review",
   "risk": "high",
   "attempts": {
     "infra": 1,
@@ -21,9 +21,9 @@
     "review": 0
   },
   "tokens": {
-    "input": 466,
-    "output": 254778,
-    "costUsd": 23.691377000000003
+    "input": 570,
+    "output": 312470,
+    "costUsd": 29.536590500000006
   },
   "testHashes": {
     "e2e/smoke.spec.ts": "ed6ce8db5e0004a2",
@@ -135,7 +135,7 @@
     }
   ],
   "acceptanceDerived": false,
-  "updatedAt": "2026-09-19T06:21:07.780Z",
+  "updatedAt": "2026-09-19T06:30:17.745Z",
   "provisional": [
     {
       "question": "調査メモが種類A（正本 vs 派生文書）の矛盾8件を報告し、本タスクのリスク区分は高である。設計 §3.3 の判定は「高リスクなら種類Aでも完全に停止する」と読めるが、ここで停止すべきか。",
