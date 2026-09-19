@@ -3,7 +3,7 @@
   "issue": 58,
   "pr": null,
   "branch": null,
-  "phase": "plan",
+  "phase": "implement",
   "risk": "high",
   "attempts": {
     "infra": 0,
@@ -21,11 +21,31 @@
     "review": 0
   },
   "tokens": {
-    "input": 196,
-    "output": 86736,
-    "costUsd": 8.376183000000001
+    "input": 298,
+    "output": 147286,
+    "costUsd": 14.421039
   },
-  "testHashes": {},
+  "testHashes": {
+    "e2e/smoke.spec.ts": "ed6ce8db5e0004a2",
+    "tests/acceptance.test.ts": "ba0921981b4630b7",
+    "tests/auth-guard.test.ts": "36f9487ef96e224e",
+    "tests/db-test-infra.test.ts": "b4db59cc79914376",
+    "tests/db/current-operator-id.test.ts": "82e8173ec61178d7",
+    "tests/db/helpers/fixtures.ts": "beddc2651149fe9b",
+    "tests/db/helpers/psql.ts": "92056af69410690c",
+    "tests/db/login-binding.test.ts": "951155ad26536214",
+    "tests/db/members-guard-trigger.test.ts": "c0675285d9d0be31",
+    "tests/db/members-schema.test.ts": "1dec944f3943d4c7",
+    "tests/db/rls-and-helper-functions.test.ts": "9ac749d11b2c42ad",
+    "tests/db/rls-policies.test.ts": "3748be28b027dcc3",
+    "tests/db/rooms.test.ts": "cd23e006ce8338de",
+    "tests/fixtures-are-synthetic.test.ts": "3fd4731b934607c5",
+    "tests/migrations-baseline.test.ts": "cd1b6e29a043b253",
+    "tests/role-navigation.test.ts": "cf16b87575989f3a",
+    "tests/serving-status.test.ts": "4b3d762719a30c34",
+    "tests/supabase-env.test.ts": "2854c57b5940bac5",
+    "tests/uii.test.ts": "b5791629644723f4"
+  },
   "specRefs": [
     {
       "ref": "v13 §5.2",
@@ -76,35 +96,35 @@
       "criterion": "マイグレーション `0007_lodging_register_entries.sql` を適用すると `lodging_register_entries` が §3-13② の DDL どおりに作成される（全列・`chk_stay_period`・`source` の4値 CHECK・生成列・索引3本・COMMENT 2本）",
       "origin": "derived",
       "basis": "DB物理設計.md §3-13② ／ v13 §7「★ 宿泊者名簿」",
-      "test": "受入テスト #1〜#9"
+      "test": "tests/db/lodging-register.test.ts: 「列構成が §3-13② の DDL と一致する」「NOT NULL の列が §3-13② の指定と一致する」「entry_id の既定値が gen_random_uuid() である（§1-6）」「source の既定値が 'checkin' である」「is_representative の既定値が true である（false = 同伴者）」「同伴者の行（is_representative = false）を作れる（§3-13②）」「索引3本が §3-13② のとおり作成されている」「ix_lodging_register_member が member_id IS NOT NULL の部分索引である」「テーブルコメントが付いている（§3-13② の COMMENT）」「address_snapshot の列コメントが member_profiles_private の参照禁止を述べている」「チェックアウト日がチェックイン日より前の行は 23514 で拒否される」「チェックアウト日とチェックイン日が同日の行は INSERT できる（境界値：同日は許可）」「チェックアウト日が NULL の行（滞在中）は INSERT できる」「checkin / web_public / staff_manual / migration の4値は INSERT できる」「4値以外の source は 23514 で拒否される」"
     },
     {
       "criterion": "`member_id` / `recorded_by` が `ON DELETE SET NULL` であり、会員行を物理削除しても名簿行は消えず、氏名・住所のスナップショットがそのまま残る（会員マスタの住所更新でも遡及改変されない）",
       "origin": "derived",
       "basis": "v13 §7（`ON DELETE CASCADE` にすると会員の退会で法定記録が消える）／ DB物理設計.md §3-13③",
-      "test": "受入テスト #10〜#13"
+      "test": "tests/db/lodging-register.test.ts: 「member_id の外部キーが members を ON DELETE SET NULL で参照する」「recorded_by の外部キーが members を ON DELETE SET NULL で参照する」「member_id が NULL を許容する（SET NULL が成立する前提）」「会員行を物理削除しても名簿行は消えない」「会員行を物理削除しても氏名スナップショットが残る」「会員行を物理削除しても住所スナップショットが残る」「会員行を物理削除すると member_id だけが NULL になる」「記録者（recorded_by）の会員行を物理削除しても名簿行は残る」「★ 会員マスタの住所を更新しても address_snapshot は変わらない（遡及改変の禁止）」「名簿から member_profiles_private への外部キーが1本も無い（参照ではなく写しである）」"
     },
     {
       "criterion": "`retention_until_on` が `coalesce(checked_out_on, checked_in_on) + 3年` として自動算出され、直接書き込めない",
       "origin": "derived",
       "basis": "DB物理設計.md §3-13②・§3-13④ ／ v13 §7（3年保存が匿名化に優先）",
-      "test": "受入テスト #14〜#16"
+      "test": "tests/db/lodging-register.test.ts: 「retention_until_on が STORED の生成列である」「滞在中（checked_out_on が NULL）はチェックイン日の3年後になる」「チェックアウト済みならチェックアウト日の3年後になる」「チェックアウト日を後から入れると保存期限が追随する」「INSERT で retention_until_on を直接指定できない（428C9）」「UPDATE で retention_until_on を直接書き換えられない（428C9）」"
     },
     {
       "criterion": "RLS が有効で、SELECT は本人の行 ＋ `admin`/`core_member` のみ、INSERT/UPDATE は staff のみ、DELETE は全拒否、`anon` は権限ゼロ。ポリシー条件に `member_type` が一切現れない",
       "origin": "derived",
       "basis": "DB物理設計.md §6-1 表 No.32・§6-7・§6-6① ／ v13 §2（member_type を認可に使わない）",
-      "test": "受入テスト #17〜#31"
+      "test": "tests/db/lodging-register.test.ts: 「lodging_register_entries で RLS が有効である」「★ ポリシー条件に member_type が1つも現れない（v13 §2 ／ §6-1 の note）」／許可側「本人は自分の名簿行を SELECT できる」「admin は他人の名簿行を SELECT できる（法定出力のため）」「core_member は他人の名簿行を SELECT できる」「admin は名簿行を INSERT できる」「core_member は名簿行を INSERT できる（現地チェックインの記録者）」「admin は名簿行を UPDATE できる（誤記の訂正）」／拒否側「一般会員は他人の名簿行を1行も取得できない（エラーではなく0行）」「★ member_type が親方の一般会員でも他人の名簿行は1行も取得できない（v13 §2）」「member_id が NULL の行（退会者・同伴者）は一般会員から見えない」「一般会員は自分の名簿行であっても INSERT できない（42501）」「member_type が親方の一般会員も名簿行を INSERT できない（42501）」「本人は自分の名簿行を UPDATE しても更新行数が0になる（法定記録の自己改変を許さない）」「admin でも名簿行を DELETE できない（42501）」「一般会員も名簿行を DELETE できない（42501）」「anon は名簿を SELECT できない（0行ではなく権限エラー）」「anon は名簿へ INSERT できない」"
     },
     {
       "criterion": "上記を検証する DB テストが `tests/db/` に追加され、許可と拒否が対で書かれ、CI の `db-test` ジョブで緑になる",
       "origin": "derived",
       "basis": "CLAUDE.md §4.4 ／ DB物理設計.md §6-8④⑤",
-      "test": "受入テスト #1〜#32 全体（jest tests/db）"
+      "test": "tests/db/lodging-register.test.ts: 「本テストが tests/db 配下に置かれている」「CI の db-test ジョブが tests/db を実行対象にしている」（DB 非依存の describe に置き、接続先が無くても skip されない）"
     }
   ],
   "acceptanceDerived": true,
-  "updatedAt": "2026-09-19T01:33:24.657Z",
+  "updatedAt": "2026-09-19T01:48:08.616Z",
   "provisional": [
     {
       "question": "`lodging_register_entries` の UPDATE（誤記訂正）を誰に開くか。DB物理設計 §6-1 表 No.32 は書き込みを「staff」と書き、同じ文書の §3-13② は「誤記の訂正は `admin` に限り、訂正の記録方法（追記か上書きか）は要確認」と書いている。正本 v13 §7・§6 は訂正について何も書いていない",
