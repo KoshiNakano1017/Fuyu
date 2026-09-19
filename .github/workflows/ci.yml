@@ -84,6 +84,19 @@ jobs:
         with:
           fetch-depth: 0
 
+      # ⚠️ 2026-09-19 追加。実装フェーズを Issue 単位の並列にした副作用で、
+      # 同時に走る2つの実装が同じマイグレーション連番を取り合う事故が起きた。
+      # Issue #53（quests）と #58（宿泊者名簿）がどちらも 0007 を付け、
+      # **両方とも単独では CI が緑だったのにマージ後に main が壊れた**
+      # （schema_migrations_pkey の一意制約違反で DB テストが全滅）。
+      # PR の時点で「main と合流したら衝突するか」を見る。
+      - name: マイグレーション連番の衝突検出
+        run: |
+          set -euo pipefail
+          BASE="${{ github.event.pull_request.base.sha || 'origin/main' }}"
+          git fetch -q origin main 2>/dev/null || true
+          python3 automation/scripts/check_migrations.py --base "$BASE"
+
       - name: 禁止ファイル名の検出
         run: |
           # main との差分で追加されたファイルのみを対象にする
