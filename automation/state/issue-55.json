@@ -21,9 +21,9 @@
     "review": 0
   },
   "tokens": {
-    "input": 230,
-    "output": 154212,
-    "costUsd": 11.802766499999999
+    "input": 306,
+    "output": 185551,
+    "costUsd": 14.7420955
   },
   "testHashes": {
     "e2e/smoke.spec.ts": "ed6ce8db5e0004a2",
@@ -132,7 +132,7 @@
     }
   ],
   "acceptanceDerived": true,
-  "updatedAt": "2026-09-19T01:52:06.677Z",
+  "updatedAt": "2026-09-19T02:00:13.751Z",
   "provisional": [
     {
       "question": "Issue 本文の「根拠となる仕様: v13 §16」が spec_ref.py で解決不能である以上、blocked=true として止めるべきか。",
