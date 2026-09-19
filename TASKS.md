@@ -15,6 +15,32 @@
 
 ## バックログ
 
+## [2026-09-19 14:50] 朝会テキスト投入UI ＋ 議事録レコードの保存（Issue #23 ／ WBS 4-1） — IN PROGRESS
+
+**リスク区分: 高**（ゲート1・2・3 ／ 承認3回）。§4.1 の**認可・ロール判定**（完了条件4・5 ＝ `members.role` による
+サーバサイド認可 ／ v13 §5.9.3・§8）、**個人情報の入出力**（`morning_meetings` は **PII-A**。`transcript_text` /
+`summary_text` は発言の全文 ／ `DB物理設計.md` §6-6b L1152）、**DBマイグレーション**（DDL ＋ RLS ＋ GRANT）の3点に該当する。
+
+根拠: 正本 v13 **§9 #63**（2026-09-05 決定：**アプリは音声を扱わない**。文字起こし済みテキストを**UIへコピー＆ペースト**、
+API連携・ファイルアップロードは行わない、**貼り付け時点で議事録として格納**）、**§7**「★ 朝会・議事録データ」（保持項目）、
+**§6** 権限マトリクス L2106（朝会＝管理者〇・コアメンバー〇・会員−・ゲスト−）、**§5.9.3・§8**（画面非表示とサーバサイド認可の併置）。
+⚠️ **§5.1 本文（L390）は録音前提のまま未改訂**であり根拠に使わない（§9 #63 が自ら未追随を明記）。
+
+範囲は **2026-09-19 オーナー決定 A'**（Issue #23 コメント）による。`morning_meetings` の DDL・RLS・GRANT・投入UI・保存処理までを
+`4-1` で実装し、**検証は DB レベルの RLS テスト**（5ロール）で行う。**UI 到達制御・アクセス制限画面は `2-3` の担当**。
+`morning_meetings` のポリシーと GRANT を `2-2` より先に置くことも A' の範囲（マイグレーションに「`2-2` で見直す」と明記する）。
+
+申し送り（いずれも正本優先）: ①`DB物理設計.md` §3-4 の `audio_storage_path NOT NULL` は §9 #63 のもとで埋める値が無い
+②同 §6 ⑦ `mm_insert_admin` は `is_admin()` だが正本 §6 はコアメンバーも〇 → INSERT は `is_staff()`
+③同 §6-6 に `GRANT INSERT` の記述が無い（GRANT 無しではポリシー評価前に `42501`）。
+
+**段取り（2026-09-19 ／ Issue #23 のコメントに全文）**: 完了条件6項目（すべて `origin: issue`。導出なし）を
+受入テスト19件へ対応させた（各条件に最低1件）。変更は**7ファイル（すべて新規）**。`supabase/migrations/0011_morning_meetings.sql`
+（DDL ＋ RLS ＋ GRANT。連番は通常系の最大 `0010` の次）、`src/lib/morning-meetings/record.ts`（保存ロジック）、
+`src/app/admin/morning-meetings/{page.tsx,MorningMeetingForm.tsx,actions.ts}`、
+`tests/db/morning-meetings-rls.test.ts`（5ロール）、`tests/morning-meeting-intake.test.ts`。新規依存パッケージは無し。
+ナビ項目は追加しない（A' により `2-3`／`2-6` の担当。§5.9.1 の表に朝会の行が無い件は QUESTIONS.md へ記録済み）。
+
 ## [2026-09-19 15:30] クエストボード（一覧・集約表示）（Issue #53 ／ WBS 5-1） — IN PROGRESS
 ## [2026-09-19 16:10] Claude／Gemini テキストクライアント基盤 ＋ APIキー管理（Issue #55 ／ WBS 1-5） — TODO
 ## [2026-09-19 16:10] Claude／Gemini テキストクライアント基盤 ＋ APIキー管理（Issue #55 ／ WBS 1-5） — IN PROGRESS
