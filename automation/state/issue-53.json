@@ -3,7 +3,7 @@
   "issue": 53,
   "pr": null,
   "branch": null,
-  "phase": "plan",
+  "phase": "implement",
   "risk": "high",
   "attempts": {
     "infra": 0,
@@ -21,11 +21,31 @@
     "review": 0
   },
   "tokens": {
-    "input": 170,
-    "output": 91871,
-    "costUsd": 8.120072
+    "input": 352,
+    "output": 185944,
+    "costUsd": 16.8225015
   },
-  "testHashes": {},
+  "testHashes": {
+    "e2e/smoke.spec.ts": "ed6ce8db5e0004a2",
+    "tests/acceptance.test.ts": "ba0921981b4630b7",
+    "tests/auth-guard.test.ts": "36f9487ef96e224e",
+    "tests/db-test-infra.test.ts": "b4db59cc79914376",
+    "tests/db/current-operator-id.test.ts": "82e8173ec61178d7",
+    "tests/db/helpers/fixtures.ts": "82dd6716a18e4037",
+    "tests/db/helpers/psql.ts": "92056af69410690c",
+    "tests/db/login-binding.test.ts": "951155ad26536214",
+    "tests/db/members-guard-trigger.test.ts": "c0675285d9d0be31",
+    "tests/db/members-schema.test.ts": "1dec944f3943d4c7",
+    "tests/db/rls-and-helper-functions.test.ts": "9ac749d11b2c42ad",
+    "tests/db/rls-policies.test.ts": "3748be28b027dcc3",
+    "tests/db/rooms.test.ts": "cd23e006ce8338de",
+    "tests/fixtures-are-synthetic.test.ts": "9be179b5f7481ed6",
+    "tests/migrations-baseline.test.ts": "cd1b6e29a043b253",
+    "tests/role-navigation.test.ts": "cf16b87575989f3a",
+    "tests/serving-status.test.ts": "4b3d762719a30c34",
+    "tests/supabase-env.test.ts": "2854c57b5940bac5",
+    "tests/uii.test.ts": "b5791629644723f4"
+  },
   "specRefs": [
     {
       "ref": "v13 §5.3",
@@ -68,52 +88,52 @@
       "criterion": "クエストボードに、`origin_type` が `manual` の行と `morning_meeting_auto` の行が単一の一覧として表示される",
       "origin": "issue",
       "basis": "v13 §5.3（L754）／v13 §7（L2360）",
-      "test": "クエストボードは origin_type が manual の行と morning_meeting_auto の行を1つの一覧として返す"
+      "test": "tests/quest-board.test.ts:`manual` と `morning_meeting_auto` の両方が1つの items に含まれる"
     },
     {
       "criterion": "ゲストでログインすると、`guest_allowed=false` のクエストも一覧に表示され、`🔒 街人登録で解放` が重なり、申請ボタンが非活性である",
       "origin": "issue",
-      "basis": "v13 §5.10.6（L1789）",
-      "test": "ゲストは guest_allowed=false のクエストを一覧に見ることができる（行は隠さない）／ゲストに対し guest_allowed=false のカードは申請ボタンが非活性になる／街人は guest_allowed=false のクエストを施錠なしで受注申請できる"
+      "basis": "v13 §5.10.6（L1789・L1792）",
+      "test": "tests/quest-board.test.ts:ゲストにも `guest_allowed=false` のクエストが一覧に表示される ／ ゲストの `guest_allowed=false` のカードに `🔒 街人登録で解放` が重なる ／ ゲストは `guest_allowed=false` のクエストの申請ボタンが非活性である ／ ゲストは `guest_allowed=true` のクエストの申請ボタンが活性である ／ 街人には `guest_allowed=false` のクエストが施錠されない ／ 施錠カードはタップで街人登録モーダルを起動する、tests/db/quests-guest-visibility.test.ts:ゲストにも `guest_allowed=false` の公開中クエストが返る ／ ゲストに `guest_allowed=true` のクエストが返る"
     },
     {
       "criterion": "ゲスト向けのレスポンスに、施錠クエストの報酬額・指示内容・担当者情報が含まれない（タイトル・カテゴリ・施錠状態までに限られる）",
       "origin": "issue",
       "basis": "v13 §5.10.6（L1800）",
-      "test": "ゲスト向けの v_quest_board は施錠クエストの報酬額・指示内容・担当者情報を返さない"
+      "test": "tests/quest-board.test.ts:ゲスト向けの施錠クエストに報酬額が含まれない ／ 〜に指示内容が含まれない ／ 〜に担当者情報が含まれない ／ 報酬額が 0 の施錠クエストでも報酬額はキーごと返らない（境界値） ／ ゲスト向けの施錠クエストにもタイトルは含まれる ／ 街人には報酬額が返る"
     },
     {
       "criterion": "一覧上部に「あと N 件のクエストが街人登録で解放されます」の常設バナーが表示され、N が `guest_allowed=false` かつ `status='open'` のクエスト件数と一致する",
       "origin": "issue",
       "basis": "v13 §5.10.6（L1793）",
-      "test": "解放件数バナーの N は guest_allowed=false かつ status='open' のクエスト件数と一致する"
+      "test": "tests/quest-board.test.ts:ゲストの一覧上部にバナーが表示される ／ N が `guest_allowed=false` かつ `status='open'` の件数と一致する ／ バナーの文言が「あと N 件のクエストが街人登録で解放されます」である"
     },
     {
       "criterion": "ゲストが `guest_allowed=false` のクエストへ受注申請 API を直接呼んだ場合、サーバ側で拒否される（画面操作を経由しない経路でも拒否される）",
       "origin": "issue",
       "basis": "v13 §5.10.6（L1794）／v13 §5.9.3（L1618-1625）／2026-09-19 オーナー決定 B",
-      "test": "ゲストは guest_allowed=false のクエストへ受注申請 API を呼ぶと 403 で拒否される／街人は同じ API を呼んでも認可では拒否されない"
+      "test": "tests/quest-application-gate.test.ts:ゲストは `guest_allowed=false` のクエストへ受注申請できない ／ ゲストは `guest_allowed=true` のクエストへ受注申請できる ／ 街人は `guest_allowed=false` のクエストへ受注申請できる ／ ★ 画面の申請ボタンの活性と、サーバ側の受注可否が全件一致する"
     },
     {
       "criterion": "上記の判定が `role`（`guest`）で行われ、`member_type` を認可に用いていない",
       "origin": "issue",
       "basis": "v13 §2（L171-172）／CLAUDE.md §4.1",
-      "test": "member_type が ゲスト でも role が member なら施錠表示にならない／ゲストは quests へ直接 INSERT / UPDATE できない"
+      "test": "tests/quest-board.test.ts:`member_type` が親方でも `role` が guest なら施錠される ／ `member_type` がゲストでも `role` が member なら施錠されない、tests/quest-application-gate.test.ts:`member_type` が親方でも `role` が guest なら受注申請できない ／ `member_type` がゲストでも `role` が member なら受注申請できる"
     },
     {
       "criterion": "`required_certification` 未保有のクエストが `🚧 受注できません` として表示される（表示のみ。API 側の資格ゲートは 5-2）",
       "origin": "issue",
       "basis": "v13 §5.10.6（L1790）",
-      "test": "required_certification を持たない閲覧者には 🚧 受注できません が表示され、街人登録への導線は出ない"
+      "test": "tests/quest-board.test.ts:`required_certification` 未保有のクエストが `🚧 受注できません` として表示される ／ 資格ゲートでは街人登録の導線を出さない ／ 資格保有者には `🚧 受注できません` が出ない"
     },
     {
       "criterion": "他者向け表示名は、`nickname` 未設定なら会員番号、親方兼街人は街人番号で表示される",
       "origin": "issue",
-      "basis": "2026-09-10 オーナー決定／WBS_Phase1.md L443",
-      "test": "nickname 未設定の会員の他者向け表示名は会員番号になる"
+      "basis": "2026-09-10 オーナー決定／WBS_Phase1.md L443／DB物理設計 §6-4（L1523-1535）",
+      "test": "tests/db/member-display-name.test.ts:ニックネームが設定済みならニックネームで表示される ／ ニックネーム未設定なら会員番号で表示される ／ 空白だけのニックネームは未設定として扱われる ／ 親方兼街人は街人番号で表示される ／ ★ ニックネーム未設定でも表示名に実名が現れない"
     }
   ],
   "acceptanceDerived": false,
-  "updatedAt": "2026-09-19T01:33:32.373Z",
+  "updatedAt": "2026-09-19T01:52:26.222Z",
   "provisional": []
 }

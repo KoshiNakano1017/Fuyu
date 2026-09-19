@@ -12,7 +12,11 @@ import { join } from "node:path";
 
 import { FIXTURE_EMAILS, TEST_MEMBERS } from "./db/helpers/fixtures";
 
-const FIXTURES_SOURCE_PATH = join(__dirname, "db/helpers/fixtures.ts");
+/**
+ * フィクスチャ定義の置き場（`tests/` からの相対）。増えたらここへ足す。
+ * 走査から漏れたファイルは守られないため、テスト名にパスを出して漏れが見えるようにする。
+ */
+const FIXTURE_SOURCE_PATHS = ["db/helpers/fixtures.ts", "fixtures/quest-board.ts"];
 
 /**
  * 実データの所在。フィクスチャがここを参照していたら、その時点で §7.1 違反である。
@@ -32,8 +36,8 @@ describe("DB テストのフィクスチャ（完了条件21）", () => {
     expect(nicknames.filter((nickname) => !nickname.startsWith("テスト"))).toEqual([]);
   });
 
-  test("フィクスチャ定義が実データの置き場を1つも参照していない", () => {
-    const source = readFileSync(FIXTURES_SOURCE_PATH, "utf8");
+  test.each(FIXTURE_SOURCE_PATHS)("%s が実データの置き場を1つも参照していない", (path) => {
+    const source = readFileSync(join(__dirname, path), "utf8");
     const hits = FORBIDDEN_REFERENCES.filter((reference) => source.includes(reference));
     expect(hits).toEqual([]);
   });
