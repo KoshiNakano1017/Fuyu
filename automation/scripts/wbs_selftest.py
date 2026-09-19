@@ -71,7 +71,7 @@ def main() -> int:
     #   **着手可能な作業パッケージが起票できなくなる**。
     for package_id, want_dropped, want_blocked, note in [
         ("4-1", False, False, "散文の「不要化」を廃止と誤読している"),
-        ("4-2", False, True, "ブロック中が廃止に倒れている"),
+        ("3-9", False, True, "ブロック中が廃止に倒れている"),
         ("13-2", True, False, "取り消し線つき ID の廃止を見落としている"),
     ]:
         package = packages.get(normalize_id(package_id))
@@ -96,7 +96,15 @@ def main() -> int:
         got = any(m in status_declaration(status) for m in BLOCKED_MARKERS)
         check(got is want, f"ブロック判定が誤っています: {status[:28]!r} → {got} — {note}")
 
-    for package_id, want_blocked in [("2-2", False), ("2-4", False), ("1-5", True), ("4-2", True)]:
+    # ⚠️ ここは**実データ（WBS の現物）を固定値で検査している**ため、
+    # プロジェクトの進行でブロックが解除されると検査が落ちる。
+    # 2026-09-19: 1-5・4-2 のブロック（非同期ジョブ実行基盤）が §16-1 のとおり
+    # 2026-09-10 に解決していたのにステータス欄が追随しておらず、
+    # それを直したらこの検査が落ちた。**検査が落ちたのは正しい挙動**である
+    # （現物が変わったのだから）。ブロック解除のたびに、
+    # そのとき実際にブロック中の行へ差し替えること。
+    # パーサの挙動そのものは、上のリテラル文字列の検査が受け持っている。
+    for package_id, want_blocked in [("2-2", False), ("2-4", False), ("3-9", True), ("5-7", True)]:
         package = packages.get(normalize_id(package_id))
         if package is None:
             failures.append(f"{package_id} が WBS に見つかりません（検査を更新してください）")

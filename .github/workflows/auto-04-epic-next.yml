@@ -110,9 +110,21 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
+          # ⚠️ 2026-09-19 修正: 旧版は draft=true / start_loop=false 固定だった。
+          # つまり払い出した Issue に `auto` が付かず、**オーナーが完了条件を書いて
+          # 手でラベルを付けるまで永久に動かない**。ループが「自律」でなくなる
+          # 最大の原因がこれで、実測で着手可能な6パッケージ（3-2/1-2/5-1/3-8/1-4/10-1）が
+          # 一度も起票されず、その下流 40件以上が連鎖的に止まっていた。
+          #
+          # 完了条件（起票3条件の③）が WBS から機械判定できないのは事実だが、
+          # wbs-to-issue 側のガードが①節番号と②ブロッカー解除は検査しており、
+          # ③が空欄なら PM エージェントが調査結果から導出して
+          # 「導出した完了条件」として提示する（設計 §3 の acceptance / origin:derived）。
+          # 導出が意図と違えば `auto:needs-review` でゲート3へ送れる。
+          # **止まったまま誰も気づかないより、導出して進めてから直すほうが安い。**
           gh workflow run wbs-to-issue.yml --repo "$REPO" \
             -f package="${{ steps.next.outputs.next }}" \
-            -f draft=true -f resolve=false -f start_loop=false
+            -f draft=false -f resolve=false -f start_loop=true
           printf '%s\n\n%s\n' \
             "\`${{ steps.done.outputs.package }}\` が完了したので、次の \`${{ steps.next.outputs.next }}\` を起票します。" \
             "起草を読んだうえで **\`auto\` ラベル**を付けてください（これが承認です。設計 §10.1.5 導線4）。" \

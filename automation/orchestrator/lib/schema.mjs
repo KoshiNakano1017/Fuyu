@@ -83,6 +83,32 @@ export const PLAN_SCHEMA = {
     },
     // 人間が読む本文。Issue コメントへそのまま出す。
     comment: { type: 'string', minLength: 1 },
+
+    // ── 仮決定（2026-09-16 オーナー決定）────────────────────
+    // 低・中リスクの未確定論点は、**止まらずに推奨案を採用して進む**。
+    // 旧運用では論点1件ごとに `blocked: true` で停止し、オーナーが
+    // ラベルを付け直すまでループ全体が止まっていた。待っている間、
+    // 依存関係の無い作業まで一緒に止まるのが最大の損失だった。
+    //
+    // ⚠️ 高リスク（認可・金額・個人情報・DBマイグレーション・外部連携）は
+    // **対象外**。従来どおり `blocked: true` で停止し、枯渇レポートで報告する。
+    // 設計 §0「仕様の意思決定はオーナーの専権事項」を崩すのは低・中に限る。
+    //
+    // 仮決定は「決めた」のではなく「**覆せる形で進めた**」記録である。
+    // reversibility に、後から覆す場合の手当てを必ず書かせる。
+    provisionalDecision: {
+      type: 'object',
+      required: ['question', 'chosen', 'rationale', 'reversibility'],
+      additionalProperties: false,
+      properties: {
+        question: { type: 'string', minLength: 1 },
+        options: { type: 'array', items: { type: 'string' } },
+        chosen: { type: 'string', minLength: 1 },
+        rationale: { type: 'string', minLength: 1 },
+        specRef: { type: 'string' },
+        reversibility: { type: 'string', minLength: 1 },
+      },
+    },
   },
 };
 

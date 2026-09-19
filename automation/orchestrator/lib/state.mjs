@@ -135,3 +135,28 @@ export function addUsage(state, usage) {
   state.tokens.costUsd += usage.total_cost_usd ?? usage.costUsd ?? 0;
   return state;
 }
+
+// ── 停止事由の分類（2026-09-16 追加）──────────────────────────
+// 旧版は停止をすべて `auto:blocked` の1状態へ潰していた。そのため
+//   ・オーナーの判断が要る（仕様の未確定）
+//   ・時間をおけば直る（クレジット切れ・SDK の一時障害）
+//   ・上流の作業パッケージ待ち
+// の3つが見分けられず、**人を呼ぶ必要がないものまで人を待って止まっていた**。
+// 実例: Issue #31 は「You've hit your session limit」で停止したが、
+// 仕様の質問と同じラベルが付いたため、誰かが気づくまで永久に待機した。
+const CREDIT_PATTERNS =
+  /session limit|usage limit|rate.?limit|quota|credit balance|insufficient.{0,12}credit|overloaded|529/i;
+
+/**
+ * 停止事由を、スイーパーが機械的に扱える種別へ落とす。
+ *
+ * @returns {'credit'|'infra'|'spec'} credit = 時間をおいて自動再開（クレジット・上限）
+ *                                    infra  = 基盤側の障害。自動再開の対象
+ *                                    spec   = 仕様が未確定。オーナー判断が要る
+ */
+export function classifyBlock(kind, text) {
+  const s = `${kind ?? ''}\n${text ?? ''}`;
+  if (CREDIT_PATTERNS.test(s)) return 'credit';
+  if (String(kind ?? '').includes('基盤エラー')) return 'infra';
+  return 'spec';
+}

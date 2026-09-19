@@ -19,7 +19,7 @@
 
 import { loadAgent } from './lib/agents.mjs';
 import { runAgent } from './lib/runAgent.mjs';
-import { loadState, saveState, addUsage, recordAttempt } from './lib/state.mjs';
+import { loadState, saveState, addUsage, recordAttempt, classifyBlock } from './lib/state.mjs';
 import * as gh from './lib/gh.mjs';
 import {
   PLAN_SCHEMA, RISK_SCHEMA, validate, outputInstruction, maxRisk,
@@ -36,6 +36,40 @@ if (!Number.isInteger(ISSUE)) {
 }
 
 const state = await loadState(ISSUE);
+
+// ── 仮決定の記録（2026-09-16）──────────────────────────────
+// 低・中リスクの未確定論点は止めずに推奨案で進める（設計 §3.4）。
+// ただし「黙って決めた」ことにならないよう、必ず3か所へ痕跡を残す:
+//   1. Issue コメント（オーナーがその場で覆せる）
+//   2. state（枯渇レポートが一覧にする）
+//   3. QUESTIONS.md（PM エージェントが §3.4.1 の形式で追記する）
+const provisional = [];
+
+async function recordProvisional(json) {
+  const p = json?.provisionalDecision;
+  if (!p) return;
+  provisional.push(p);
+  await gh.comment(ISSUE, [
+    `## ⚡ 仮決定で進行します：${p.question}`,
+    '',
+    '**採用した案**',
+    p.chosen,
+    '',
+    '**理由**',
+    p.rationale,
+    ...(p.specRef ? ['', `**根拠**: ${p.specRef}`] : []),
+    '',
+    '**覆す場合の手当て**',
+    p.reversibility,
+    '',
+    '> [!important] これは決定ではなく「覆せる形で進めた」記録です',
+    '> オーナーの判断が要ると考える場合は `auto:needs-review` を付けてください。',
+    '> 区分によらずマージ前の承認（ゲート3）を経由します。',
+    '',
+    '<!--provisional-->',
+  ].join('\n'));
+}
+
 state.phase = 'plan';
 
 /** 基盤エラーは即停止する（設計 §12.1.2）。リトライしない。 */
@@ -56,6 +90,8 @@ async function fatal(message, detail) {
   ].join('\n'));
   await gh.setOutput('blocked', 'true');
   await gh.setOutput('risk', 'high');
+  // クレジット切れと基盤障害はオーナー判断を要しない。スイーパーが後で再開する。
+  await gh.setOutput('blocked_kind', classifyBlock('基盤エラー', detail ?? message));
   process.exit(1);
 }
 
@@ -118,6 +154,7 @@ if (!define.ok) {
 }
 
 await gh.comment(ISSUE, define.json.comment);
+await recordProvisional(define.json);
 
 if (define.json.blocked) {
   gh.notice('タスク定義の段階で停止しました（仕様が未確定）');
@@ -126,6 +163,7 @@ if (define.json.blocked) {
   await gh.setOutput('blocked', 'true');
   await gh.setOutput('risk', 'high');
   await gh.setMultilineOutput('blocked_reason', define.json.blockedReason ?? '仕様が未確定');
+  await gh.setOutput('blocked_kind', 'spec');
   process.exit(0);
 }
 
@@ -180,6 +218,7 @@ const research = await step(
 
 if (research.ok) {
   await gh.comment(ISSUE, research.json.comment);
+await recordProvisional(research.json);
   risk = maxRisk(risk, research.json.risk);
 
   if (research.json.blocked) {
@@ -190,6 +229,7 @@ if (research.ok) {
     await gh.setOutput('blocked', 'true');
     await gh.setOutput('risk', 'high');
     await gh.setMultilineOutput('blocked_reason', research.json.blockedReason ?? '仕様が未確定');
+    await gh.setOutput('blocked_kind', 'spec');
     process.exit(0);
   }
 } else {
@@ -238,6 +278,7 @@ if (!plan.ok) {
 }
 
 await gh.comment(ISSUE, plan.json.comment);
+await recordProvisional(plan.json);
 
 if (plan.json.blocked) {
   state.risk = 'high';
@@ -245,6 +286,7 @@ if (plan.json.blocked) {
   await gh.setOutput('blocked', 'true');
   await gh.setOutput('risk', 'high');
   await gh.setMultilineOutput('blocked_reason', plan.json.blockedReason ?? '仕様が未確定');
+  await gh.setOutput('blocked_kind', 'spec');
   process.exit(0);
 }
 
@@ -277,6 +319,7 @@ if (state.acceptance.length === 0) {
 }
 
 state.risk = risk;
+state.provisional = provisional;
 state.specRefs = plan.json.specRefs ?? research.json?.specRefs ?? [];
 await saveState(state);
 

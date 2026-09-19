@@ -246,6 +246,7 @@ jobs:
       privacy_reject: ${{ steps.orc.outputs.privacy_reject }}
       blocked: ${{ steps.orc.outputs.blocked }}
       reason: ${{ steps.orc.outputs.reason }}
+      blocked_kind: ${{ steps.orc.outputs.blocked_kind }}
     steps:
       # PAT で checkout する。修正コミットの push が ci.yml を起動する必要があるため（設計 §8.1）。
       - uses: actions/checkout@v4
@@ -314,26 +315,51 @@ jobs:
     if: always() && needs.verdict.outputs.blocked == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: auto:blocked へ付け替えて通知
+      - name: 停止事由に応じてラベルを付け替え、通知する
         env:
           GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
           ISSUE: ${{ needs.context.outputs.issue }}
           REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           REASON: ${{ needs.verdict.outputs.reason }}
+          KIND: ${{ needs.verdict.outputs.blocked_kind }}
         run: |
           set -euo pipefail
+          # 2026-09-16: spec → auto:blocked（オーナー判断）／ infra・credit → auto:retry（自動再開）
+          # 個人情報の検出（review-privacy）は必ず spec 側に落ちるため、人間の目を通る。
+          KIND="${KIND:-spec}"
+          if [ "$KIND" = "spec" ]; then
+            NEW_LABEL="auto:blocked"
+          else
+            NEW_LABEL="auto:retry"
+          fi
           gh issue edit "$ISSUE" --repo "$REPO" \
-            --remove-label "auto:review" --add-label "auto:blocked" || true
-          {
-            echo "@${OWNER} 検証フェーズが停止しました。"
-            echo
-            echo "${REASON:-理由は PR / Issue のコメントを参照してください。}"
-            echo
-            echo '再開は `auto:blocked` を外し、`auto:review` を付け直してください。'
-            echo
-            echo "実行: ${RUN_URL}"
-          } > notice.md
+            --remove-label "auto:review" --add-label "$NEW_LABEL" || true
+
+          if [ "$NEW_LABEL" = "auto:retry" ]; then
+            cat > notice.md <<'EOF'
+          ## ⏳ 検証フェーズが一時的な事由で停止しました
+
+          仕様の問題ではありません。**オーナーの操作は不要です。**
+          スイーパー（`auto-05-sweep.yml`）が時間をおいて自動で再開します。
+
+          <!--retry:from=auto:review-->
+          EOF
+            printf '\n事由: `%s`\n理由: %s\n実行: %s\n' \
+              "$KIND" "${REASON:-（理由の記録がありません）}" "$RUN_URL" >> notice.md
+          else
+            {
+              echo "@${OWNER} 検証フェーズが停止しました。**オーナーの判断が要ります。**"
+              echo
+              echo "${REASON:-理由は PR / Issue のコメントを参照してください。}"
+              echo
+              echo '再開は `auto:blocked` を外し、`auto:review` を付け直してください。'
+              echo
+              echo "> この項目は、着手可能な仕事が尽きた時点で**枯渇レポート**にまとめて報告されます。"
+              echo
+              echo "実行: ${RUN_URL}"
+            } > notice.md
+          fi
           gh issue comment "$ISSUE" --repo "$REPO" --body-file notice.md
   risk:
     needs: [context, verdict, ci-status, spec-guard]
@@ -416,9 +442,19 @@ jobs:
           fi
           echo "risk=${RISK}" >> "$GITHUB_OUTPUT"
 
-          # ── 低リスク自動通過の6条件（設計 §4.1）──
-          # 1つでも欠ければ中リスクに繰り上げ、ゲート3を経由する。
+          # ── 自動通過の条件（設計 §4.1 改訂 2026-09-16）──
+          # 旧版は「低リスクのみ・6条件すべて」だった。承認をマージ前1回へ集約した
+          # 改訂により、自動通過の対象を **高リスク以外** へ広げる。
+          #
+          # 条件③（段取りの宣言範囲内）は FAILED から WARNED へ移した。
+          # 理由: ゲート1・2を撤去したため、段取りは**誰の承認も経ていない**。
+          # つまり③はもはや「オーナーが承認した範囲を逸脱したか」ではなく
+          # 「エージェントの自己申告と実際が一致するか」という自己整合性検査であり、
+          # 逸脱の実害はレビュー3種と CI が捕える。しかも判定は段取りコメントの
+          # backtick を grep する脆い実装で、書式が揺れると読み取れず（③の失敗）
+          # 無関係なタスクが承認待ちで滞留する。警告として残し、停止事由から外す。
           FAILED=""
+          WARNED=""
 
           # ① CI が全ジョブ緑
           if [ "$CI_GREEN" != "true" ]; then FAILED="${FAILED}①CIが緑でない / "; fi
@@ -430,7 +466,7 @@ jobs:
           DECLARED="$(printf '%s' "$PLAN" | grep -oE '`[^`]+`' | tr -d '`' \
             | grep -E '^[A-Za-z0-9_./@-]+$' | grep -E '/|\.[A-Za-z0-9]+$'             | sed 's:/*$::' | sort -u || true)"
           if [ -z "$DECLARED" ]; then
-            FAILED="${FAILED}③段取りから変更ファイルの宣言を読み取れない / "
+            WARNED="${WARNED}③段取りから変更ファイルの宣言を読み取れない / "
           else
             OUT=""
             while IFS= read -r f; do
@@ -447,7 +483,7 @@ jobs:
           $CHANGED
           EOF
             if [ -n "$OUT" ]; then
-              FAILED="${FAILED}③宣言外のファイルを変更している（${OUT}） / "
+              WARNED="${WARNED}③宣言外のファイルを変更している（${OUT}） / "
             fi
           fi
 
@@ -462,12 +498,20 @@ jobs:
           # ⑥ supabase/migrations/ に差分なし
           printf '%s\n' "$CHANGED" | grep -q '^supabase/migrations/' && FAILED="${FAILED}⑥supabase/migrations/に差分がある / "
 
+          # オーナーが計画フェーズの通知を見て異議を出した場合、区分によらずゲート3へ送る
+          # （設計 §4.1「異議申立ての窓を持たない自動通過は認めない」を、時間待ちではなく
+          #   ラベルで実現したもの。auto-01 の notify-classification が案内している）。
+          NEEDS_REVIEW=false
+          if gh issue view "$ISSUE" --repo "$REPO" --json labels --jq '.labels[].name'              | grep -qx 'auto:needs-review'; then
+            NEEDS_REVIEW=true
+          fi
+
           AUTO_PASS=false
-          if [ "$RISK" = "low" ] && [ "$PII" != "true" ] && [ -z "$FAILED" ]; then
+          if [ "$RISK" != "high" ] && [ "$PII" != "true" ] && [ "$NEEDS_REVIEW" != "true" ] && [ -z "$FAILED" ]; then
             AUTO_PASS=true
           fi
           echo "auto_pass=${AUTO_PASS}" >> "$GITHUB_OUTPUT"
-          echo "リスク区分: ${RISK} / 自動通過: ${AUTO_PASS} / 欠けた条件: ${FAILED:-なし}"
+          echo "リスク区分: ${RISK} / 自動通過: ${AUTO_PASS} / 欠けた条件: ${FAILED:-なし} / 警告: ${WARNED:-なし}"
 
           # 判定はオーナーが見えるところに残す。異議の材料になるため（設計 §4.1）。
           {
@@ -478,11 +522,17 @@ jobs:
               echo "- **個人情報に関わるため high へ繰り上げました**（2026-09-05 オーナー決定）: ${PII_REASON}"
               echo "  - 低リスク自動通過の対象から除外し、ゲート3を必ず経由します"
             fi
-            echo "- 低リスク自動通過（設計 §4.1 の6条件）: ${AUTO_PASS}"
+            echo "- 自動通過（設計 §4.1 改訂: 高リスク以外＋①④⑤⑥）: ${AUTO_PASS}"
             echo "- 欠けた条件: ${FAILED:-なし}"
+            echo "- 警告（停止事由ではない）: ${WARNED:-なし}"
+            if [ "$NEEDS_REVIEW" = "true" ]; then
+              echo "- **\`auto:needs-review\` が付いているため、区分によらずゲート3を経由します**"
+            fi
             echo
             if [ "$AUTO_PASS" = "true" ]; then
-              echo "6条件をすべて満たしたため、ゲート3を省略してマージへ進みます。"
+              echo "条件を満たしたため、ゲート3を省略してマージへ進みます。"
+              echo
+              echo "> 覆したい場合は PR を close するか、Issue に \`auto:needs-review\` を付けてください。"
             else
               echo "@${OWNER} ゲート3（Environment \`gate-merge\`）で承認をお願いします。"
             fi

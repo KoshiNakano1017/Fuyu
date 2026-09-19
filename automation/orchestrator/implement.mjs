@@ -25,7 +25,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { loadAgent } from './lib/agents.mjs';
 import { runAgent } from './lib/runAgent.mjs';
-import { loadState, saveState, addUsage, recordAttempt } from './lib/state.mjs';
+import { loadState, saveState, addUsage, recordAttempt, classifyBlock } from './lib/state.mjs';
 import * as gh from './lib/gh.mjs';
 import { IMPLEMENT_SCHEMA, validate, outputInstruction, extractJson } from './lib/schema.mjs';
 import { section, stripTemplate, hasDerived, formatApproved, acceptanceRows } from './lib/acceptance.mjs';
@@ -67,6 +67,9 @@ async function stop(kind, message, detail) {
   ].join('\n'));
   await gh.setOutput('blocked', 'true');
   await gh.setMultilineOutput('reason', message);
+  // spec = オーナー判断が要る / credit・infra = スイーパーが自動再開する
+  await gh.setOutput('blocked_kind', classifyBlock(kind, `${message}
+${detail ?? ''}`));
   process.exit(0);
 }
 

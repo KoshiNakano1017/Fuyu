@@ -24,7 +24,7 @@
 | `automation/agents/` | エージェント定義11本（frontmatter が権限の宣言を兼ねる） | 任意の場所でよいので、自動化を1箇所に集約 |
 | `automation/settings/` | エージェントごとの権限設定5本 | 同上 |
 | `automation/scripts/` | ワークフローから呼ぶスクリプト | YAML に長い処理を埋めると読めず、手元で検証もできないため分離 |
-| `.github/workflows/` | ワークフロー6本 | **GitHub の仕様で位置が固定**されている |
+| `.github/workflows/` | ワークフロー8本 | **GitHub の仕様で位置が固定**されている |
 | `.github/ISSUE_TEMPLATE/` | Issue テンプレート | 同上 |
 | `docs/` | 仕様書（正本）・設計 | ループが読む対象。**ループは書き換えない**（§8.2） |
 | ルート | アプリのソース | ループが書く対象 |
@@ -40,12 +40,13 @@
 | | `settings/pm.json` | 🟡 未検証 | 同上 |
 | | `settings/test.json` | 🟡 未検証 | 同上 |
 | | `settings/code.json` | 🟡 未検証 | 同上 |
-| **ワークフロー** | `.github/workflows/auto-01-plan.yml` | 🟢 完成 | 計画フェーズ。§4.1 のリスク分岐・停止・異議申立て窓まで実装。**足場が無くても動く** |
-|  | `.github/workflows/auto-02-implement.yml` | 🟢 完成 | 実装フェーズ。テスト設計 → 実装 → PR。ゲートなし（設計 §6）。**足場が必要** |
-|  | `.github/workflows/auto-03-review-merge.yml` | 🟢 完成 | **最重量**（レビュー3並列＋修正ループ＋リトライ判定＋仕様書ガード＋ゲート3）。**足場が必要** |
-| **エージェント定義** | `agents/pm-define.md` | 🟢 完成 | タスク定義＋リスク区分の判定 |
+| **ワークフロー** | `.github/workflows/auto-01-plan.yml` | 🟢 完成 | 計画フェーズ。**2026-09-16: ゲート1・2と30分異議窓を撤去**（`approve-definition` / `approve-plan` / `low-risk-*` / `rejected` を削除し `notify-classification` を新設）。停止事由を `blocked_kind` でラベルへ振り分ける（設計 §4.1・§5）。**足場が無くても動く** |
+|  | `.github/workflows/auto-02-implement.yml` | 🟢 完成 | 実装フェーズ。テスト設計 → 実装 → PR。ゲートなし（設計 §6）。**2026-09-16: concurrency を Issue 単位へ**（`format('auto-implement-{0}', issue.number)`。リテラル `'auto-implement'` は pending 追い出しで Issue を無音のまま永久停止させる。設計 §8.3）。**足場が必要** |
+|  | `.github/workflows/auto-03-review-merge.yml` | 🟢 完成 | **最重量**（レビュー3並列＋修正ループ＋リトライ判定＋仕様書ガード＋ゲート3）。**2026-09-16: 自動通過を `RISK = low` → `RISK != high` へ拡大**。PII 繰り上げと `auto:needs-review` はゲート3を強制。**条件③（段取りの宣言範囲内）は停止事由から警告へ格下げ**（設計 §4.1）。**足場が必要** |
+|  | `.github/workflows/auto-05-sweep.yml` | 🟢 **完成（2026-09-16 新設）** | **ループで唯一のイベント非依存の入口**（cron `*/30` ＋ 手動）。`auto-01`〜`04` は全て `labeled` 駆動で、run が死ぬと Issue が永久静止していた（設計 §6.4） |
+| **エージェント定義** | `agents/pm-define.md` | 🟢 完成 | タスク定義＋リスク区分の判定。**2026-09-16: 新章「仮決定で進む」を追加**（低・中リスクの未確定論点はここが正。設計 §3.4） |
 |  | `agents/research.md` | 🟢 完成 | 調査。§3.2 の6軸と質問形式を転記済み |
-|  | `agents/pm-plan.md` | 🟢 完成 | 段取り＋`QUESTIONS.md` への起票 |
+|  | `agents/pm-plan.md` | 🟢 完成 | 段取り＋`QUESTIONS.md` への起票。仮決定の書式は**再掲せず `pm-define.md` を参照**する（二重管理の禁止） |
 |  | `agents/test-design.md` | 🟢 完成 | 仕様だけを見て受入テストを先に書く（設計 §11.6 の commit-first） |
 |  | `agents/coding.md` | 🟢 完成 | 実装。テストと `docs/spec/` は書き換えない |
 |  | `agents/review-quality.md` | 🟢 完成 | レビュー 5a。バグ・認可漏れ・CLAUDE.md §4 |
@@ -53,8 +54,9 @@
 |  | `agents/review-privacy.md` | 🟢 完成 | レビュー 5c。**最後の防波堤**。ダミーデータでは止めない（2026-09-05 オーナー決定） |
 |  | `agents/fix.md` | 🟢 完成 | 修正。振る舞いが変わるなら直さず止まる（設計 §7.1） |
 |  | `agents/pm-report.md` | 🟢 完成 | 報告。`LOOP_LOG.md` へ §10.9 の指標の**素材**を記録する |
-|  | `agents/risk-classify.md` | 🟢 完成 | **2026-09-07 新設**。PM の自己判定を独立 subagent の再判定へ分離（設計 §4.1・§11.6） |
+|  | `agents/risk-classify.md` | 🟢 完成 | **2026-09-07 新設**。PM の自己判定を独立 subagent の再判定へ分離（設計 §4.1・§11.6）。**2026-09-16 修正**: 出力例が `triggered` / `reasons` / `escalated_axis` / `uncertain` という**`RISK_SCHEMA` に存在しない4キー**を載せていた。`additionalProperties: false` のため**未知キーを返すと検証に落ち、`plan.mjs` が安全側に倒して `high` 扱いになる**（独立判定が常に `high` へ縮退する）。使えるのは `risk` / `reason` / `triggers` の3つだけ |
 | **スクリプト** | `scripts/post_agent_output.sh` | 🟢 完成 | エージェントの最終メッセージを Issue / PR へ転記する（下記「出力先に届かないエージェント」） |
+| | `automation/scripts/sweep.py` | 🟢 **完成（2026-09-16 新設）** | `auto-05-sweep.yml` の実体。**①回収**（停滞した `auto:planning`/`approved`/`implementing`/`review` をラベル付け直しで再起動。閾値 90/30/150/150分）**②再試行**（`auto:retry` を冷却60分後に復帰。戻り先は `<!--retry:from=X-->`）**③払い出し**（作業中が上限未満なら WBS 依存順で次の ready を `wbs-to-issue.yml` へ dispatch）**④枯渇レポート**。**`auto:blocked` には触れない**（オーナーの専権事項・設計 §0）。`--dry-run` で手元検証できる |
 | **Issue テンプレ** | `.github/ISSUE_TEMPLATE/auto-task.yml` | 🟢 完成 | 起票3条件を必須フィールド化 |
 | **起票導線** | `.github/workflows/wbs-to-issue.yml` | 🟢 完成 | **導線1（§10.1.5）**。WBS の作業パッケージ番号を渡すと Issue を生成。手動起動 |
 | | `automation/scripts/wbs_to_issue.py` | 🟢 完成 | 上記のパーサ。`python3 automation/scripts/wbs_to_issue.py 3-5b` で手元検証できる |
@@ -62,11 +64,11 @@
 | | 導線3（QUESTIONS.md からの逆流） | 🔴 未着手 | 設計 §10.1.5 |
 | **正本参照** | `automation/scripts/spec_ref.py` | 🟢 完成 | **エージェント化 段1**（設計 §12.1.6）。`v13 §5.2.3` / `§9 #51` をパス・行範囲・本文・`sha256` へ解決する。解決できない参照は終了コード3で落ちるため、**ゲート1へ到達する前**に止められる。`python3 automation/scripts/spec_ref.py "v13 §5.2.3"` で手元検証できる |
 | **定義の検査** | `automation/scripts/check_agents.py` | 🟢 完成 | **エージェント化 段2**。frontmatter の `tools:`（ツール層）と `settings/*.json`（パス層）の対応を検査し、「`docs/spec/` を書けない」「`coding`/`fix` は `tests/` を書けない」を強制する。違反があれば終了コード3。**2026-09-13 修正**: `Write(<glob>)` を有効な防御として数えていたのをやめた（下の警告を参照） |
-| **オーケストレータ** | `orchestrator/plan.mjs` | 🟢 **完成（2026-09-13）** | **段3**。PM定義 → リスク判定 → 調査 → PM段取り を1プロセスで回し、**構造化出力（JSON Schema）**で受け渡す。Issue コメントの grep 判定を全廃した |
-| | `orchestrator/implement.mjs` | 🟡 **完成・未配線** | **段7**。テスト設計 → テストの sha256 固定 → コーディング → `verify.sh` のループ。`auto-02` からはまだ呼ばれていない |
-| | `orchestrator/review.mjs` | 🟡 **完成・未配線** | **段7**。5a/5b/5c 並列 → 修正 → `verify.sh` → テストハッシュ照合 → `spec_ref` の sha 再検証。`auto-03` からはまだ呼ばれていない |
+| **オーケストレータ** | `orchestrator/plan.mjs` | 🟢 **完成（2026-09-13）** | **段3**。PM定義 → リスク判定 → 調査 → PM段取り を1プロセスで回し、**構造化出力（JSON Schema）**で受け渡す。Issue コメントの grep 判定を全廃した。**2026-09-16: 仮決定を Issue コメント（`<!--provisional-->`）と `state.provisional` に記録し、`blocked_kind` を出力する** |
+| | `orchestrator/implement.mjs` | 🟢 完成・配線済み | **段7**。テスト設計 → テストの sha256 固定 → コーディング → `verify.sh` のループ |
+| | `orchestrator/review.mjs` | 🟢 完成・配線済み | **段7**。5a/5b/5c 並列 → 修正 → `verify.sh` → テストハッシュ照合 → `spec_ref` の sha 再検証 |
 | | `orchestrator/lib/runAgent.mjs` | 🟢 **完成（2026-09-13）** | **SDK に触れるのはこのファイルだけ。** Claude Agent SDK（`@anthropic-ai/claude-agent-sdk`）を呼ぶ。PreToolUse フックで `Write` のパス拒否を補完する（下の警告） |
-| | `orchestrator/lib/{agents,schema,state,gh}.mjs` | 🟢 完成 | 定義の読み込み／構造化出力の検証／state（試行3分類＋エラー指紋）／gh ラッパ |
+| | `orchestrator/lib/{agents,schema,state,gh}.mjs` | 🟢 完成 | 定義の読み込み／構造化出力の検証／state（試行3分類＋エラー指紋）／gh ラッパ。**2026-09-16: `schema.mjs` に `provisionalDecision`（`reversibility` 必須・設計 §3.4）、`state.mjs` に `classifyBlock()`（`spec`/`infra`/`credit` の分類・設計 §5）を追加** |
 | **速い検証** | `automation/scripts/verify.sh` | 🟢 **完成（2026-09-13）** | **段7**。型・lint・単体を数十秒で回し JSON で返す。**CI の代替ではない**（設計 §11.6：マージの根拠にできるのは CI の合否と人間の承認だけ） |
 
 > [!IMPORTANT] 導線1 は `auto` ラベルを自動では付けない
@@ -158,14 +160,23 @@
 | 9 | `auto-02-implement.yml` / `auto-03-review-merge.yml` | — | ✅ 完了（**足場のマージ待ち**） |
 | 10 | 実装ループの試運転（設計 §9 フェーズ3 の 3-2 / 3-4） | 1時間 | ⬜ 足場が main に入ってから |
 
-> [!WARNING] 試運転の前に Environment を1つ追加する
-> 低リスクの**30分の異議申立て窓**（設計 §4.1）は、`sleep` ではなく
-> Environment の **Wait timer** で実現している（待機中に Actions の実行時間を消費しないため）。
+> [!WARNING] ~~試運転の前に Environment を1つ追加する~~ → **ラベルを3つ追加する（2026-09-16）**
+> ~~低リスクの**30分の異議申立て窓**（設計 §4.1）を Environment の **Wait timer**
+> （`gate-low-risk-objection`／Wait timer = 30分）で実現しているため、これが無いと
+> 低リスクの Issue が `low-risk-window` で失敗し自動通過せずに止まる。~~
+> → **30分の異議窓ごと撤去した。この Environment はもう参照されない**（設計 §4.2）。
+> **必須の Environment は `gate-merge` だけ**である。
 >
-> `Settings → Environments` に **`gate-low-risk-objection`** を作り、
-> **Wait timer = 30 分／Required reviewers なし**を設定する。
-> これが無いと低リスクの Issue が `low-risk-window` で失敗し、
-> **自動通過せずに止まる**（安全側には倒れるが、試運転 3-1 が再現しない）。
+> 代わりに `Settings → Labels` へ**3つのラベルを作る**。無いとワークフローの
+> `gh issue edit --add-label` が失敗し、**停止の行き先が分からなくなる**。
+>
+> | ラベル | 意味 | 誰が解くか |
+> | --- | --- | --- |
+> | `auto:retry` | 基盤エラー・クレジット切れ | スイーパー（冷却60分） |
+> | `auto:waiting-dep` | 上流の作業パッケージ待ち | 上流の完了 |
+> | `auto:needs-review` | オーナーの異議。区分によらずゲート3を強制 | オーナー |
+>
+> 意味と使い分けの根拠は**設計 §5 が正本**。ここに複製しない。
 
 **ここまでで「仕様の曖昧さが選択肢に変換されて返ってくる」状態になる。**
 

@@ -3,7 +3,7 @@
 # トリガ : Issue に `auto` ラベルが付いた時
 # 担当   : automation/orchestrator/plan.mjs
 #          （PM定義 → リスク判定 → 調査 → PM段取り を1プロセスで回す）
-# ゲート : リスク区分により 0〜2 回停止する（設計 §4.1）
+# ゲート : 計画フェーズでは停止しない（2026-09-16 改訂）。承認はマージ前の1回のみ
 # 設計   : docs/自律開発ループ設計.md §12.1.2 ORC1 ／ §12.1.6 段4
 #
 # ── 2026-09-13 改訂（段4）─────────────────────────────────────
@@ -64,6 +64,7 @@ jobs:
       risk: ${{ steps.orc.outputs.risk }}
       blocked: ${{ steps.orc.outputs.blocked }}
       blocked_reason: ${{ steps.orc.outputs.blocked_reason }}
+      blocked_kind: ${{ steps.orc.outputs.blocked_kind }}
     steps:
       - uses: actions/checkout@v4
 
@@ -146,28 +147,52 @@ jobs:
             exit 1
           fi
 
-  # ── 停止: 仕様が未確定 ────────────────────────────────────
+  # ── 停止: 事由で行き先を分ける（2026-09-16 改訂）─────────────
+  #
+  # 旧版は停止をすべて `auto:blocked` へ潰していた。そのため
+  #   ・仕様が未確定（オーナー判断が要る）
+  #   ・クレジット切れ・SDK の一時障害（時間をおけば直る）
+  # が同じ見た目になり、**人を呼ぶ必要がないものまで人を待って止まった**。
+  # 実例: Issue #31 は「You've hit your session limit」で停止したが、
+  # 仕様の質問と同じラベルが付いたため、誰も気づかないまま滞留した。
   blocked:
     needs: plan
     if: always() && needs.plan.outputs.blocked == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: auto:blocked へ付け替えて通知
+      - name: 停止事由に応じてラベルを付け替え、通知する
         env:
           GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
           ISSUE: ${{ github.event.issue.number }}
           REPO: ${{ github.repository }}
+          KIND: ${{ needs.plan.outputs.blocked_kind }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
+          # spec         → auto:blocked  オーナー判断が要る。枯渇レポートに載る
+          # infra/credit → auto:retry    スイーパーが時間をおいて自動再開する
+          KIND="${KIND:-spec}"
+          if [ "$KIND" = "spec" ]; then
+            NEW_LABEL="auto:blocked"
+          else
+            NEW_LABEL="auto:retry"
+          fi
           gh issue edit "$ISSUE" --repo "$REPO" \
-            --remove-label "auto:planning" --add-label "auto:blocked"
-          # ⚠️ 2026-09-13 修正。旧版は「選択肢から1つ返信してください」とだけ書いていたが、
-          # **Issue コメントはどのワークフローもトリガしない**（issue_comment を拾うのは
-          # claude-review.yml だけで、その条件は PR 限定）。指示どおり操作しても動かない。
-          # 再開に必要な操作を明記する（設計 §10.5）。
-          cat > notice.md <<'EOF'
-          @OWNER_PLACEHOLDER 仕様が未確定のため計画フェーズを停止しました。
+            --remove-label "auto:planning" --add-label "$NEW_LABEL"
+
+          if [ "$NEW_LABEL" = "auto:retry" ]; then
+            cat > notice.md <<'EOF'
+          ## ⏳ 一時的な事由で停止しました
+
+          エージェントの判断でも仕様の問題でもありません。**オーナーの操作は不要です。**
+          スイーパー（`auto-05-sweep.yml`）が時間をおいて自動で再開します。
+
+          <!--retry:from=auto-->
+          EOF
+            printf '\n事由: `%s`\n実行: %s\n' "$KIND" "$RUN_URL" >> notice.md
+          else
+            cat > notice.md <<'EOF'
+          @OWNER_PLACEHOLDER 仕様が未確定のため停止しました。**オーナーの判断が要ります。**
 
           **再開の手順（この2つを両方行ってください）**
 
@@ -175,135 +200,79 @@ jobs:
           2. そのうえで **`auto:blocked` を外し、`auto` ラベルを付け直す**
 
           > ⚠️ **コメントだけでは再開しません。** Issue へのコメントはワークフローを起動しません。
-          > 再開の引き金は `auto` ラベルが「付いた」ことだけです。
-          > `auto` が既に付いている場合は、一度外してから付け直してください
-          > （同じラベルを付け直してもイベントは発生しません）。
+          > 再開の引き金はラベルが「付いた」ことだけです。既に付いている場合は、
+          > 一度外してから付け直してください。
+          >
+          > この項目は、着手可能な仕事が尽きた時点で**枯渇レポート**にまとめて報告されます。
 
           実行: RUN_URL_PLACEHOLDER
           EOF
-          sed -i "s|@OWNER_PLACEHOLDER|@${OWNER}|; s|RUN_URL_PLACEHOLDER|${RUN_URL}|" notice.md
+            sed -i "s|@OWNER_PLACEHOLDER|@${OWNER}|; s|RUN_URL_PLACEHOLDER|${RUN_URL}|" notice.md
+          fi
           gh issue comment "$ISSUE" --repo "$REPO" --body-file notice.md
-
-  # ── ゲート1: タスク定義の承認（高リスクのみ・設計 §4.1）────────
-  approve-definition:
+  # ── リスク区分の通知と、異議申立ての窓（設計 §4.1 改訂 2026-09-16）──
+  #
+  # 旧版はここに ゲート1（gate-task-definition／高リスク）と
+  # ゲート2（gate-task-plan／高・中）の2つの承認ジョブを置き、
+  # さらに低リスクには 30分の Wait timer（gate-low-risk-objection）を挟んでいた。
+  #
+  # ── なぜ撤去したか（2026-09-16 オーナー決定）────────────────
+  # 計画フェーズの承認待ちは、オーナーが不在の間ループ全体を止める。
+  # 実測で 9件中8件が高リスク判定であり（§4.1 の判定条件が
+  # 認可・金額・個人情報・DBマイグレーションを列挙する一方、Phase 1 は
+  # まさに認証基盤と DB 基盤を作る段階であるため）、事実上すべての
+  # タスクが2回の承認待ちに入っていた。
+  #
+  # 承認は **マージ前の1回（ゲート3）だけ** に集約する。
+  # 根拠: 設計 §0 が「ループは docs/spec/ に既に確定している仕様を
+  # 実装するだけ」と定めている以上、仕様が確定しているタスクの
+  # 計画・実装は判断ではなく作業であり、誤りは CI・レビュー3種・
+  # RLS テストで検出できる。判断が要るのは「未確定の論点が残っている」
+  # 場合であり、それは blocked 側（§3.2）で扱う。
+  #
+  # ── 異議申立ての窓は残す（形を変えて）──────────────────────
+  # §4.1 の「異議申立ての窓を持たない自動通過は認めない」は維持する。
+  # ただし **時間で待たない**。リスク区分を通知し、オーナーはマージ前まで
+  # いつでも `auto:needs-review` を付けて強制的にゲート3へ送れる。
+  # 30分の壁時計を消費せずに、異議の機会は実質的に広がる。
+  notify-classification:
     needs: plan
-    if: needs.plan.outputs.blocked == 'false' && needs.plan.outputs.risk == 'high'
-    runs-on: ubuntu-latest
-    environment: gate-task-definition
-    steps:
-      - run: echo "タスク定義が承認されました（高リスク）"
-
-  # ── ゲート2: 段取りの承認（高・中）──────────────────────────
-  approve-plan:
-    needs: [plan, approve-definition]
-    if: >-
-      always()
-      && needs.plan.outputs.blocked == 'false'
-      && needs.plan.outputs.risk != 'low'
-      && !contains(fromJSON('["failure","cancelled"]'), needs.approve-definition.result)
-    runs-on: ubuntu-latest
-    environment: gate-task-plan
-    steps:
-      - run: echo "段取りが承認されました（リスク区分 ${{ needs.plan.outputs.risk }}）"
-
-  # ── 低リスク: 異議申立ての通知（設計 §4.1）───────────────────
-  # 「異議申立ての窓を持たない自動通過は認めない」
-  low-risk-notice:
-    needs: plan
-    if: needs.plan.outputs.blocked == 'false' && needs.plan.outputs.risk == 'low'
+    if: needs.plan.outputs.blocked == 'false'
     runs-on: ubuntu-latest
     steps:
-      - name: auto:low-risk を付けて判定理由つきで通知
+      - name: リスク区分と異議申立ての方法を通知
         env:
           GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
           ISSUE: ${{ github.event.issue.number }}
           REPO: ${{ github.repository }}
+          RISK: ${{ needs.plan.outputs.risk }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          gh issue edit "$ISSUE" --repo "$REPO" --add-label "auto:low-risk"
-          printf '%s\n\n%s\n\n%s\n' \
-            "@${OWNER} **低リスクと判定したため、承認なしで実装へ進みます。** 判定理由は上のタスク定義コメントを参照してください。" \
-            '異議がある場合は **30分以内に `auto:low-risk` ラベルを外してください。** 外すと中リスクへ降格し、段取りの承認（ゲート2）が必要になります。' \
-            "実行: ${RUN_URL}" > notice.md
-          gh issue comment "$ISSUE" --repo "$REPO" --body-file notice.md
-
-  # ── 低リスク: 30分の異議申立て窓 ─────────────────────────────
-  # Environment `gate-low-risk-objection` に Wait timer 30分・レビュアーなしを設定する。
-  # sleep で待たないのは、待機中に実行時間を消費しないため。
-  low-risk-window:
-    needs: low-risk-notice
-    runs-on: ubuntu-latest
-    environment: gate-low-risk-objection
-    steps:
-      - run: echo "異議申立ての窓が閉じました"
-
-  low-risk-verdict:
-    needs: low-risk-window
-    if: always() && needs.low-risk-window.result == 'success'
-    runs-on: ubuntu-latest
-    outputs:
-      demoted: ${{ steps.check.outputs.demoted }}
-    steps:
-      - name: auto:low-risk が残っているか確認
-        id: check
-        env:
-          GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
-          ISSUE: ${{ github.event.issue.number }}
-          REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          LABELS="$(gh issue view "$ISSUE" --repo "$REPO" --json labels --jq '.labels[].name')"
-          if printf '%s' "$LABELS" | grep -qx 'auto:low-risk'; then
-            echo "demoted=false" >> "$GITHUB_OUTPUT"
+          if [ "$RISK" = "high" ]; then
+            GATE='**マージ前（ゲート3）で承認を求めます。** 計画・実装・レビューはここから自動で進みます。'
           else
-            echo "::notice::auto:low-risk が外されました。中リスクへ降格しゲート2へ進みます"
-            echo "demoted=true" >> "$GITHUB_OUTPUT"
+            GATE='**承認なしでマージまで進みます。**（リスク区分が高以外のため・設計 §4.1 改訂）'
           fi
-
-  approve-plan-after-objection:
-    needs: low-risk-verdict
-    if: always() && needs.low-risk-verdict.outputs.demoted == 'true'
-    runs-on: ubuntu-latest
-    environment: gate-task-plan
-    steps:
-      - run: echo "段取りが承認されました（異議申立てにより中リスクへ降格）"
-
-  # ── 却下 ────────────────────────────────────────────────────
-  rejected:
-    needs: [approve-definition, approve-plan, approve-plan-after-objection]
-    if: >-
-      always()
-      && (contains(fromJSON('["failure","cancelled"]'), needs.approve-definition.result)
-       || contains(fromJSON('["failure","cancelled"]'), needs.approve-plan.result)
-       || contains(fromJSON('["failure","cancelled"]'), needs.approve-plan-after-objection.result))
-    runs-on: ubuntu-latest
-    steps:
-      - name: auto:rejected へ付け替え
-        env:
-          GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
-          ISSUE: ${{ github.event.issue.number }}
-          REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          gh issue edit "$ISSUE" --repo "$REPO" \
-            --remove-label "auto:planning" --add-label "auto:rejected" || true
-          printf '%s\n' \
-            'ゲートで却下されました。**却下理由を Issue にコメントしてください**（Environment のコメントはエージェントから読めません）。再開は `auto:rejected` を外し `auto` ラベルを付け直してください。' > notice.md
+          {
+            printf '計画フェーズが完了しました。リスク区分: **%s**\n\n' "$RISK"
+            printf '%s\n\n' "$GATE"
+            printf '%s\n' '> [!note] 異議がある場合'
+            printf '%s\n' '> `auto:needs-review` ラベルを付けてください。**マージ前であればいつでも有効**で、'
+            printf '%s\n' '> 区分にかかわらずゲート3（`gate-merge`）での承認が必須になります。'
+            printf '%s\n' '> 計画を丸ごと止めたい場合は `auto:blocked` を付けてください。'
+            printf '\n実行: %s\n' "$RUN_URL"
+          } > notice.md
           gh issue comment "$ISSUE" --repo "$REPO" --body-file notice.md
 
   # ── 次フェーズへ引き渡し ────────────────────────────────────
   handoff:
-    needs: [plan, approve-plan, low-risk-verdict, approve-plan-after-objection]
+    needs: [plan, notify-classification]
     if: >-
       always()
       && needs.plan.result == 'success'
       && needs.plan.outputs.blocked == 'false'
-      && !contains(fromJSON('["failure","cancelled"]'), needs.approve-plan.result)
-      && !contains(fromJSON('["failure","cancelled"]'), needs.low-risk-verdict.result)
-      && !contains(fromJSON('["failure","cancelled"]'), needs.approve-plan-after-objection.result)
-      && (needs.approve-plan.result == 'success'
-       || needs.low-risk-verdict.result == 'success')
+      && needs.notify-classification.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: ラベルを auto:approved に付け替え
