@@ -15,6 +15,22 @@
 
 ## バックログ
 
+## [2026-09-19 09:00] Cloud Storage for Firebase設定・署名付きURL基盤（Issue #49 ／ WBS 1-4） — BLOCKED
+
+**リスク区分: 高**（ゲート1・2・3／承認3回）。認可・ロール判定（署名付きURLを発行する Edge Function の
+ロール判定と `media_assets` の RLS）、外部連携（GCS・Cloud Functions）、個人情報の入出力
+（Exif 位置情報＝PII-B）、DBマイグレーション（`media_assets` DDL）、セキュリティ高リスク
+（署名付きURL の TTL・`contentType` 固定・サイズ上限強制）の5つに該当する。
+
+根拠: 正本 v13 §5.11.2（L1894-1963）・§9 #9（L2470）。実物と照合済み。
+
+**停止理由**（起票3条件のうち2・3が欠けている）:
+- 条件3: 本 Issue の「完了条件」「スコープ外」が雛形のまま未記入
+- 条件2: `QUESTIONS.md`「[2026-09-15] `media_assets` テーブル（DDL ＋ RLS）を作る作業パッケージが
+  WBS 上に存在しない」が未回答
+- あわせて同じ WBS `1-4` の Issue #18（`auto:blocked`）が既に開いており、どちらを正本 Issue とするかが未確定
+  → `QUESTIONS.md`「[2026-09-19] WBS `1-4` の Issue が2本ある（#18 ＝ `auto:blocked` ／ #49 ＝ 新規）」へ起票
+
 ## [2026-09-15 12:00] 部屋台帳・部屋割当（rooms / room_assignments）（Issue #31 ／ WBS 3-1） — TODO
 
 **リスク区分: 高**（ゲート1・2・3／承認3回）。認可・ロール判定（`rooms`・`room_assignments` の RLS
