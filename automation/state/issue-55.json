@@ -3,7 +3,7 @@
   "issue": 55,
   "pr": null,
   "branch": null,
-  "phase": "plan",
+  "phase": "implement",
   "risk": "high",
   "attempts": {
     "infra": 0,
@@ -21,11 +21,31 @@
     "review": 0
   },
   "tokens": {
-    "input": 186,
-    "output": 114066,
-    "costUsd": 9.1482765
+    "input": 230,
+    "output": 154212,
+    "costUsd": 11.802766499999999
   },
-  "testHashes": {},
+  "testHashes": {
+    "e2e/smoke.spec.ts": "ed6ce8db5e0004a2",
+    "tests/acceptance.test.ts": "ba0921981b4630b7",
+    "tests/auth-guard.test.ts": "36f9487ef96e224e",
+    "tests/db-test-infra.test.ts": "b4db59cc79914376",
+    "tests/db/current-operator-id.test.ts": "82e8173ec61178d7",
+    "tests/db/helpers/fixtures.ts": "82dd6716a18e4037",
+    "tests/db/helpers/psql.ts": "92056af69410690c",
+    "tests/db/login-binding.test.ts": "951155ad26536214",
+    "tests/db/members-guard-trigger.test.ts": "c0675285d9d0be31",
+    "tests/db/members-schema.test.ts": "1dec944f3943d4c7",
+    "tests/db/rls-and-helper-functions.test.ts": "9ac749d11b2c42ad",
+    "tests/db/rls-policies.test.ts": "3748be28b027dcc3",
+    "tests/db/rooms.test.ts": "cd23e006ce8338de",
+    "tests/fixtures-are-synthetic.test.ts": "3fd4731b934607c5",
+    "tests/migrations-baseline.test.ts": "cd1b6e29a043b253",
+    "tests/role-navigation.test.ts": "cf16b87575989f3a",
+    "tests/serving-status.test.ts": "4b3d762719a30c34",
+    "tests/supabase-env.test.ts": "2854c57b5940bac5",
+    "tests/uii.test.ts": "b5791629644723f4"
+  },
   "specRefs": [
     {
       "ref": "v13 §9 #45",
@@ -66,53 +86,53 @@
       "criterion": "ANTHROPIC_API_KEY / GEMINI_API_KEY をサーバサイドからのみ読み出せ、NEXT_PUBLIC_ 接頭辞を持たない",
       "origin": "derived",
       "basis": "CLAUDE.md §3.2",
-      "test": "AI クライアント層のソースが NEXT_PUBLIC_ 接頭辞の環境変数を1つも参照しない／Claude クライアントが dangerouslyAllowBrowser を設定しない"
+      "test": "tests/ai-env.test.ts:`AI クライアント層が NEXT_PUBLIC_ 接頭辞の環境変数を1つも読まない` ／ tests/ai-client.test.ts:`Claude クライアントが ANTHROPIC_API_KEY の値を明示的に SDK へ渡す`・`Gemini クライアントが GEMINI_API_KEY の値を明示的に SDK へ渡す`・`AI クライアント層が dangerouslyAllowBrowser を設定しない`"
     },
     {
       "criterion": "キー未設定時に、import 時ではなく利用時点で変数名を含むエラーになる",
       "origin": "derived",
       "basis": "CLAUDE.md §3.2・§4.3（src/lib/supabase/env.ts と同じ作法）",
-      "test": "ANTHROPIC_API_KEY / GEMINI_API_KEY が未設定なら呼び出し時点で変数名を含む例外を投げる／空文字も未設定として扱う／import しただけでは例外を投げない"
+      "test": "tests/ai-env.test.ts:`ANTHROPIC_API_KEY が設定されていればその値を返す`・`ANTHROPIC_API_KEY が未設定なら変数名を含む例外を投げる`・`ANTHROPIC_API_KEY が空文字なら未設定として扱い例外を投げる`・`GEMINI_API_KEY が設定されていればその値を返す`・`GEMINI_API_KEY が未設定なら変数名を含む例外を投げる`・`GEMINI_API_KEY が空文字なら未設定として扱い例外を投げる`・`両キーが未設定でも env モジュールの読み込み自体は例外を投げない`"
     },
     {
       "criterion": "テキストプロンプトを渡して Claude から応答を得る呼び出しが1モジュールに集約され、呼び出し側が SDK へ直接依存しない（＝差し替え可能である）",
       "origin": "derived",
       "basis": "v13 §9 #45",
-      "test": "AI クライアント層以外のモジュールが AI の SDK パッケージを import していない／共通インタフェースにモック実装を差し込むと呼び出し側のコードを変えずに応答を差し替えられる"
+      "test": "tests/ai-client.test.ts:`AI クライアント層の外側に AI の SDK を import しているモジュールが1つも無い`・`Anthropic SDK を import するファイルが AI クライアント層に1つだけである`・`Gemini SDK を import するファイルが AI クライアント層に1つだけである`・`共通インタフェース types.ts が AI の SDK を1つも import しない`・`TextAiClient のスタブを渡せば呼び出し側のコードを変えずに応答を差し替えられる`"
     },
     {
       "criterion": "Gemini クライアントがテキスト入力のみを受け付け、音声ファイル・GCS URI を渡す口を持たない",
       "origin": "derived",
       "basis": "v13 §9 #63",
-      "test": "Gemini クライアントに音声ファイルを渡すコードが型エラーになる／Gemini クライアントのソースが GCS URI・音声 MIME タイプを1つも参照しない"
+      "test": "tests/ai-client.test.ts:`Gemini クライアントの入力型が音声・GCS URI を渡す口を持たない`・`Gemini クライアントのソースが GCS URI・音声入力の口を1つも参照しない`"
     },
     {
       "criterion": "1回の呼び出しで構造化された複数出力（議事録サマリー＋クエスト候補JSON 等）を受け取れる形になっている",
       "origin": "derived",
       "basis": "v13 §5.1 ③・§5.7.4 ②",
-      "test": "議事録サマリーとクエスト候補を含む構造化オブジェクトを1回の応答から取り出せる／構造化出力を1つ得るために発生する SDK 呼び出しが1回だけである"
+      "test": "tests/ai-client.test.ts:`1回の呼び出しで議事録サマリー・クエスト候補・ナレッジ候補を含む構造化出力を返す`（Claude／Gemini の2件）・`構造化出力1件を得るために SDK を呼ぶ回数が1回だけである`"
     },
     {
       "criterion": "エラーメッセージ・ログに API キーが出力されない",
       "origin": "derived",
       "basis": "CLAUDE.md §3.2",
-      "test": "キーが不正で SDK が失敗したとき送出されるエラーメッセージに API キーの値が含まれない／AI クライアント層のソースが logLevel: 'debug' / ANTHROPIC_LOG を設定しない"
+      "test": "tests/ai-client.test.ts:`SDK が送出したエラーに API キーが載っていても、再送出されるエラーには含まれない`・`AI クライアント層がデバッグログ出力を有効にしない`"
     },
     {
       "criterion": "単体テストが実 API キー無しで通る（外部呼び出しはモック）",
       "origin": "derived",
       "basis": "CLAUDE.md §4.4・§6.1",
-      "test": "受入テスト15件すべてが ANTHROPIC_API_KEY・GEMINI_API_KEY 未設定の環境で通る"
+      "test": "tests/ai-client.test.ts:`このテストが両方の AI SDK をモックしており実 API を呼ばない`・`環境に実キーがあってもテストはダミーへ上書きしてから実行される`"
     },
     {
       "criterion": ".env.example の GEMINI_API_KEY の説明が音声・マルチモーダル処理を前提としない",
       "origin": "derived",
       "basis": "v13 §9 #63（CONSOLIDATED_DECISIONS.md §1 が反映先として明記・未反映）",
-      "test": ".env.example の GEMINI_API_KEY の説明に「音声」「マルチモーダル」の語が含まれない"
+      "test": "tests/ai-env.test.ts:`GEMINI_API_KEY の説明に「音声」「マルチモーダル」が含まれない`"
     }
   ],
   "acceptanceDerived": true,
-  "updatedAt": "2026-09-19T01:44:11.880Z",
+  "updatedAt": "2026-09-19T01:52:06.677Z",
   "provisional": [
     {
       "question": "Issue 本文の「根拠となる仕様: v13 §16」が spec_ref.py で解決不能である以上、blocked=true として止めるべきか。",
