@@ -61,6 +61,33 @@
 
 ---
 
+## ⚡ [2026-09-19] Claude のテキスト呼び出しに `@anthropic-ai/sdk` と Claude Agent SDK のどちらを使うか（v13 §9 #45）
+- ステータス: 未回答（仮決定で進行中・ブロッカーではない）
+- 優先度: 低〜中（誤ると `1-5` のクライアント層1モジュールと依存1件を差し替えることになる。
+  呼び出し側は共通インタフェース越しのため波及しない）
+- 背景: Issue #55（WBS `1-5`）の段取り作成時に判明。2026-09-19 のオーナー決定 A は
+  「Claude（**Agent SDK**）／Gemini のテキスト用クライアント基盤」という表記だが、調査で
+  **Anthropic 公式が両者を別レイヤーと位置づけている**ことが確認された
+  （Messages API のクライアント＝`@anthropic-ai/sdk` ／ Claude Agent SDK ＝エージェントループ・
+  ツール実行・ランタイムを提供する上位レイヤー。出典: https://platform.claude.com/docs/en/cli-sdks-libraries/overview ）。
+  `1-5` の成果物は「テキストプロンプトを渡して構造化された応答を1回で得る」だけで、
+  エージェントループもツール実行も要らない。
+  現状 `@anthropic-ai/claude-agent-sdk` は `devDependencies` にあり、利用箇所は
+  `automation/orchestrator/lib/runAgent.mjs`（自律ループ専用）1ファイルのみ。
+- 選択肢:
+  - A. `@anthropic-ai/sdk`（Messages API）を `dependencies` に追加してアプリ本体のテキスト呼び出しに使う。
+    Agent SDK は自律ループ専用の `devDependencies` のまま据え置く
+  - B. `@anthropic-ai/claude-agent-sdk` を `dependencies` へ移し、アプリ本体もこれを使う
+    （オーナー決定 A の字面どおり）
+- 仮決定: **A を採用して進行する。** 理由: §9 #45 が「AI呼び出しは抽象化して差し替え可能にしておけばよい」と
+  明記しており、`1-5` の完了条件も抽象化（呼び出し側が SDK へ直接依存しないこと）で担保される。
+  `4-2` 以降でエージェントループが必要になった時点で B へ寄せても、差し替わるのはクライアント層1モジュールだけで済む。
+- 可逆性: 高。共通インタフェース（`src/lib/ai/types.ts`）の実装を1つ差し替え、`package.json` の依存を1件入れ替えるだけ。
+  呼び出し側のコードは変更不要。
+- 関連ファイル: v13 §9 #45、`package.json`、`automation/README.md` L70、Issue #55
+
+---
+
 ## [2026-09-19] WBS `10-1` 一括インポートパイプラインの完了条件が未記入（Issue #57）（v13 §5.8.2）
 - ステータス: 未回答
 - 優先度: 高（Issue #57 のタスク定義を止めている。個人情報を一括書き込みする導線のため、
@@ -595,9 +622,21 @@
   与えており、`GRANT INSERT` の記述がどこにもない。Supabase 公式ドキュメントは「grants と policies の二段で
   チェックされ、**grant が無ければポリシー評価の前に `42501` で落ちる**」と明記しているため、
   INSERT を許す実装には `GRANT INSERT` が必要になる（https://supabase.com/docs/guides/database/postgres/row-level-security ）。
+- 追記（2026-09-19・Issue #55 の段取り作成時に発見 ／ **上の3件に入っていない新規の2件**）:
+  ④`docs/spec/detailed-design/外部連携設計.md` L155-160「## 4. 朝会音声処理（Gemini直接連携）」が
+  「統一メディア基盤へアップロード → **GCS URI を Gemini へ直接渡す**」のまま。
+  ⑤`docs/spec/basic-design/infra/システムアーキテクチャ.md` L28「**朝会音声のみ Gemini API**」および
+  L100・L827・L949 の図中ノード「Gemini API 朝会音声」。
+  いずれも §9 #63（アプリは音声を扱わない／**ファイルアップロードは行わない**）と食い違う。
+  **正本優先で進行する**（Issue #55 の `1-5` は音声・GCS URI を受け取る口を持たないクライアント層を作る）。
+  訂正の要否は上と同じくオーナー判断待ち。あわせて `.env.example` の `GEMINI_API_KEY` の説明
+  （「朝会音声のマルチモーダル処理用」）も未追随だが、こちらは `docs/spec/` 配下ではないため
+  Issue #55 の変更対象に含めた。
 - 関連ファイル: v13 §9 #63・§6、`docs/spec/detailed-design/API設計.md` §2-3、
   `docs/spec/detailed-design/画面設計.md` C3、`docs/spec/basic-design/frontend/HTMLモック_v13.md`、
-  `docs/design/prototype_v15.html`、`docs/spec/detailed-design/DB物理設計.md` §6-6、Issue #23
+  `docs/design/prototype_v15.html`、`docs/spec/detailed-design/DB物理設計.md` §6-6、
+  `docs/spec/detailed-design/外部連携設計.md` L155-160、
+  `docs/spec/basic-design/infra/システムアーキテクチャ.md` L28・L100・L827・L949、Issue #23、Issue #55
 
 ---
 
