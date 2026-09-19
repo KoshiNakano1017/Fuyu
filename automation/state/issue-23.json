@@ -3,7 +3,7 @@
   "issue": 23,
   "pr": null,
   "branch": null,
-  "phase": "plan",
+  "phase": "implement",
   "risk": "high",
   "attempts": {
     "infra": 1,
@@ -21,11 +21,40 @@
     "review": 0
   },
   "tokens": {
-    "input": 344,
-    "output": 196062,
-    "costUsd": 17.7516095
+    "input": 400,
+    "output": 232673,
+    "costUsd": 20.7084265
   },
-  "testHashes": {},
+  "testHashes": {
+    "e2e/smoke.spec.ts": "ed6ce8db5e0004a2",
+    "tests/acceptance.test.ts": "ba0921981b4630b7",
+    "tests/ai-client.test.ts": "26b0511e481725da",
+    "tests/ai-env.test.ts": "af2ee601c87cfcce",
+    "tests/auth-guard.test.ts": "36f9487ef96e224e",
+    "tests/db-test-infra.test.ts": "b4db59cc79914376",
+    "tests/db/current-operator-id.test.ts": "82e8173ec61178d7",
+    "tests/db/helpers/fixtures.ts": "beddc2651149fe9b",
+    "tests/db/helpers/psql.ts": "92056af69410690c",
+    "tests/db/lodging-register.test.ts": "b8d167670f70b0f5",
+    "tests/db/login-binding.test.ts": "951155ad26536214",
+    "tests/db/member-display-name.test.ts": "8101ecf136244b02",
+    "tests/db/members-guard-trigger.test.ts": "c0675285d9d0be31",
+    "tests/db/members-schema.test.ts": "1dec944f3943d4c7",
+    "tests/db/quests-guest-visibility.test.ts": "fccbf9370bd04426",
+    "tests/db/rls-and-helper-functions.test.ts": "9ac749d11b2c42ad",
+    "tests/db/rls-policies.test.ts": "3748be28b027dcc3",
+    "tests/db/rooms.test.ts": "cd23e006ce8338de",
+    "tests/fixtures-are-synthetic.test.ts": "9be179b5f7481ed6",
+    "tests/fixtures/quest-board.ts": "b96fbdb382ad9574",
+    "tests/helpers/ai-sources.ts": "b976105b854a38e2",
+    "tests/migrations-baseline.test.ts": "cd1b6e29a043b253",
+    "tests/quest-application-gate.test.ts": "daf570f863ab6141",
+    "tests/quest-board.test.ts": "7bf9d2d72355d98c",
+    "tests/role-navigation.test.ts": "cf16b87575989f3a",
+    "tests/serving-status.test.ts": "4b3d762719a30c34",
+    "tests/supabase-env.test.ts": "2854c57b5940bac5",
+    "tests/uii.test.ts": "b5791629644723f4"
+  },
   "specRefs": [
     {
       "ref": "v13 §9 #63",
@@ -71,42 +100,42 @@
     {
       "criterion": "`admin` / `core_member` が、朝会の文字起こし済みテキストを画面にコピー＆ペーストで投入できる",
       "origin": "issue",
-      "basis": "v13 §9 #63（L2537）・v13 §6（L2106 朝会＝管理者〇・コアメンバー〇）",
-      "test": "#1 admin は朝会の議事録を INSERT できる／#2 core_member は朝会の議事録を INSERT できる／#3 staff からの投入で議事録が1件作られる"
+      "basis": "v13 §9 #63（L2537）・v13 §6（L2106）",
+      "test": "tests/db/morning-meetings-rls.test.ts:`admin は朝会の文字起こしテキストを投入できる` / `core_member は朝会の文字起こしテキストを投入できる`、tests/morning-meeting-intake.test.ts:`投入先がテキスト入力欄（textarea）である`"
     },
     {
       "criterion": "投入されたテキストが、貼り付け時点で議事録として保存される",
       "origin": "issue",
-      "basis": "v13 §9 #63（L2537）「貼り付け時点で議事録として格納する」",
-      "test": "#4 貼り付けたテキストが一字も変えずに transcript_text へ保存される／#5 保存直後の summary_text は空のままである"
+      "basis": "v13 §9 #63（L2537）",
+      "test": "tests/db/morning-meetings-rls.test.ts:`投入した本文が、その場で1件の議事録として存在する` / `サマリー未生成のままでも議事録として保存される`"
     },
     {
       "criterion": "保存された議事録から、朝会ID・実施日・全文文字起こしテキスト・作成者ID が読み出せる",
       "origin": "issue",
       "basis": "v13 §7「★ 朝会・議事録データ」（L2166-2168）",
-      "test": "#6 朝会ID が採番されている／#7 実施日が投入値と一致する／#8 作成者IDが投入した staff の member_id と一致する（全文テキストは #4）"
+      "test": "tests/db/morning-meetings-rls.test.ts:`朝会IDが読み出せる` / `実施日が読み出せる` / `全文文字起こしテキストが、投入した本文のまま読み出せる` / `作成者IDが読み出せる`"
     },
     {
-      "criterion": "`member` / `guest` / 未認証が、サーバサイドで拒否される（検証は DB レベルの RLS テスト。UI 到達制御は `2-3` の担当）",
+      "criterion": "`member` / `guest` / 未認証が、サーバサイドで拒否される（検証は DB レベルの RLS テスト）",
       "origin": "issue",
-      "basis": "v13 §5.9.3（L1631-1638）・v13 §8（L2436-2469）・2026-09-19 オーナー決定 A'（CONSOLIDATED_DECISIONS.md §19-5）",
-      "test": "#9 member は INSERT できない／#10 guest は INSERT できない／#11 未認証は INSERT できない（42501）／#12 非 staff が Server Action を直接呼んでも保存されない"
+      "basis": "v13 §5.9.3（L1631-1638）・v13 §8（L2436-2469）",
+      "test": "tests/db/morning-meetings-rls.test.ts:`member は議事録を投入できない` / `guest は議事録を投入できない` / `member_type が親方でも role が member なら議事録を投入できない` / `未認証（anon）は議事録を投入できない` / `未認証（anon）は議事録を読み出せない`、tests/morning-meeting-intake.test.ts:`朝会の実装がサーバ側ロールガード（requireStaff）を参照している` / `朝会の実装が service_role クライアントを使っていない`"
     },
     {
       "criterion": "保存した議事録が staff（`admin` / `core_member`）以外から読めない",
       "origin": "issue",
-      "basis": "v13 §6（L2106 会員−・ゲスト−）・v13 §8（個人情報の表示制御）・DB物理設計.md §6-6b L1152（PII-A）",
-      "test": "#13 admin は読める／#14 core_member は読める／#15 member からは0件／#16 guest からは0件／#17 未認証は SELECT できない（42501）"
+      "basis": "v13 §6（L2106）・v13 §8・DB物理設計.md §6-6b L1152（PII-A）",
+      "test": "tests/db/morning-meetings-rls.test.ts:`admin は保存された議事録を読み出せる` / `core_member は保存された議事録を読み出せる` / `member には保存された議事録が0行になる` / `guest には保存された議事録が0行になる` / `member_type が親方でも role が member なら保存された議事録が0行になる`"
     },
     {
       "criterion": "API 連携・ファイルアップロードの経路を提供しない",
       "origin": "issue",
-      "basis": "v13 §9 #63（L2537）「API連携・ファイルアップロードは行わない」",
-      "test": "#18 朝会・議事録のルートハンドラが src/app/api/ 配下に存在しない／#19 投入フォームにファイル入力が存在しない"
+      "basis": "v13 §9 #63（L2537）",
+      "test": "tests/morning-meeting-intake.test.ts:`朝会議事録に触れる Route Handler が1つも無い` / `朝会の実装がファイルアップロードの経路を1つも持たない` / `朝会の実装が音声・外部文字起こしAPIを1つも参照していない`、tests/db/morning-meetings-rls.test.ts:`morning_meetings に NOT NULL の音声ファイル列が無い`"
     }
   ],
   "acceptanceDerived": false,
-  "updatedAt": "2026-09-19T06:04:17.901Z",
+  "updatedAt": "2026-09-19T06:14:43.406Z",
   "provisional": [
     {
       "question": "調査メモが種類A（正本 vs 派生文書）の矛盾8件を報告し、本タスクのリスク区分は高である。設計 §3.3 の判定は「高リスクなら種類Aでも完全に停止する」と読めるが、ここで停止すべきか。",
