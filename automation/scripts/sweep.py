@@ -64,11 +64,20 @@ L_REJECTED = "auto:rejected"
 L_EPIC = "auto:epic"
 
 #: 「作業中」とみなすラベル。払い出しの上限はこの本数で数える。
-INFLIGHT = {L_PLANNING, L_APPROVED, L_IMPLEMENTING, L_REVIEW}
+#:
+#: ⚠️ 2026-09-19: `L_AUTO` を含める。入口で起動待ちの Issue も**着手済みの仕事**であり、
+#: 数えないと「まだ空きがある」と誤認して払い出しを続け、上限を超える。
+INFLIGHT = {L_AUTO, L_PLANNING, L_APPROVED, L_IMPLEMENTING, L_REVIEW}
 
 #: 停滞とみなすまでの分数。**各ジョブの timeout-minutes より必ず長くする**
 #: （auto-01=60 / auto-02=90 / auto-03=90）。短いと実行中の run を二重起動する。
 STALE_MINUTES = {
+    # 入口の `auto`。auto-01 はラベルが付いた瞬間にしか起動せず、その run が
+    # 生成に失敗する／即死すると **Issue は `auto` のまま永久に止まる**。
+    # `auto:approved` で #9 が13日止まったのと同じ構造が入口にもある。
+    # auto-01 は付け替え直後に `auto:planning` へ移すので、`auto` のまま
+    # 20分以上動かないなら起動していないと見てよい。
+    L_AUTO: 20,
     L_PLANNING: 90,
     L_APPROVED: 30,  # 実装はまだ始まっていない。PR も無いので早めに拾ってよい
     L_IMPLEMENTING: 150,
@@ -77,6 +86,7 @@ STALE_MINUTES = {
 
 #: 回収時に戻す先。`auto:approved` は「付け直す」ことが引き金になる。
 RECOVER_TO = {
+    L_AUTO: L_AUTO,
     L_PLANNING: L_AUTO,
     L_APPROVED: L_APPROVED,
     L_IMPLEMENTING: L_APPROVED,
@@ -85,6 +95,7 @@ RECOVER_TO = {
 
 #: 各ラベルの再起動に対応するワークフロー。実行中なら回収を見送る（二重起動の防止）。
 GUARD_WORKFLOW = {
+    L_AUTO: "auto-01-plan.yml",
     L_PLANNING: "auto-01-plan.yml",
     L_APPROVED: "auto-02-implement.yml",
     L_IMPLEMENTING: "auto-02-implement.yml",
@@ -242,7 +253,12 @@ def recover(issues: list[dict], dry: bool) -> list[str]:
 
     for it in issues:
         names = it["labelNames"]
-        phase = next((lb for lb in (L_PLANNING, L_APPROVED, L_IMPLEMENTING, L_REVIEW) if lb in names), None)
+        # ⚠️ 2026-09-19: `L_AUTO` を先頭に足した。旧版はここに入口の `auto` が無く、
+        # 「まだ始まっていない状態」として回収対象から外していた。
+        # 実害: #13 が `auto` のまま放置され、スイーパーが何度走っても拾わなかった。
+        # 並び順は進行が遅いほう優先（`auto` は他のフェーズラベルと同時に付かない）。
+        phase = next((lb for lb in (L_PLANNING, L_APPROVED, L_IMPLEMENTING, L_REVIEW, L_AUTO)
+                      if lb in names), None)
         if phase is None:
             continue
 
