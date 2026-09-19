@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "issue": 9,
+  "pr": null,
+  "branch": null,
+  "phase": "implement",
+  "risk": null,
+  "attempts": {
+    "infra": 0,
+    "verify": 0,
+    "review": 0
+  },
+  "lastFingerprint": {
+    "infra": null,
+    "verify": null,
+    "review": null
+  },
+  "repeatedFingerprint": {
+    "infra": 0,
+    "verify": 0,
+    "review": 0
+  },
+  "tokens": {
+    "input": 14,
+    "output": 13472,
+    "costUsd": 0.9577215000000001
+  },
+  "testHashes": {
+    "e2e/smoke.spec.ts": "ed6ce8db5e0004a2",
+    "tests/acceptance.test.ts": "ba0921981b4630b7",
+    "tests/auth-guard.test.ts": "36f9487ef96e224e",
+    "tests/db-test-infra.test.ts": "b4db59cc79914376",
+    "tests/db/current-operator-id.test.ts": "82e8173ec61178d7",
+    "tests/db/helpers/fixtures.ts": "82dd6716a18e4037",
+    "tests/db/helpers/psql.ts": "92056af69410690c",
+    "tests/db/login-binding.test.ts": "951155ad26536214",
+    "tests/db/members-guard-trigger.test.ts": "c0675285d9d0be31",
+    "tests/db/members-schema.test.ts": "1dec944f3943d4c7",
+    "tests/db/rls-and-helper-functions.test.ts": "9ac749d11b2c42ad",
+    "tests/db/rls-policies.test.ts": "3748be28b027dcc3",
+    "tests/db/rooms.test.ts": "cd23e006ce8338de",
+    "tests/fixtures-are-synthetic.test.ts": "3fd4731b934607c5",
+    "tests/migrations-baseline.test.ts": "cd1b6e29a043b253",
+    "tests/role-navigation.test.ts": "cf16b87575989f3a",
+    "tests/supabase-env.test.ts": "2854c57b5940bac5",
+    "tests/uii.test.ts": "b5791629644723f4"
+  },
+  "specRefs": [],
+  "acceptance": [
+    {
+      "criterion": "`未提供` → `調理中`、`提供済み` → `提供済み` の対応関係が、どこか1箇所の定義から参照できる",
+      "origin": "issue",
+      "basis": "v13 §5.4.1 表「本人への表示」行（L855）",
+      "test": "tests/serving-status.test.ts:保存値「未提供」は本人向けに「調理中」と表示される / 保存値「提供済み」は本人向けに「提供済み」と表示される / 変換関数が返す文言は対応表の定義と一致する"
+    },
+    {
+      "criterion": "上記の対応関係を検証する自動テストがある（未知の入力値を渡した場合の挙動も含めて3ケース以上）",
+      "origin": "issue",
+      "basis": "Issue 本文の完了条件",
+      "test": "tests/serving-status.test.ts:上記3件 + 未知の保存値「取消」は表示文言へ変換されず RangeError になる / 表示文言「調理中」を保存値として渡すと RangeError になる / 空文字列の保存値は RangeError になる（計6ケース）"
+    },
+    {
+      "criterion": "定義・テストは特定の UI 画面の実装に依存しない（画面への組み込みは別タスク）",
+      "origin": "issue",
+      "basis": "Issue 本文の完了条件 / タスク定義「スコープ外」",
+      "test": "tests/serving-status.test.ts:対応表の定義が React・Next.js の画面実装を参照していない"
+    },
+    {
+      "criterion": "`serving_status` の値域は `未提供`/`提供済み` の2件に閉じており、それ以外の値は表示文言へ変換されず RangeError になる",
+      "origin": "derived",
+      "basis": "v13 §7 データ要件 L1764–1768（`serving_status`: `未提供`/`提供済み`）／ `docs/spec/detailed-design/DB物理設計.md` L205–211 の CHECK 制約／ `取消` は `orders` 側の値であり `serving_status` には存在しない（v13 §5.4.1 L850）",
+      "test": "tests/serving-status.test.ts:対応表の保存値は「未提供」と「提供済み」の2件だけである / 未知の保存値「取消」は表示文言へ変換されず RangeError になる / 表示文言「調理中」を保存値として渡すと RangeError になる / 空文字列の保存値は RangeError になる"
+    }
+  ],
+  "acceptanceDerived": true,
+  "updatedAt": "2026-09-19T00:28:50.849Z"
+}
