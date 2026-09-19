@@ -17,8 +17,9 @@
 
 ## [2026-09-19 15:30] クエストボード（一覧・集約表示）（Issue #53 ／ WBS 5-1） — IN PROGRESS
 ## [2026-09-19 16:10] Claude／Gemini テキストクライアント基盤 ＋ APIキー管理（Issue #55 ／ WBS 1-5） — TODO
+## [2026-09-19 16:10] Claude／Gemini テキストクライアント基盤 ＋ APIキー管理（Issue #55 ／ WBS 1-5） — IN PROGRESS
 
-**リスク区分: 高**（ゲート1・2・3／承認3回）。§4.1 の**外部連携**（Claude API／Gemini API）と
+**リスク区分: 高**（承認はマージ前のゲート3で1回／設計 §4.1 2026-09-16 改訂）。§4.1 の**外部連携**（Claude API／Gemini API）と
 **セキュリティ高リスク**（APIキー＝シークレットの管理／CLAUDE.md §3.1・§3.2）の2点に該当する。
 
 根拠: 正本 v13 §9 #45（AI基盤は Claude で確定。**AI呼び出しは抽象化して差し替え可能にしておけばよい**）、
@@ -35,6 +36,14 @@
 `4-2` の議事録構造化・クエスト候補抽出ロジック本体 ／ `4-1` のテキスト投入UI ／
 非同期ジョブ基盤の配線（Cloud Tasks ＋ Cloud Scheduler）／ `line-rag-bot` との API 連携（§9 #31）／
 AI対話履歴の GCS 書き出し（QUESTIONS 未回答「監査ログ A6」）
+
+**段取り（2026-09-19 ／ Issue #55 のコメントに全文）**: 完了条件8項目（タスク定義の7項目 ＋
+`.env.example` の §9 #63 追随1項目）を受入テスト15件へ 1:1 で対応させた。
+変更ファイルは `src/lib/ai/{types,env,claude,gemini}.ts`（新規）・`tests/ai-env.test.ts`・
+`tests/ai-client.test.ts`（新規）・`.env.example`・`package.json`／`package-lock.json`。
+新規依存: `@anthropic-ai/sdk`・`@google/genai`（自動通過条件④「新規依存なし」は欠ける）。
+**仮決定**: Claude のテキスト呼び出しは `@anthropic-ai/sdk` を使う（Agent SDK は自律ループ専用のまま）。
+`QUESTIONS.md`「⚡ [2026-09-19] Claude のテキスト呼び出しに…」へ非ブロックで記録済み。
 
 ## [2026-09-19 15:30] クエストボード（一覧・集約表示）（Issue #53 ／ WBS 5-1） — TODO
 
