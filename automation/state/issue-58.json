@@ -21,9 +21,9 @@
     "review": 0
   },
   "tokens": {
-    "input": 248,
-    "output": 130391,
-    "costUsd": 11.87522
+    "input": 298,
+    "output": 147286,
+    "costUsd": 14.421039
   },
   "testHashes": {
     "e2e/smoke.spec.ts": "ed6ce8db5e0004a2",
@@ -124,7 +124,7 @@
     }
   ],
   "acceptanceDerived": true,
-  "updatedAt": "2026-09-19T01:42:48.292Z",
+  "updatedAt": "2026-09-19T01:48:08.616Z",
   "provisional": [
     {
       "question": "`lodging_register_entries` の UPDATE（誤記訂正）を誰に開くか。DB物理設計 §6-1 表 No.32 は書き込みを「staff」と書き、同じ文書の §3-13② は「誤記の訂正は `admin` に限り、訂正の記録方法（追記か上書きか）は要確認」と書いている。正本 v13 §7・§6 は訂正について何も書いていない",
