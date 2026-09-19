@@ -35,6 +35,7 @@ from collections import defaultdict
 from pathlib import Path
 
 MIGRATIONS = Path("supabase/migrations")
+NEWLINE = chr(10)
 PATTERN = re.compile(r"^(\d{4})_[a-z0-9_]+\.sql$")
 
 
@@ -92,18 +93,43 @@ def main() -> int:
             )
 
     if args.base:
-        base = versions_in_rev(args.base)
-        for version, names in sorted(here.items()):
-            other = [n for n in base.get(version, []) if n not in names]
-            if other:
-                problems.append(
-                    f"連番 {version} が {args.base} と衝突します: "
-                    f"こちら {' / '.join(names)} ／ 向こう {' / '.join(other)}\n"
-                    f"    → **マージすると schema_migrations_pkey の一意制約に違反し、"
-                    f"main の DB テストが全て落ちます。**\n"
-                    f"    → 並列実装の副作用です（設計 §8.3 改訂）。番号を付け替えてください"
-                )
+        # ⚠️ 合流後の姿を正しく組み立てる必要がある。
+        #
+        # 素朴に「ブランチの一覧」と「base の一覧」を突き合わせると、
+        # **リネームを新規追加と誤認する**（旧名が base にまだ在るため衝突に見える）。
+        # 実際にこの検査の初版がそれで自分の PR を落とした
+        # （0007_lodging → 0010_lodging の改名を、0007 の衝突と報告した）。
+        #
+        # 正しくは「分岐点（merge-base）以降に base へ増えたファイル」だけが
+        # マージで降ってくる分である。それをブランチの一覧へ足したものが合流後の姿。
+        merged: dict[str, list[str]] = {v: list(n) for v, n in here.items()}
+        mb = subprocess.run(
+            ["git", "merge-base", "HEAD", args.base],
+            capture_output=True, text=True, encoding="utf-8",
+        )
+        if mb.returncode == 0:
+            at_fork = versions_in_rev(mb.stdout.strip())
+            fork_names = {n for names in at_fork.values() for n in names}
+            for version, names in versions_in_rev(args.base).items():
+                for name in names:
+                    # 分岐点から在るファイルは、このブランチが改名・削除した可能性がある。
+                    # ブランチ側の一覧が正なので足さない。
+                    if name in fork_names:
+                        continue
+                    if name not in merged.setdefault(version, []):
+                        merged[version].append(name)
 
+        for version, names in sorted(merged.items()):
+            if len(names) > 1:
+                problems.append(
+                    f"連番 {version} が {args.base} との合流後に衝突します: "
+                    f"{' / '.join(sorted(names))}"
+                    + NEWLINE
+                    + "    → **マージすると schema_migrations_pkey の一意制約に違反し、"
+                    + "main の DB テストが全て落ちます。**"
+                    + NEWLINE
+                    + "    → 並列実装の副作用です（設計 §8.3 改訂）。番号を付け替えてください"
+                )
     if problems:
         print("::error::マイグレーションの連番に問題があります")
         for p in problems:
