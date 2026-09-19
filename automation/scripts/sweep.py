@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import os
 import subprocess
 import sys
@@ -331,12 +332,21 @@ def dispense(issues: list[dict], cap: int, wbs: Path, dry: bool) -> tuple[list[s
     slots = cap - len(inflight)
     print(f"  作業中 {len(inflight)}件 / 上限 {cap}件 → 空き {max(slots, 0)}")
 
-    # 既に起票済みの作業パッケージ ID（本文の <!--wbs:X--> マーカー）を集める
+    # 既に起票済みの作業パッケージ ID を集める。
+    #
+    # ⚠️ 2026-09-19: マーカーだけを見ていたため **1-4 を二重起票した**（#18 と #49）。
+    # `<!--wbs:X-->` は wbs-to-issue 経由で作られた Issue にしか入っておらず、
+    # それ以前に手で立てた Issue（#18）には無い。マーカーが唯一の手掛かりだと
+    # 「起票済みだが印が無い」パッケージを毎回すり抜ける。
+    # タイトル `[auto] WBS <id> <名前>` からも拾って二重化を塞ぐ。
     taken: set[str] = set()
     for it in issues:
         b = it.get("body") or ""
         if "<!--wbs:" in b:
             taken.add(b.split("<!--wbs:", 1)[1].split("-->", 1)[0].strip())
+        m = re.match(r"\s*\[auto\]\s*WBS\s+([0-9]+-[0-9A-Za-z]+)", it.get("title") or "")
+        if m:
+            taken.add(m.group(1))
 
     # 依存は領域をまたぐ（例: §0-1 の `0-1` は §1 の `1-2` に依存する）。
     # そのため classify() へ渡す索引は **WBS 全体**でなければならない。
@@ -361,6 +371,28 @@ def dispense(issues: list[dict], cap: int, wbs: Path, dry: bool) -> tuple[list[s
 
     if owner_only:
         print(f"  ⚠ オーナーの手作業のため払い出さない: {', '.join(i['id'] for i in owner_only)}")
+
+    # ── 影響度順に並べ替える（2026-09-19 追加）────────────────────
+    # 旧版は WBS の記載順（＝§1 から）に払い出していた。その結果、
+    # 下流19件を止めている `3-2`（チェックイン）より、下流0件の §1 の行が先に出ていた。
+    # 上限に達すると最も詰まりを解く1本が翌回まわしになる。
+    # 「その行が完了すると何件が着手可能になるか」の降順で出す。
+    def downstream(pid: str, seen: set[str] | None = None) -> int:
+        seen = seen if seen is not None else set()
+        n = 0
+        for k, p in index.items():
+            if k in seen or pid not in p.deps:
+                continue
+            seen.add(k)
+            n += 1 + downstream(k, seen)
+        return n
+
+    for item in ready:
+        item["downstream"] = downstream(item["id"])
+    ready.sort(key=lambda i: -i["downstream"])
+    if ready:
+        head = ", ".join(f"{i['id']}(下流{i['downstream']})" for i in ready[:5])
+        print(f"  影響度順: {head}")
 
     acted: list[str] = []
     for item in ready[: max(slots, 0)]:
