@@ -21,13 +21,121 @@
     "review": 0
   },
   "tokens": {
-    "input": 66,
-    "output": 38144,
-    "costUsd": 2.752393
+    "input": 186,
+    "output": 114066,
+    "costUsd": 9.1482765
   },
   "testHashes": {},
-  "specRefs": [],
-  "acceptance": [],
-  "acceptanceDerived": false,
-  "updatedAt": "2026-09-19T01:26:27.842Z"
+  "specRefs": [
+    {
+      "ref": "v13 §9 #45",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "2506"
+    },
+    {
+      "ref": "v13 §9 #63",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "2524"
+    },
+    {
+      "ref": "v13 §5.1",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "386-393"
+    },
+    {
+      "ref": "v13 §5.7.4",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "1270-1280"
+    },
+    {
+      "ref": "v13 §4",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "195-382"
+    },
+    {
+      "ref": "CLAUDE.md §3.2",
+      "path": "CLAUDE.md"
+    },
+    {
+      "ref": "CLAUDE.md §4.4",
+      "path": "CLAUDE.md"
+    }
+  ],
+  "acceptance": [
+    {
+      "criterion": "ANTHROPIC_API_KEY / GEMINI_API_KEY をサーバサイドからのみ読み出せ、NEXT_PUBLIC_ 接頭辞を持たない",
+      "origin": "derived",
+      "basis": "CLAUDE.md §3.2",
+      "test": "AI クライアント層のソースが NEXT_PUBLIC_ 接頭辞の環境変数を1つも参照しない／Claude クライアントが dangerouslyAllowBrowser を設定しない"
+    },
+    {
+      "criterion": "キー未設定時に、import 時ではなく利用時点で変数名を含むエラーになる",
+      "origin": "derived",
+      "basis": "CLAUDE.md §3.2・§4.3（src/lib/supabase/env.ts と同じ作法）",
+      "test": "ANTHROPIC_API_KEY / GEMINI_API_KEY が未設定なら呼び出し時点で変数名を含む例外を投げる／空文字も未設定として扱う／import しただけでは例外を投げない"
+    },
+    {
+      "criterion": "テキストプロンプトを渡して Claude から応答を得る呼び出しが1モジュールに集約され、呼び出し側が SDK へ直接依存しない（＝差し替え可能である）",
+      "origin": "derived",
+      "basis": "v13 §9 #45",
+      "test": "AI クライアント層以外のモジュールが AI の SDK パッケージを import していない／共通インタフェースにモック実装を差し込むと呼び出し側のコードを変えずに応答を差し替えられる"
+    },
+    {
+      "criterion": "Gemini クライアントがテキスト入力のみを受け付け、音声ファイル・GCS URI を渡す口を持たない",
+      "origin": "derived",
+      "basis": "v13 §9 #63",
+      "test": "Gemini クライアントに音声ファイルを渡すコードが型エラーになる／Gemini クライアントのソースが GCS URI・音声 MIME タイプを1つも参照しない"
+    },
+    {
+      "criterion": "1回の呼び出しで構造化された複数出力（議事録サマリー＋クエスト候補JSON 等）を受け取れる形になっている",
+      "origin": "derived",
+      "basis": "v13 §5.1 ③・§5.7.4 ②",
+      "test": "議事録サマリーとクエスト候補を含む構造化オブジェクトを1回の応答から取り出せる／構造化出力を1つ得るために発生する SDK 呼び出しが1回だけである"
+    },
+    {
+      "criterion": "エラーメッセージ・ログに API キーが出力されない",
+      "origin": "derived",
+      "basis": "CLAUDE.md §3.2",
+      "test": "キーが不正で SDK が失敗したとき送出されるエラーメッセージに API キーの値が含まれない／AI クライアント層のソースが logLevel: 'debug' / ANTHROPIC_LOG を設定しない"
+    },
+    {
+      "criterion": "単体テストが実 API キー無しで通る（外部呼び出しはモック）",
+      "origin": "derived",
+      "basis": "CLAUDE.md §4.4・§6.1",
+      "test": "受入テスト15件すべてが ANTHROPIC_API_KEY・GEMINI_API_KEY 未設定の環境で通る"
+    },
+    {
+      "criterion": ".env.example の GEMINI_API_KEY の説明が音声・マルチモーダル処理を前提としない",
+      "origin": "derived",
+      "basis": "v13 §9 #63（CONSOLIDATED_DECISIONS.md §1 が反映先として明記・未反映）",
+      "test": ".env.example の GEMINI_API_KEY の説明に「音声」「マルチモーダル」の語が含まれない"
+    }
+  ],
+  "acceptanceDerived": true,
+  "updatedAt": "2026-09-19T01:44:11.880Z",
+  "provisional": [
+    {
+      "question": "Issue 本文の「根拠となる仕様: v13 §16」が spec_ref.py で解決不能である以上、blocked=true として止めるべきか。",
+      "options": [
+        "A. blocked=false。解決不能である事実を明示したうえで、実在する節（§9 #45・§9 #63・§5.1・§5.7.4・§4）へ読み替えて材料を揃える",
+        "B. blocked=true。解決不能な参照が1件でもある時点で止める",
+        "C. 正本に §16 相当の節を新設する前提で材料を揃える"
+      ],
+      "chosen": "A（blocked=false。解決不能を明示したうえで実在する節へ読み替え）",
+      "rationale": "この論点は既に決着済みである。2026-09-19 に2度オーナーへ照会され、QUESTIONS.md の該当項目は ✅ 回答済みで「この範囲であれば正本から完了条件を導出してよい」「WBS 1-5 概要欄の追随はオーナー側で対応する」との回答が入っている。かつ本パッケージの成果物に対応する記述は正本側に実在する（6件すべて解決・内容も実物で確認済み）ため、優先すべき正本側が存在する種類A に当たる。既に決まっていることを3度目に問い直さない方針（質問の作法）に従った。節番号の推測による書き換えは一切していない。C は正本の仕様変更にあたり調査エージェントの権限外。",
+      "specRef": "v13 §9 #45 / §9 #63 / §5.1 / §5.7.4 / §4（いずれも解決済み）。QUESTIONS.md「✅ [2026-09-19] WBS 1-5 の MCP Gateway は正本 §4 で Phase 3 に置かれている」",
+      "reversibility": "完全に取り消せる。成果物は Issue コメント1件のみでファイル編集はゼロ。判断が違えば PM が <!--blocked--> を出すか auto:needs-review を付けるだけで止まり、調査結果はそのまま材料として残る。"
+    },
+    {
+      "question": "Claude のテキスト呼び出しに @anthropic-ai/sdk（Messages API）と Claude Agent SDK のどちらを使うか",
+      "options": [
+        "A. @anthropic-ai/sdk を dependencies へ追加して使う。Agent SDK は自律ループ専用の devDependencies のまま据え置く",
+        "B. @anthropic-ai/claude-agent-sdk を dependencies へ移し、アプリ本体もこれを使う（オーナー決定 A の字面どおり）"
+      ],
+      "chosen": "A（@anthropic-ai/sdk を採用する）",
+      "rationale": "Anthropic 公式が Messages API のクライアント（@anthropic-ai/sdk）と Claude Agent SDK（エージェントループ・ツール実行・ランタイムを提供する上位レイヤー）を別物と位置づけており、1-5 の成果物は「テキストを渡して構造化応答を1回得る」だけでエージェントループもツール実行も必要としない。v13 §9 #45 が「AI呼び出しは抽象化して差し替え可能にしておけばよい」と明記しているため、この選択は仕様の確定ではなく抽象化の内側の実装判断にとどまる。",
+      "specRef": "v13 §9 #45",
+      "reversibility": "高い。共通インタフェース src/lib/ai/types.ts の実装を1つ差し替え、package.json の依存を1件入れ替えるだけで B へ移れる。呼び出し側のコードは変更不要。"
+    }
+  ]
 }
