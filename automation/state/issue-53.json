@@ -21,13 +21,99 @@
     "review": 0
   },
   "tokens": {
-    "input": 50,
-    "output": 21412,
-    "costUsd": 1.9355055
+    "input": 170,
+    "output": 91871,
+    "costUsd": 8.120072
   },
   "testHashes": {},
-  "specRefs": [],
-  "acceptance": [],
+  "specRefs": [
+    {
+      "ref": "v13 §5.3",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "752-833"
+    },
+    {
+      "ref": "v13 §5.10.6",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "1782-1800"
+    },
+    {
+      "ref": "v13 §5.10.1",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "1679-1724"
+    },
+    {
+      "ref": "v13 §5.9.3",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "1618-1625"
+    },
+    {
+      "ref": "v13 §6",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "2094, 2144"
+    },
+    {
+      "ref": "v13 §7",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "2360"
+    },
+    {
+      "ref": "v13 §2",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "171-172"
+    }
+  ],
+  "acceptance": [
+    {
+      "criterion": "クエストボードに、`origin_type` が `manual` の行と `morning_meeting_auto` の行が単一の一覧として表示される",
+      "origin": "issue",
+      "basis": "v13 §5.3（L754）／v13 §7（L2360）",
+      "test": "クエストボードは origin_type が manual の行と morning_meeting_auto の行を1つの一覧として返す"
+    },
+    {
+      "criterion": "ゲストでログインすると、`guest_allowed=false` のクエストも一覧に表示され、`🔒 街人登録で解放` が重なり、申請ボタンが非活性である",
+      "origin": "issue",
+      "basis": "v13 §5.10.6（L1789）",
+      "test": "ゲストは guest_allowed=false のクエストを一覧に見ることができる（行は隠さない）／ゲストに対し guest_allowed=false のカードは申請ボタンが非活性になる／街人は guest_allowed=false のクエストを施錠なしで受注申請できる"
+    },
+    {
+      "criterion": "ゲスト向けのレスポンスに、施錠クエストの報酬額・指示内容・担当者情報が含まれない（タイトル・カテゴリ・施錠状態までに限られる）",
+      "origin": "issue",
+      "basis": "v13 §5.10.6（L1800）",
+      "test": "ゲスト向けの v_quest_board は施錠クエストの報酬額・指示内容・担当者情報を返さない"
+    },
+    {
+      "criterion": "一覧上部に「あと N 件のクエストが街人登録で解放されます」の常設バナーが表示され、N が `guest_allowed=false` かつ `status='open'` のクエスト件数と一致する",
+      "origin": "issue",
+      "basis": "v13 §5.10.6（L1793）",
+      "test": "解放件数バナーの N は guest_allowed=false かつ status='open' のクエスト件数と一致する"
+    },
+    {
+      "criterion": "ゲストが `guest_allowed=false` のクエストへ受注申請 API を直接呼んだ場合、サーバ側で拒否される（画面操作を経由しない経路でも拒否される）",
+      "origin": "issue",
+      "basis": "v13 §5.10.6（L1794）／v13 §5.9.3（L1618-1625）／2026-09-19 オーナー決定 B",
+      "test": "ゲストは guest_allowed=false のクエストへ受注申請 API を呼ぶと 403 で拒否される／街人は同じ API を呼んでも認可では拒否されない"
+    },
+    {
+      "criterion": "上記の判定が `role`（`guest`）で行われ、`member_type` を認可に用いていない",
+      "origin": "issue",
+      "basis": "v13 §2（L171-172）／CLAUDE.md §4.1",
+      "test": "member_type が ゲスト でも role が member なら施錠表示にならない／ゲストは quests へ直接 INSERT / UPDATE できない"
+    },
+    {
+      "criterion": "`required_certification` 未保有のクエストが `🚧 受注できません` として表示される（表示のみ。API 側の資格ゲートは 5-2）",
+      "origin": "issue",
+      "basis": "v13 §5.10.6（L1790）",
+      "test": "required_certification を持たない閲覧者には 🚧 受注できません が表示され、街人登録への導線は出ない"
+    },
+    {
+      "criterion": "他者向け表示名は、`nickname` 未設定なら会員番号、親方兼街人は街人番号で表示される",
+      "origin": "issue",
+      "basis": "2026-09-10 オーナー決定／WBS_Phase1.md L443",
+      "test": "nickname 未設定の会員の他者向け表示名は会員番号になる"
+    }
+  ],
   "acceptanceDerived": false,
-  "updatedAt": "2026-09-19T00:48:42.632Z"
+  "updatedAt": "2026-09-19T01:33:32.373Z",
+  "provisional": []
 }
