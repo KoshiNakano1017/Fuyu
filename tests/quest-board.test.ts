@@ -12,9 +12,12 @@
 import { buildQuestBoard } from "@/lib/quests/board";
 
 import {
+  ADMIN_VIEWER,
   ALL_QUESTS,
   CERTIFICATION_REQUIRED_QUEST,
   CERTIFIED_MEMBER_VIEWER,
+  CORE_MEMBER_VIEWER,
+  CORE_ONLY_LOCKED_QUEST,
   GUEST_TYPED_MEMBER_VIEWER,
   GUEST_VIEWER,
   LOCKED_OPEN_QUEST_COUNT,
@@ -175,5 +178,43 @@ describe("完了条件7: 資格ゲートの表示（v13 §5.10.6 L1790）", () =
     expect(
       shownItemOf(CERTIFIED_MEMBER_VIEWER, CERTIFICATION_REQUIRED_QUEST.questId).badge,
     ).toBeNull();
+  });
+});
+
+describe("完了条件8: `core_only_reward` はゲストだけでなく一般会員にも詳細を伏せる（v13 §5.10.6 2026-09-20改訂）", () => {
+  test("一般街人には `core_only_reward=true` の報酬額が含まれない（完了条件3の「街人には返る」の例外）", () => {
+    expect(shownItemOf(MEMBER_VIEWER, CORE_ONLY_LOCKED_QUEST.questId)).not.toHaveProperty(
+      "rewardUii",
+    );
+  });
+
+  test("一般街人には `core_only_reward=true` の指示内容が含まれない", () => {
+    expect(shownItemOf(MEMBER_VIEWER, CORE_ONLY_LOCKED_QUEST.questId)).not.toHaveProperty(
+      "description",
+    );
+  });
+
+  test("ゲストにも `core_only_reward=true` の報酬額は含まれない（従来どおり）", () => {
+    expect(shownItemOf(GUEST_VIEWER, CORE_ONLY_LOCKED_QUEST.questId)).not.toHaveProperty(
+      "rewardUii",
+    );
+  });
+
+  test("コアメンバーには `core_only_reward=true` でも報酬額が返る", () => {
+    expect(shownItemOf(CORE_MEMBER_VIEWER, CORE_ONLY_LOCKED_QUEST.questId).rewardUii).toBe(
+      CORE_ONLY_LOCKED_QUEST.rewardUii,
+    );
+  });
+
+  test("管理者には `core_only_reward=true` でも指示内容が返る", () => {
+    expect(shownItemOf(ADMIN_VIEWER, CORE_ONLY_LOCKED_QUEST.questId).description).toBe(
+      CORE_ONLY_LOCKED_QUEST.description,
+    );
+  });
+
+  test("`core_only_reward=true` でも一般街人には施錠バッジは出ない（街人登録導線はゲスト専用のため）", () => {
+    // isLockedForViewer はゲスト専用の判定であり続ける。core_only_reward は詳細列だけを絞る、
+    // 別軸の制御である（visibility.ts の areDetailsHiddenForViewer コメント参照）。
+    expect(shownItemOf(MEMBER_VIEWER, CORE_ONLY_LOCKED_QUEST.questId).isLocked).toBe(false);
   });
 });

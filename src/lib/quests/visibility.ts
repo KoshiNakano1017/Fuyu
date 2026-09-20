@@ -26,7 +26,13 @@ export type Quest = {
   guestAllowed: boolean;
   /** 資格ゲート。街人登録では解放されない別の軸（v13 §5.10.6 表3行目） */
   requiredCertification: readonly string[];
-  /** 報酬額。ゲストの施錠クエストへは返さない（v13 §5.10.6 末尾の [!important]） */
+  /**
+   * コアメンバー・管理者限定フラグ（v13 §5.10.6 2026-09-20改訂）。
+   * true の施錠クエストは、報酬額・指示内容を**一般会員にも**返さない
+   * （既定の施錠クエストはゲストにのみ返さない。§areDetailsHiddenForViewer 参照）。
+   */
+  coreOnlyReward: boolean;
+  /** 報酬額。返さない条件は `areDetailsHiddenForViewer()` を参照 */
   rewardUii?: number | null;
   /** 指示内容。同上 */
   description?: string | null;
@@ -61,6 +67,30 @@ export type QuestBadge = typeof LOCKED_BADGE | typeof CERTIFICATION_BADGE;
  */
 export function isLockedForViewer(quest: Quest, viewer: QuestBoardViewer): boolean {
   return viewer.role === "guest" && !quest.guestAllowed;
+}
+
+/** `role` がコアメンバー・管理者か（v13 §2・CLAUDE.md §4.1：認可の根拠は `role` のみ）。 */
+function isStaffRole(role: QuestBoardViewer["role"]): boolean {
+  return role === "admin" || role === "core_member";
+}
+
+/**
+ * 報酬額・指示内容・担当者情報を伏せるべきか。
+ *
+ * `isLockedForViewer()`（🔒 バッジ・街人登録モーダルの起動判定）とは**別の関数**にしてある。
+ * 街人登録の導線はゲストにしか出さない一方、詳細を伏せる範囲は
+ * `core_only_reward`（v13 §5.10.6 2026-09-20改訂）によりゲストより広くなり得るため、
+ * 「施錠バッジが出ているか」と「詳細を返すか」が一致しなくなった。1つの条件に
+ * まとめると、どちらかの意味が暗黙に混じって次の変更で事故る（CLAUDE.md §4.2）。
+ *
+ * 条件は2つ、いずれかを満たせば伏せる:
+ *   (a) ゲスト かつ 施錠中（従来どおり）
+ *   (b) スタッフ以外 かつ `core_only_reward`（コア・管理者だけがフラグを立てられる）
+ */
+export function areDetailsHiddenForViewer(quest: Quest, viewer: QuestBoardViewer): boolean {
+  const hiddenFromGuest = viewer.role === "guest" && !quest.guestAllowed;
+  const hiddenFromNonStaff = quest.coreOnlyReward && !isStaffRole(viewer.role);
+  return hiddenFromGuest || hiddenFromNonStaff;
 }
 
 /** 資格要件を満たしていないか（v13 §5.3-2 の安全ゲート）。 */
@@ -101,7 +131,14 @@ export function opensRegistrationModal(quest: Quest, viewer: QuestBoardViewer): 
  *
  * `status = 'open'` に限る。受付を終えた施錠クエストを数えると、
  * 「登録しても解放されない件数」を登録動機として提示することになる。
+ *
+ * `core_only_reward = true` も同じ理由で除外する（2026-09-20改訂）。街人登録は `role` を
+ * `guest` → `member` に変えるだけであり、`core_only_reward` の非開示は `member` にも及ぶ
+ * （`areDetailsHiddenForViewer()` 参照）。含めると「登録しても報酬額・指示内容は結局見えない件」を
+ * 解放数として見せてしまう。
  */
 export function countQuestsUnlockedByRegistration(quests: readonly Quest[]): number {
-  return quests.filter((quest) => !quest.guestAllowed && quest.status === "open").length;
+  return quests.filter(
+    (quest) => !quest.guestAllowed && !quest.coreOnlyReward && quest.status === "open",
+  ).length;
 }
