@@ -99,6 +99,37 @@
   `src/lib/auth/navigation.ts`、`src/components/nav/RoleNav.tsx`、`tests/role-navigation.test.ts`、Issue #92
 
 ---
+## [2026-09-20] WBS `3-3`（予約キャンセル・ノーショー処理）の対象テーブル `check_ins` が未作成（v13 §5.2.2 ／ §9 #27）
+- ステータス: 未回答
+- 優先度: 高（Issue #93 ／ WBS `3-3`（予約キャンセル・ノーショー処理）のタスク定義を止めている。
+  同じ `check_ins` 不在を理由に WBS `3-8`（宿泊枠の残数算出＋カレンダー）も止まっており、論点の構図が同一）
+- 背景: v13 §5.2.2 は「予約の論理削除（`cancelled_at` ＋ `cancel_reason` ＋ 操作者ID）」と
+  「紐づく `room_assignments` の終了による部屋の解放」を定めており、v13 §7 に追加列4本
+  （`cancelled_at` / `cancel_reason_type` / `cancel_reason` / `cancelled_by`）が明記されている。
+  しかし**キャンセル対象の「予約」の実体は `check_ins`**（`API設計.md` §2-2・§3-4 で
+  `POST /api/reservations`・`POST /api/public/reservations` の対象テーブルが `check_ins`、
+  `reservation_source` で入口を区別すると規定）であり、この `check_ins` が
+  `supabase/migrations/` に存在しない（最新は `0101` まで。`0006_rooms_and_assignments.sql` の
+  コメントに「`check_ins` は WBS `3-2`（チェックイン／チェックアウト操作）の成果物であり、まだ存在しない」と明記）。
+  加えて `DB物理設計.md` §3-11 は `check_ins` を「Vault 側 `01_schema.sql` で実装済み」とし、
+  同 §3-12 の注記では**列名を仮定していると自認**している。つまり
+  「追加列4本を足す先のテーブル定義」がリポジトリ内に無く、列の現状も確定できない。
+  一方 WBS `3-3` の依存欄は `3-1`（部屋台帳・部屋割当）のみで、`3-2` への依存が記載されていない。
+  Issue #93 の完了条件・スコープ外はいずれも自動起票の雛形（プレースホルダ）のまま。
+- 選択肢:
+  - A. **`3-3` を保留し、先に `3-2`（チェックイン／チェックアウト操作）で `check_ins` を作る。**
+    WBS `3-3` の依存を `3-1` → `3-1, 3-2` へ改め、Issue #93 は依存待ちとして据え置く
+  - B. `3-3` のスコープを**顧客管理画面のキャンセルモーダル UI（モック実在）までに限定**し、
+    DDL・API・RLS は `3-2` 完了後の別 Issue に分ける
+  - C. `3-3` の中で `check_ins` の**最小スキーマも併せて作る**（`3-2` は操作UIのみを担当する形へ狭める）
+- 推奨: A（理由: `0006_rooms_and_assignments.sql` のコメントが 2026-09-15 のオーナー決定として
+  「`check_ins` を参照するものは `3-2` へ送る」という境界を明示的に引いており、C はその決定を覆す。
+  B は UI だけが先に入り、論理削除の実体が無いまま「`3-3` 完了」と記録される状態を作る。
+  また A は同一構図の `3-8` に対する推奨と一貫しており、`3-2` を1本解けば両方が動き出す）
+- 関連ファイル: v13 §5.2.2（L422-441）、v13 §7「★ 予約キャンセル・ノーショーに伴う追加項目」（L2367-2371）、
+  v13 §6 権限マトリクス（L2179）、`docs/spec/detailed-design/API設計.md` §2-2・§3-4、
+  `docs/spec/detailed-design/DB物理設計.md` §3-11・§3-12、
+  `supabase/migrations/0006_rooms_and_assignments.sql`、`docs/spec/WBS_Phase1.md` L241、Issue #93
 
 ## [2026-09-20] WBS `1-6`（pgvector有効化・RAG基盤）の残作業の範囲と、`9-1`（アプリ内の横断セマンティック検索）との切れ目（v13 §9 #31 ／ `CONSOLIDATED_DECISIONS.md` §17-6）
 - ステータス: 未回答
