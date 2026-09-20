@@ -1,0 +1,119 @@
+{
+  "version": 1,
+  "issue": 99,
+  "pr": null,
+  "branch": null,
+  "phase": "plan",
+  "risk": "mid",
+  "attempts": {
+    "infra": 0,
+    "verify": 0,
+    "review": 0
+  },
+  "lastFingerprint": {
+    "infra": null,
+    "verify": null,
+    "review": null
+  },
+  "repeatedFingerprint": {
+    "infra": 0,
+    "verify": 0,
+    "review": 0
+  },
+  "tokens": {
+    "input": 124,
+    "output": 92117,
+    "costUsd": 7.353988500000001
+  },
+  "testHashes": {},
+  "specRefs": [
+    {
+      "ref": "v13 §5.9.4 アクセス制限画面",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "1664-1688"
+    },
+    {
+      "ref": "v13 §2 利用者向け表示名",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "82-182"
+    },
+    {
+      "ref": "v13 §5.2.3 公開予約ページ",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "443-579"
+    },
+    {
+      "ref": "v13 §5.10.8 ① チェックイン時の判定と表示",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "1885-1914"
+    },
+    {
+      "ref": "v13 §5.3.1 Eumo給付の拡張",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "791-825"
+    },
+    {
+      "ref": "v13 §7 eumo_grants",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "2420"
+    },
+    {
+      "ref": "CONSOLIDATED_DECISIONS.md §14-2 残作業",
+      "path": "docs/spec/CONSOLIDATED_DECISIONS.md",
+      "lines": "971-974"
+    },
+    {
+      "ref": "WBS_Phase1.md 18-1 HTMLモック prototype_v15.html の維持・レビュー反映",
+      "path": "docs/spec/WBS_Phase1.md",
+      "lines": "540"
+    }
+  ],
+  "acceptance": [
+    {
+      "criterion": "`docs/design/prototype_v15.html` から「管理者・コアメンバー専用」が無くなり「運営業務専用」に置き換わっている。あわせてアクセス制限画面が「現在のロール」「必要な権限」を §2 の利用者向け表示名（admin＝システム管理者／core_member＝システム運用者／member＝街人／guest＝ゲスト）で表示する",
+      "origin": "derived",
+      "basis": "v13 §5.9.4 ／ v13 §2",
+      "test": "モックのどこにも「管理者・コアメンバー専用」という文言が残っていない ／ アクセス制限画面に「この画面は運営業務専用です」と表示される ／ requiredRoles() は admin を「システム管理者」と表示する ／ requiredRoles() は core_member を「システム運用者」と表示する ／ roleLabel は member を「街人」と表示する ／ 街人ロールではアクセス制限画面が出る（拒否側） ／ 管理者ロールでは画面本体が表示される（許可側）"
+    },
+    {
+      "criterion": "公開予約ページに「街人（会員）ですか？（はい／いいえ）」が必須項目として存在し、どちらを選んでも表示料金が変わらない（料金・権限判定に一切使われない）",
+      "origin": "derived",
+      "basis": "v13 §5.2.3",
+      "test": "公開予約ページに「街人（会員）ですか？」の必須項目が表示される ／ 街人申告で「はい」を選んでも「いいえ」のときと表示料金が同一である ／ 料金を算出するコードが街人申告のフラグを参照していない"
+    },
+    {
+      "criterion": "チェックイン画面に `街人`/`ゲスト`・`🌱 初回来訪`/`再訪（通算◯回目）`・`キャッシュバック未発行`/`発行依頼済み`/`受領済み` の3系統のバッジが表示され、判定が疑わしいケースで「要確認」が出る",
+      "origin": "derived",
+      "basis": "v13 §5.10.8 ①③",
+      "test": "初回来訪の会員のチェックインに 🌱 初回来訪 バッジが出る ／ 再訪の会員のチェックインに 再訪（通算◯回目） バッジが出る ／ 会員種別に応じて 街人 または ゲスト のバッジが出る ／ キャッシュバック未発行の会員に キャッシュバック未発行 バッジが出る ／ 判定が疑わしい会員のチェックインに「要確認」が出る"
+    },
+    {
+      "criterion": "Eumo給付一覧に給付種別（quest_reward / first_visit_cashback / registration_cashback / manual の4値）と用途（purpose）の列があり、手動起票（対象者・金額・用途の入力）の導線が存在する",
+      "origin": "derived",
+      "basis": "v13 §5.3.1 ／ v13 §7 eumo_grants",
+      "test": "Eumo給付一覧の各行に給付種別が表示される ／ Eumo給付一覧の各行に用途が表示される ／ 給付種別は4値に対応するラベルを持つ ／ 手動起票の導線から対象者・金額・用途を入力して給付を1件追加できる"
+    },
+    {
+      "criterion": "モック内の改訂ログ配列（diffList）に本追随が v1.21.0 として記録され、ロール表示名は §9 #58 未確定の仮案である旨が明記されている",
+      "origin": "derived",
+      "basis": "v13 §5.9.4 ／ v13 §9 #58",
+      "test": "改訂ログに v1.21.0 の項目が含まれている ／ 改訂ログにロール表示名が §9 #58 未確定の仮案である旨の注記が含まれている"
+    }
+  ],
+  "acceptanceDerived": true,
+  "updatedAt": "2026-09-20T23:24:51.588Z",
+  "provisional": [
+    {
+      "question": "Issue #99（WBS 18-1 HTMLモック prototype_v15.html の維持・レビュー反映）の「維持・レビュー反映」がどこまでを指すか。完了条件が雛形のプレースホルダのままで、かつ Issue の根拠節 v13 §14 は正本に実在しない（v13 は §9 まで／§14 は CONSOLIDATED_DECISIONS.md 側の節番号）",
+      "options": [
+        "A. CONSOLIDATED_DECISIONS.md §14-2 が名指しする4項目（§5.9.4 文言・§5.2.3 申告項目・チェックインバッジ・Eumo給付一覧の種別/用途列）の追随に限定する",
+        "B. v1.21.0 以降（〜v1.27.0）の全改訂をモックへ追随させる",
+        "C. バックエンド結合（fetch/localStorage の導入）まで含める"
+      ],
+      "chosen": "A. CONSOLIDATED_DECISIONS.md §14-2 の4項目の追随に限定する（バックエンド結合・キャッシュバック金額の2プラン化・ロール表示名の最終ラベル確定は範囲外）",
+      "rationale": "WBS 18-1 のステータス欄自身が「CONSOLIDATED §14-2 が明記」と出典を示しており、範囲を推測ではなく既存の記録から引けるため（節番号の黙った読み替えはせず、仮決定として明示した）。B は対象の洗い出し自体が別作業で 18-2 と重複し、C はモックをアプリ実装に変える行為で規模 M と整合しない。なお §14-2 に含まれないキャッシュバック金額の2プラン化は金額付与の範囲に当たるため、範囲の切れ目をオーナー判断に委ねて除外した。",
+      "specRef": "CONSOLIDATED_DECISIONS.md §14-2 ／ v13 §5.2.3・§5.3.1・§5.9.4・§5.10.8 ／ WBS_Phase1.md 18-1",
+      "reversibility": "成果物は docs/design/prototype_v15.html 1ファイルの編集のみで、DB・API・アプリ本体（src/）に波及しない。範囲が違っていれば当該コミットの revert または該当ブロックの再編集で戻せる。範囲を広げる判断になった場合もバックエンド結合分を別 Issue に起こせばよく、18-1 の成果は破棄されない。"
+    }
+  ]
+}
