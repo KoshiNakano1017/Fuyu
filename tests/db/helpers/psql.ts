@@ -42,7 +42,13 @@ export type SqlResult = {
  */
 export function runSql(body: string): SqlResult {
   const script = ["\\set VERBOSITY verbose", "BEGIN;", body, "ROLLBACK;", ""].join("\n");
-  const args = [DB_URL, "-X", "-q", "-A", "-t", "-v", "ON_ERROR_STOP=1", "-P", "pager=off", "-f", "-"];
+  // ⚠️ 接続文字列を引数の先頭に置かない（`-d` で渡す）。
+  //    Windows の psql は getopt の順序入れ替えを行わないため、最初の非オプション引数より
+  //    後ろのフラグが「余分なコマンドライン引数は無視されました」として**全部捨てられる**。
+  //    そうなると -t -A が効かず、ヘッダ・区切り線・`(1 行)` フッタが出力に混ざり、
+  //    検査値と比較できなくなる（2026-09-20 に Windows で全 198 件が失敗して判明）。
+  //    Linux では GNU getopt が並べ替えるため CI は緑のままであり、この差は手元でしか出ない。
+  const args = ["-X", "-q", "-A", "-t", "-v", "ON_ERROR_STOP=1", "-P", "pager=off", "-d", DB_URL, "-f", "-"];
 
   try {
     const stdout = execFileSync("psql", args, { input: script, encoding: "utf8" });
