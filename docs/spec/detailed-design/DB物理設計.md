@@ -856,8 +856,8 @@ COMMENT ON COLUMN lodging_register_entries.address_snapshot IS
 
 | 経路 | `source` | 誰が |
 | --- | --- | --- |
-| 現地チェックイン（店員タブレット）| `checkin` | staff。`member_profiles_private` の現在値を初期表示し、**本人に確認のうえ確定してコピーする** |
-| 公開予約ページ `/reserve`（v13 §5.2.3） | `web_public` | Edge Function（`service_role`）。⚠️ 予約時点では宿泊が成立していないため、**名簿行はチェックイン確定時に作る**のが原則。予約時に住所を取る場合の扱いは要確認 |
+| 現地チェックイン（店員タブレット）| `checkin` | staff。`member_profiles_private` の現在値を初期表示し、**本人に確認のうえ確定してコピーする**（未登録・初回客は空欄から入力）。API: `POST /api/checkins/{id}/lodging-register`（**API設計.md §3-5・v13 §5.2.7／2026-09-20新設**） |
+| 公開予約ページ `/reserve`（v13 §5.2.3） | ― | **本経路では作らない（2026-08-16／§9 #30-② 確定、2026-09-20 API設計へ反映）**。予約時点では宿泊が成立しておらず、旅館業法必須項目（住所・前泊地・後泊地）は`公開予約APIのリクエストスキーマに含めない`。名簿行は上段の現地チェックイン経路でのみ作成する（`web_public` は `source` の値としては温存するが、Phase 1 では発行しない） |
 | 運営の代理登録 | `staff_manual` | staff |
 | 過去分の取込 | `migration` | `service_role`。Phase 1 で過去の名簿を取り込むかは**要確認**（現行は Excel／紙運用の可能性がある） |
 
@@ -1151,7 +1151,7 @@ WHERE  p.full_name_normalized = i.name_norm;
 | 20 | `quest_applications` | PII-B | 誰がどのクエストに申請したか | 本人 ＋ staff。**受注確定後の受注者は `v_member_public` 経由で全員に見える**（§6-4） | 本人が INSERT。審査は staff |
 | 21 | `morning_meetings` | **PII-A** | **`transcript_text`／`summary_text`（会話の全文文字起こし＝個人の発言）** | **staff のみ**（v13 §6：朝会は admin/core_member） | `admin` |
 | 22 | `media_assets` | PII-B | `member_id`（投稿者）, **`geo_location`（Exif 位置情報）**, `ai_caption` | 投稿者本人 ＋ staff は全件。一般会員・ゲストは**「公開」のもののみ**（v13 §6） | 全ロールが自分の投稿を INSERT。非表示化・削除は staff |
-| 23 | `quests` | 非PII | ― | `authenticated` 全員（`guest_allowed=false` はゲスト除外） | `admin`/`core_member` |
+| 23 | `quests` | 非PII（報酬額・指示内容は列単位GRANTで保護／2026-09-20訂正） | ― | `authenticated` 全員（**行は絞らない**。報酬額・指示内容は `v_quest_board` 経由でのみ取得可: ゲストは施錠中〔`guest_allowed=false`〕、非スタッフは `core_only_reward=true` の場合にNULL） | `admin`/`core_member` |
 | 24 | `work_categories` | 非PII | ― | `authenticated` 全員 | `admin` |
 | 25 | `menu_items` | 非PII | ― | `authenticated` 全員 | `admin` |
 | 26 | `accommodation_rates` | 非PII | ― | `authenticated` 全員 | `admin` |
@@ -2033,16 +2033,38 @@ CREATE POLICY <T>_write_admin  ON <T> FOR ALL    TO authenticated
 ```
 
 適用先: `membership_plans`・`menu_items`・`accommodation_rates`・`accommodation_types`・`work_categories`・`rooms`（`rooms` の書き込みは `is_staff()`）。
-`quests` のみ差分あり — ゲストには `guest_allowed = true` の行だけを見せる:
+
+> [!warning] 2026-09-20 訂正：本節はかつて実装・正本と食い違っていた
+> 旧記載は「`quests` はゲストには `guest_allowed = true` の行**だけ**を見せる」としていたが、
+> これは正本 v13 §5.10.6（「施錠クエストも一覧には表示したうえで施錠表示する」）および
+> 実装（`0008_quests_rls_and_board_view.sql`）のどちらとも食い違っていた
+> （QUESTIONS.md [2026-09-19] 起票・オーナー指摘で判明）。**CLAUDE.md §1.1 により正本が勝つ**ため、
+> 本節を実装に合わせて訂正する。行は絞らない。絞るのは報酬額・指示内容（列）だけである。
+
+`quests` のみ差分あり。**行は絞らず、報酬額・指示内容（`reward_uii`・`description`）だけを
+列単位GRANTと `v_quest_board`（所有者権限ビュー）で絞る**:
 
 ```sql
-CREATE POLICY quests_select_member ON quests FOR SELECT TO authenticated
-  USING ( (SELECT public.current_member_role()) <> 'guest' );
-CREATE POLICY quests_select_guest  ON quests FOR SELECT TO authenticated
-  USING ( guest_allowed = true );
-CREATE POLICY quests_write_staff   ON quests FOR ALL TO authenticated
+CREATE POLICY quests_select_all  ON quests FOR SELECT TO authenticated USING ( true );
+CREATE POLICY quests_write_staff ON quests FOR ALL    TO authenticated
   USING ( (SELECT public.is_staff()) ) WITH CHECK ( (SELECT public.is_staff()) );
+
+-- reward_uii・description は authenticated への SELECT から明示的に外す（0012 ／ 2026-09-20）。
+-- PostgREST 直叩き（`GET /rest/v1/quests?select=reward_uii`）で列が素通りしていた穴を塞ぐ。
+-- 読めるのは v_quest_board（security_invoker = false）経由のみ。
+REVOKE SELECT ON quests FROM authenticated;
+GRANT SELECT (
+  quest_id, title, category_id, difficulty, base_hours, recruit_count, place_id,
+  origin_type, execution_mode, required_certification, guest_allowed,
+  core_only_reward, status, created_by, created_at, updated_at
+) ON quests TO authenticated;
 ```
+
+`v_quest_board` が `reward_uii`・`description` をNULLで返す条件は2つ、いずれかを満たせば伏せる:
+① **ゲスト × 施錠中**（`guest_allowed = false`。従来どおり）、
+② **非スタッフ（`member`/`guest`）× `core_only_reward = true`**（コア・管理者が機微と判断した
+クエストにだけ立てるフラグ。2026-09-20新設／v13 §5.10.6）。スタッフ（`admin`/`core_member`）は
+①②いずれにも該当しないため常に実値を見る。実装は `0012_quest_reward_column_lockdown.sql`。
 
 ### 6-8. RLS のテスト方法（`CLAUDE.md` §4.4 の必須要件）
 

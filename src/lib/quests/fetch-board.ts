@@ -23,13 +23,14 @@ type QuestBoardRow = {
   origin_type: QuestOriginType;
   status: QuestStatus;
   guest_allowed: boolean;
+  core_only_reward: boolean;
   required_certification: string[] | null;
   reward_uii: number | null;
   description: string | null;
 };
 
 const QUEST_BOARD_COLUMNS =
-  "quest_id, title, category_id, origin_type, status, guest_allowed, required_certification, reward_uii, description";
+  "quest_id, title, category_id, origin_type, status, guest_allowed, core_only_reward, required_certification, reward_uii, description";
 
 function toQuest(row: QuestBoardRow): Quest {
   return {
@@ -39,6 +40,7 @@ function toQuest(row: QuestBoardRow): Quest {
     originType: row.origin_type,
     status: row.status,
     guestAllowed: row.guest_allowed,
+    coreOnlyReward: row.core_only_reward,
     requiredCertification: row.required_certification ?? [],
     rewardUii: row.reward_uii,
     description: row.description,

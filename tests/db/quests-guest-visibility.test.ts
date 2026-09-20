@@ -3,17 +3,20 @@
 // 根拠: v13 §5.10.6 L1789「`guest_allowed = false` … **一覧には表示したうえで施錠表示**」、
 //       v13 §5.9.3 L1622（行単位の制御は RLS で行う）。
 //
-// > [!important] ここは正本と派生設計が食い違っている箇所である
-// > `DB物理設計.md` L2036-2044 の `quests_select_guest` は
-// > 「ゲストには `guest_allowed = true` の行**だけ**を見せる」としている。
-// > これだと施錠カードも解放件数バナーも成立しない。CLAUDE.md §1.1 により**正本 v13 が勝つ**ため、
-// > ここでは「ゲストにも施錠行が返る」を受入基準として固定する（設計書側の追随は別途報告済み）。
+// > [!important] 派生設計と正本の食い違いは 0012 で解消した（2026-09-20）
+// > `DB物理設計.md` L2036-2044 の `quests_select_guest`（「ゲストには `guest_allowed = true` の行
+// > **だけ**を見せる」）は派生設計側の誤りであり、正本 v13 §5.10.6 が定める「行は表示・列だけ絞る」を
+// > `0008_quests_rls_and_board_view.sql` は正しく実装していた（CLAUDE.md §1.1）。本ファイル下部の
+// > 「PostgREST直叩き」系テストは、`0008` の GRANT が列（`reward_uii`・`description`）まで
+// > `authenticated` へ広く与えていたために、正しい行レベル設計の**下**で列が素通りしていた別の穴
+// > （オーナー指摘・2026-09-20）を固定する。派生文書（`DB物理設計.md`・`API設計.md`）側の訂正も
+// > 同日中に実施済み。
 //
 // ⚠️ フィクスチャは自作のみ。実在の会員データ・実クエストを一切参照しない（CLAUDE.md §3.2・§7.1）。
 // ⚠️ 実装より先に書いている（設計 §11.6 commit-first）。
 
-import { authUserInsertSql, loginAsSql, memberInsertSql } from "./helpers/fixtures";
-import { describeDb, query } from "./helpers/psql";
+import { authUserInsertSql, loginAsSql, memberInsertSql, TEST_AUTH_USERS, TEST_MEMBERS } from "./helpers/fixtures";
+import { describeDb, query, sqlstateOf } from "./helpers/psql";
 
 /** ゲスト役。共有フィクスチャには `role = 'guest'` の会員が居ないため、本ファイルで用意する。 */
 const GUEST_AUTH_USER = {
@@ -32,15 +35,17 @@ const GUEST_MEMBER = {
 
 const LOCKED_QUEST_ID = "11111111-1111-4111-8111-1111111111f1";
 const OPEN_QUEST_ID = "11111111-1111-4111-8111-1111111111f2";
+const CORE_ONLY_QUEST_ID = "11111111-1111-4111-8111-1111111111f3";
 
 /**
- * クエスト2件を投入する。RLS を迂回できる所有者権限（psql の接続ユーザー）で流し、
+ * クエスト3件を投入する。RLS を迂回できる所有者権限（psql の接続ユーザー）で流し、
  * 検査は `SET ROLE authenticated` の後に行う。
  */
 const QUESTS_SQL = [
-  "INSERT INTO public.quests (quest_id, title, origin_type, guest_allowed, status)",
-  `VALUES ('${LOCKED_QUEST_ID}', 'テスト施錠クエスト', 'morning_meeting_auto', false, 'open'),`,
-  `       ('${OPEN_QUEST_ID}',   'テスト開放クエスト', 'manual',               true,  'open');`,
+  "INSERT INTO public.quests (quest_id, title, origin_type, guest_allowed, core_only_reward, reward_uii, description, status)",
+  `VALUES ('${LOCKED_QUEST_ID}',   'テスト施錠クエスト',     'morning_meeting_auto', false, false, 1000, '通常の指示内容', 'open'),`,
+  `       ('${OPEN_QUEST_ID}',     'テスト開放クエスト',     'manual',               true,  false,  800, '開放クエストの指示内容', 'open'),`,
+  `       ('${CORE_ONLY_QUEST_ID}','テスト非公開クエスト',   'manual',               false, true,  5000, 'コア限定の指示内容', 'open');`,
 ].join("\n");
 
 const asGuest = [
@@ -48,6 +53,24 @@ const asGuest = [
   memberInsertSql(GUEST_MEMBER),
   QUESTS_SQL,
   loginAsSql(GUEST_AUTH_USER.id),
+  "SET ROLE authenticated;",
+].join("\n");
+
+/** 一般街人（`role = 'member'`）としてログインする。共有フィクスチャの `self` 役を使う。 */
+const asMember = [
+  authUserInsertSql(TEST_AUTH_USERS.self),
+  memberInsertSql(TEST_MEMBERS.self),
+  QUESTS_SQL,
+  loginAsSql(TEST_AUTH_USERS.self.id),
+  "SET ROLE authenticated;",
+].join("\n");
+
+/** コアメンバー（`role = 'core_member'`）としてログインする。共有フィクスチャの `core` 役を使う。 */
+const asCoreMember = [
+  authUserInsertSql(TEST_AUTH_USERS.core),
+  memberInsertSql(TEST_MEMBERS.core),
+  QUESTS_SQL,
+  loginAsSql(TEST_AUTH_USERS.core.id),
   "SET ROLE authenticated;",
 ].join("\n");
 
@@ -69,3 +92,48 @@ describeDb("完了条件2: ゲストの `quests` 可視性（v13 §5.10.6 L1789�
     expect(rows).toBe("1");
   });
 });
+
+describeDb(
+  "完了条件9: PostgREST 直叩きでは報酬額・指示内容を読めない（0012／オーナー指摘・2026-09-20）",
+  () => {
+    test("ゲストは `quests` テーブルを直接 SELECT しても reward_uii を読めない（列単位GRANTで拒否）", () => {
+      const sqlstate = sqlstateOf(`
+        ${asGuest}
+        SELECT reward_uii FROM public.quests WHERE quest_id = '${LOCKED_QUEST_ID}';
+      `);
+      expect(sqlstate).toBe("42501");
+    });
+
+    test("一般街人も `quests` テーブルを直接 SELECT すると description を読めない（会員にも列は開かない）", () => {
+      const sqlstate = sqlstateOf(`
+        ${asMember}
+        SELECT description FROM public.quests WHERE quest_id = '${OPEN_QUEST_ID}';
+      `);
+      expect(sqlstate).toBe("42501");
+    });
+
+    test("`v_quest_board` 経由なら一般街人にも通常クエストの reward_uii が返る（列の拒否はテーブル直叩きのみ）", () => {
+      const rows = query(`
+        ${asMember}
+        SELECT reward_uii FROM public.v_quest_board WHERE quest_id = '${LOCKED_QUEST_ID}';
+      `);
+      expect(rows).toBe("1000");
+    });
+
+    test("`core_only_reward=true` のクエストは `v_quest_board` 経由でも一般街人には NULL が返る", () => {
+      const rows = query(`
+        ${asMember}
+        SELECT reward_uii IS NULL AS is_null FROM public.v_quest_board WHERE quest_id = '${CORE_ONLY_QUEST_ID}';
+      `);
+      expect(rows).toBe("t");
+    });
+
+    test("`core_only_reward=true` のクエストでもコアメンバーには `v_quest_board` 経由で実値が返る", () => {
+      const rows = query(`
+        ${asCoreMember}
+        SELECT reward_uii FROM public.v_quest_board WHERE quest_id = '${CORE_ONLY_QUEST_ID}';
+      `);
+      expect(rows).toBe("5000");
+    });
+  },
+);
