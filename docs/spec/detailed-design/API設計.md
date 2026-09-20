@@ -114,6 +114,7 @@ up: "[[浮遊街アプリ 総合要件定義・設計書_v13]]"
 | --- | --- | --- | --- | --- |
 | ~~POST~~ | ~~`/api/reservations/webhook`~~ | ~~宿泊予約フォーム送信トリガー~~ → ❌ **廃止（2026-08-23 ／ v13 §9 #46）**：Googleフォームを廃止し公開予約ページへ置換したため、Webhook 自体が不要になった（§3-4 参照） | — | — |
 | POST | `/api/checkins` | チェックイン（QR/画面タップ） | core_member, admin, 本人 | `check_ins` |
+| POST | `/api/checkins/{id}/lodging-register` | 宿泊者名簿の登録・確定（チェックイン時の店員タブレット操作／v13 §5.2.7・詳細は §3-5） | core_member, admin | `lodging_register_entries` |
 | PATCH | `/api/checkins/{id}/checkout` | チェックアウト | core_member, admin, 本人 | `check_ins`, `stay_ticket_transactions`（consume） |
 | DELETE | `/api/checkins/{id}` | 予約キャンセル・ノーショー（論理削除、理由必須） | core_member, admin | `check_ins`, `room_assignments` |
 | POST | `/api/checkins/{id}/room-assignments` | 部屋割当 | core_member, admin | `room_assignments` |
@@ -133,7 +134,7 @@ up: "[[浮遊街アプリ 総合要件定義・設計書_v13]]"
 
 | メソッド | パス | 概要 | 認可 | 対応DB |
 | --- | --- | --- | --- | --- |
-| GET | `/api/quests` | クエスト一覧（`guest_allowed`でフィルタ） | 全員 | `quests` |
+| GET | `/api/quests` | クエスト一覧（**行は絞らない**。報酬額・指示内容を`v_quest_board`が列マスクする／v13 §5.10.6。2026-09-20訂正：旧記載「`guest_allowed`でフィルタ」は行を隠す誤った実装イメージだった） | 全員 | `v_quest_board` |
 | POST | `/api/quests` | クエスト新規作成（手動） | admin, core_member | `quests` |
 | POST | `/api/quests/{id}/applications` | 受注申請 | member, guest（`guest_allowed=true`のみ） | `quest_applications` |
 | PATCH | `/api/quest-applications/{id}/review` | 審査・実行指示 | admin, core_member | `quest_applications` |
@@ -506,6 +507,81 @@ paths:
 > OTP により**メールアドレスの本人性は確認できる**が、それだけで既存会員アカウントへ結合してはならない。
 > 同姓同名・家族間での連絡先共有があり得るため、v13 §5.8.3 のとおり
 > **候補が複数件ヒットした場合は自動連携せず運営承認キューへ回す**。
+
+### 3-5. チェックイン時の宿泊者名簿収集（v13 §5.2.7・2026-09-20新設）
+
+> [!important] 住所・前泊地・後泊地は公開予約APIに追加しない
+> §3-4 の `POST /api/public/reservations` のリクエストスキーマ（上記）に旅館業法必須項目は
+> **意図的に含めていない**。2026-08-16・2026-08-23 の2度にわたりオーナーが確定した方針
+> （`QUESTIONS.md` 参照・v13 §5.2.3 の note）は「**チェックイン時にアプリ側で収集する**」であり、
+> 予約フォームを重くして初回客が離脱するリスクを避ける。本節はその収集経路を実装する。
+
+`lodging_register_entries`（`DB物理設計.md` §3-13）への書き込み経路は、現地チェックイン
+（店員タブレット）に限定する（同§⑤）。公開予約ページからは作らない。
+
+```yaml
+paths:
+  /api/checkins/{id}/lodging-register:
+    post:
+      summary: "宿泊者名簿（lodging_register_entries）の登録・確定（チェックイン時の店員タブレット操作）"
+      description: >
+        既存会員は member_profiles_private の現在値をタブレットへ初期表示し、本人に確認のうえ
+        確定した値をスナップショットとして保存する（DB物理設計.md §3-13⑤・②の
+        「member_profiles_private を参照してはならない」に従い、コピーであって参照ではない）。
+        未登録・初回客（ゲスト）は空欄から入力する。同伴者がいる場合は1人につき1回呼び出す
+        （is_representative=false）。
+      security:
+        - staffSession: []   # core_member または admin
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+          description: "check_ins.checkin_id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [full_name_confirmed, address, previous_location]
+              properties:
+                full_name_confirmed:
+                  type: boolean
+                  description: "氏名（・カナ）を本人へ提示し確認を取ったことの申告。false は 422 で拒否する"
+                full_name_snapshot:
+                  type: string
+                  nullable: true
+                  description: "未指定時はサーバ側で member_profiles_private の現在値をコピーする。会員に紐付かない客は必須"
+                full_name_kana_snapshot: { type: string, nullable: true }
+                address:
+                  type: string
+                  description: "旅館業法必須項目。宿泊時点の住所（スナップショットとして保存）"
+                previous_location:
+                  type: string
+                  description: "前泊地。旅館業法必須項目"
+                next_destination:
+                  type: string
+                  nullable: true
+                  description: "後泊地／行先。任意項目（v13 §7）"
+                is_representative:
+                  type: boolean
+                  default: true
+                  description: "false = 同伴者の名簿行（代表者と別の1名簿行として保存する）"
+      responses:
+        "201":
+          description: 名簿行を新規作成した
+        "200":
+          description: 既存の名簿行を更新した（チェックアウト前の訂正。DB物理設計.md §3-13② [!danger] 参照）
+        "403":
+          description: "core_member・admin 以外からの呼び出し"
+        "422":
+          description: "address・previous_location が空、または full_name_confirmed が false"
+```
+
+⚠️ **本エンドポイントの認可を `本人` に広げない。** `lodging_register_entries` の INSERT/UPDATE RLS
+（`DB物理設計.md` §3-13②）は staff 限定であり、これは意図的である。旅館業法対応の法定記録を
+宿泊者自身の自己申告のみで確定させると、記録の正確性の担保（本人確認）が失われる。
 > 予約時点で確定させるのは**宿泊枠であって人物の同定ではない**、という切り分けを守ること。
 
 ---

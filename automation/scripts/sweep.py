@@ -63,11 +63,26 @@ L_DONE = "auto:done"
 L_REJECTED = "auto:rejected"
 L_EPIC = "auto:epic"
 
-#: 「作業中」とみなすラベル。払い出しの上限はこの本数で数える。
+#: 「作業中」とみなすラベル。**進行中の表示**にはこちらを使う。
 #:
 #: ⚠️ 2026-09-19: `L_AUTO` を含める。入口で起動待ちの Issue も**着手済みの仕事**であり、
 #: 数えないと「まだ空きがある」と誤認して払い出しを続け、上限を超える。
 INFLIGHT = {L_AUTO, L_PLANNING, L_APPROVED, L_IMPLEMENTING, L_REVIEW}
+
+#: **オーナーの承認を待っている**ラベル。エージェントの実装枠は消費しない。
+#:
+#: ⚠️ 2026-09-20: 払い出しの上限計算から除外する。
+#: `auto:review` はゲート3（マージ前の承認・設計 §4.1）でオーナーを待つ状態を含み、
+#: この待ちには**上限が無い**（オーナーが見るまで何日でも続く）。
+#: 実測: 2026-09-19 に #54・#56 が `auto:review` のまま約21時間滞留し、
+#: `auto` の1件と合わせて上限3枠を占有した結果、
+#: スイープが「着手可能 12件」を正しく認識しながら**払い出し 0件**を続けていた。
+#: 承認待ちはオーナーの待ち行列であり、エージェントの同時実行数とは別の資源である。
+#: これを実装枠に数えると、**高リスク1件の承認待ちが低・中リスクの自動進行を全部止める**。
+OWNER_WAIT = {L_REVIEW}
+
+#: 払い出しの上限を数える対象。承認待ちを除いた「エージェントが実際に動かしている」本数。
+CAPACITY = INFLIGHT - OWNER_WAIT
 
 #: 停滞とみなすまでの分数。**各ジョブの timeout-minutes より必ず長くする**
 #: （auto-01=60 / auto-02=90 / auto-03=90）。短いと実行中の run を二重起動する。
@@ -344,9 +359,14 @@ def dispense(issues: list[dict], cap: int, wbs: Path, dry: bool) -> tuple[list[s
             print(f"  … {wf} が実行中のため、今回は払い出さない（次の定時で拾う）")
             return [], [], []
 
-    inflight = [it for it in issues if it["labelNames"] & INFLIGHT]
-    slots = cap - len(inflight)
-    print(f"  作業中 {len(inflight)}件 / 上限 {cap}件 → 空き {max(slots, 0)}")
+    # 上限は「エージェントが実際に動かしている本数」で数える。
+    # 承認待ち（OWNER_WAIT）はオーナーの待ち行列であって実装枠ではないため除外する
+    # （理由と実測は OWNER_WAIT の docstring を参照）。
+    working = [it for it in issues if it["labelNames"] & CAPACITY]
+    awaiting = [it for it in issues if it["labelNames"] & OWNER_WAIT]
+    slots = cap - len(working)
+    print(f"  作業中 {len(working)}件 / 上限 {cap}件 → 空き {max(slots, 0)}"
+          f"（別途 承認待ち {len(awaiting)}件。枠は消費しない）")
 
     # 既に起票済みの作業パッケージ ID を集める。
     #

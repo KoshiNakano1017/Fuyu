@@ -18,6 +18,7 @@ export const MANUAL_OPEN_QUEST = {
   originType: "manual" as const,
   status: "open" as const,
   guestAllowed: true,
+  coreOnlyReward: false,
   requiredCertification: [] as string[],
   rewardUii: 800,
   /** 指示内容。ゲストには返さない（v13 §5.10.6 L1800） */
@@ -34,6 +35,7 @@ export const MORNING_MEETING_LOCKED_QUEST = {
   originType: "morning_meeting_auto" as const,
   status: "open" as const,
   guestAllowed: false,
+  coreOnlyReward: false,
   requiredCertification: [] as string[],
   rewardUii: 1200,
   description: "切り返しの回数と水分量は当日の指示に従う",
@@ -51,6 +53,7 @@ export const LOCKED_ZERO_REWARD_QUEST = {
   originType: "manual" as const,
   status: "open" as const,
   guestAllowed: false,
+  coreOnlyReward: false,
   requiredCertification: [] as string[],
   rewardUii: 0,
   description: "母屋前の落ち葉を掃く",
@@ -65,6 +68,7 @@ export const LOCKED_CLOSED_QUEST = {
   originType: "manual" as const,
   status: "closed" as const,
   guestAllowed: false,
+  coreOnlyReward: false,
   requiredCertification: [] as string[],
   rewardUii: 500,
   description: "受付は終了している",
@@ -82,10 +86,29 @@ export const CERTIFICATION_REQUIRED_QUEST = {
   originType: "manual" as const,
   status: "open" as const,
   guestAllowed: true,
+  coreOnlyReward: false,
   requiredCertification: ["チェーンソー"],
   rewardUii: 1500,
   description: "伐倒方向の指示を受けてから着手する",
   assigneeName: "テスト管理者",
+};
+
+/**
+ * 施錠中かつ `core_only_reward = true`（v13 §5.10.6 2026-09-20改訂）。
+ * 一般会員（`MEMBER_VIEWER`）にも報酬額・指示内容を返してはならない、コア・管理者専用の1件。
+ */
+export const CORE_ONLY_LOCKED_QUEST = {
+  questId: "11111111-1111-4111-8111-111111111106",
+  title: "非公開の特別依頼",
+  categoryId: "22222222-2222-4222-8222-222222222206",
+  originType: "manual" as const,
+  status: "open" as const,
+  guestAllowed: false,
+  coreOnlyReward: true,
+  requiredCertification: [] as string[],
+  rewardUii: 5000,
+  description: "詳細は口頭のみで共有する。名簿記載は最小限に留める",
+  assigneeName: "テストコア",
 };
 
 /** クエストボードへ渡す全件。手動起案と朝会自動抽出が混在している（v13 §5.3 L754）。 */
@@ -95,6 +118,7 @@ export const ALL_QUESTS = [
   LOCKED_ZERO_REWARD_QUEST,
   LOCKED_CLOSED_QUEST,
   CERTIFICATION_REQUIRED_QUEST,
+  CORE_ONLY_LOCKED_QUEST,
 ];
 
 /** `guest_allowed = false` かつ `status = 'open'` の件数。解放件数バナーの N の期待値。 */
@@ -119,6 +143,22 @@ export const MEMBER_VIEWER = {
   memberId: "33333333-3333-4333-8333-333333333302",
   role: "member" as const,
   memberType: "街人（一般）",
+  certifications: [] as string[],
+};
+
+/** コアメンバー。`core_only_reward` の施錠クエストでも報酬額・指示内容が返る（v13 §5.10.6 2026-09-20改訂）。 */
+export const CORE_MEMBER_VIEWER = {
+  memberId: "33333333-3333-4333-8333-333333333306",
+  role: "core_member" as const,
+  memberType: "街人（コア）",
+  certifications: [] as string[],
+};
+
+/** 管理者。コアメンバーと同様、`core_only_reward` でも詳細が返る側。 */
+export const ADMIN_VIEWER = {
+  memberId: "33333333-3333-4333-8333-333333333307",
+  role: "admin" as const,
+  memberType: "街人（コア）",
   certifications: [] as string[],
 };
 

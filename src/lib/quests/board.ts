@@ -1,14 +1,16 @@
 // クエストボードの表示行を組み立てる。WBS 5-1。
 //
 // 根拠: v13 §5.3-1（手動起案と朝会自動抽出を統合表示）、
-//       v13 §5.10.6（施錠表示・解放件数バナー・**施錠クエストの詳細はゲストに返さない**）。
+//       v13 §5.10.6（施錠表示・解放件数バナー・詳細の非開示。2026-09-20改訂で
+//       `core_only_reward` を追加＝コア・管理者以外への非開示はゲスト限定ではなくなった）。
 //
 // ⚠️ ここは「画面に何を出すか」だけでなく「**API が何を返すか**」でもある。
-//    施錠クエストの報酬額・指示内容・担当者情報は、クライアントへ渡す前にこの関数で落とす。
-//    DOM で隠すのは認可ではない（v13 §5.9.3）。
+//    報酬額・指示内容・担当者情報は、クライアントへ渡す前にこの関数で落とす
+//    （`areDetailsHiddenForViewer()` が対象を判定する。DOM で隠すのは認可ではない／v13 §5.9.3）。
 
 import { canApplyToQuest } from "./application-gate";
 import {
+  areDetailsHiddenForViewer,
   badgeFor,
   countQuestsUnlockedByRegistration,
   isLockedForViewer,
@@ -68,7 +70,7 @@ function toCardBase(quest: Quest, viewer: QuestBoardViewer): QuestBoardItem {
   };
 }
 
-/** 施錠されていない閲覧者向け。詳細3項目をここで初めて足す。 */
+/** 詳細を伏せない閲覧者向け（`areDetailsHiddenForViewer()` が false）。詳細3項目をここで初めて足す。 */
 function toUnlockedItem(quest: Quest, viewer: QuestBoardViewer): QuestBoardItem {
   return {
     ...toCardBase(quest, viewer),
@@ -105,7 +107,9 @@ export function buildQuestBoard(
   viewer: QuestBoardViewer,
 ): QuestBoard {
   const items = quests.map((quest) =>
-    isLockedForViewer(quest, viewer) ? toCardBase(quest, viewer) : toUnlockedItem(quest, viewer),
+    areDetailsHiddenForViewer(quest, viewer)
+      ? toCardBase(quest, viewer)
+      : toUnlockedItem(quest, viewer),
   );
 
   return { items, banner: buildBanner(quests, viewer) };
