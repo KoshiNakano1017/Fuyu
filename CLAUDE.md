@@ -34,8 +34,8 @@ Claude Code（Claudian経由を含む）がこのリポジトリで作業する�
 | フロントエンド | Next.js（Vercel） / Tailwind CSS |
 | バックエンド・DB・認証 | Supabase（PostgreSQL / Auth / Realtime / RLS） |
 | メディアストレージ | Cloud Storage for Firebase（署名付きURL方式・Firebase Auth不採用） |
-| AI基盤 | Claude API / Agent SDK、朝会音声は Gemini API |
-| RAG | `line-rag-bot`（Firestore）へ統合。本体は独自ベクトル基盤を持たない |
+| AI基盤 | Claude API / Agent SDK、Gemini API。**アプリは録音データを扱わず、朝会の入力は文字起こし済みテキストのみ**（v13 §9 #63 ／ 2026-09-05 決定） |
+| RAG/ベクトル検索 | ~~`line-rag-bot`（Firestore）へ統合。本体は独自ベクトル基盤を持たない~~ → **2026-09-11 確定：Supabase pgvector へ一本化**。アプリと浮遊街コンシェルジュが同一のベクトル空間 `public.knowledge_chunks` を共有する（v13 §9 #31 限定改訂・v1.26.0 ／ `CONSOLIDATED_DECISIONS.md` §17） |
 | 通知 | LINE Messaging API |
 
 詳細は §1 の正本ドキュメントを参照。
