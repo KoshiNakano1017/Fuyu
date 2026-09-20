@@ -112,7 +112,6 @@ SELECT
   q.execution_mode,
   q.required_certification,
   q.guest_allowed,
-  q.core_only_reward,
   q.status,
   q.created_at,   -- 一覧の並び順（新しい順）に使う。施錠クエストでも伏せる必要は無い
 
@@ -125,7 +124,14 @@ SELECT
        THEN NULL ELSE q.reward_uii  END AS reward_uii,
   CASE WHEN (public.current_member_role() = 'guest' AND NOT q.guest_allowed)
          OR (NOT public.is_staff() AND q.core_only_reward)
-       THEN NULL ELSE q.description END AS description
+       THEN NULL ELSE q.description END AS description,
+
+  -- ⚠️ 新設列は**必ず末尾に置く**。`CREATE OR REPLACE VIEW` は既存列の名前・順序を
+  --    変えられず、途中へ挿すと `cannot change name of view column "status" to
+  --    "core_only_reward"`（SQLSTATE 42P16）で落ちる。読みやすさのために
+  --    `guest_allowed` の隣へ置きたくなるが、それをやるならビューの DROP が要り、
+  --    0008 の GRANT/REVOKE を張り直す必要が出る（同じ結果に対して手数が増えるだけ）。
+  q.core_only_reward
 FROM public.quests q;
 
 COMMENT ON VIEW public.v_quest_board IS
