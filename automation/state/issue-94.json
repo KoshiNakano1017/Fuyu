@@ -21,9 +21,9 @@
     "review": 0
   },
   "tokens": {
-    "input": 166,
-    "output": 112556,
-    "costUsd": 9.5551235
+    "input": 202,
+    "output": 124156,
+    "costUsd": 11.151588
   },
   "testHashes": {
     "e2e/smoke.spec.ts": "ed6ce8db5e0004a2",
@@ -143,7 +143,7 @@
     }
   ],
   "acceptanceDerived": false,
-  "updatedAt": "2026-09-20T17:59:56.391Z",
+  "updatedAt": "2026-09-20T18:04:29.681Z",
   "provisional": [
     {
       "question": "浮遊街コンシェルジュ（line-rag-bot）Streamlit 管理画面の URL をどこから供給するか（正本にも `.env.example` にも Phase 1 用のキーが存在しない）",
