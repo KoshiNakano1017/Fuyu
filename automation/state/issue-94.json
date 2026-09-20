@@ -1,0 +1,141 @@
+{
+  "version": 1,
+  "issue": 94,
+  "pr": null,
+  "branch": null,
+  "phase": "plan",
+  "risk": "mid",
+  "attempts": {
+    "infra": 0,
+    "verify": 0,
+    "review": 0
+  },
+  "lastFingerprint": {
+    "infra": null,
+    "verify": null,
+    "review": null
+  },
+  "repeatedFingerprint": {
+    "infra": 0,
+    "verify": 0,
+    "review": 0
+  },
+  "tokens": {
+    "input": 136,
+    "output": 84745,
+    "costUsd": 7.644781500000001
+  },
+  "testHashes": {},
+  "specRefs": [
+    {
+      "ref": "v13 §5.7.5",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "1306-1328"
+    },
+    {
+      "ref": "v13 §5.7.1",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "1205-1215"
+    },
+    {
+      "ref": "v13 §5.9.1",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "1623-1647"
+    },
+    {
+      "ref": "v13 §5.9.2",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "1649-1653"
+    },
+    {
+      "ref": "v13 §5.9.3",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "1655-1662"
+    },
+    {
+      "ref": "v13 §5.9.4",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "1664-1688"
+    },
+    {
+      "ref": "v13 §5.9.5",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "1691-1709"
+    },
+    {
+      "ref": "v13 §9 #31",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "2539"
+    },
+    {
+      "ref": "画面設計.md §4 B9/C5",
+      "path": "docs/spec/detailed-design/画面設計.md",
+      "lines": "338-352"
+    },
+    {
+      "ref": "外部連携設計.md §2-2・§2-3",
+      "path": "docs/spec/detailed-design/外部連携設計.md",
+      "lines": "120-130"
+    }
+  ],
+  "acceptance": [
+    {
+      "criterion": "core_member と admin が /staff/knowledge を開くと「浮遊街コンシェルジュ管理画面を開く」ボタンが表示される",
+      "origin": "derived",
+      "basis": "v13 §5.9.1（「ナレッジ登録フォーム（§5.7）」行 ＝ コアメンバー ◯／運営管理者 ◯）／ v13 §5.7.1 ／ 画面設計.md §4 B9",
+      "test": "コアメンバーと運営管理者は /staff/knowledge に到達できる ／ 管理画面 URL が設定されていればその URL を返す"
+    },
+    {
+      "criterion": "ボタンから管理画面 URL が別タブで開く（target=\"_blank\" ＋ rel=\"noopener noreferrer\"）",
+      "origin": "derived",
+      "basis": "画面設計.md §4 B9「タップで別タブで開く（システム間の認証連携なし）」",
+      "test": "導線ボタンは target=\"_blank\" と rel=\"noopener noreferrer\" を持つ"
+    },
+    {
+      "criterion": "member・guest はナビに当該領域が描画されず、URL を直接叩いても中身を一切描画せず制限画面になる",
+      "origin": "derived",
+      "basis": "v13 §5.9.2（DOM から除外）・§5.9.3（サーバサイド認可の併置）・§5.9.4（中身をマウントしない）",
+      "test": "一般会員とゲストは /staff/knowledge に到達できない"
+    },
+    {
+      "criterion": "管理画面 URL が未設定（または開けない値）の環境では、ボタンそのものを描画しない",
+      "origin": "derived",
+      "basis": "v13 §5.9.5「空振りの禁止」（押しても何も起きない導線を作らない）",
+      "test": "管理画面 URL が未設定・空文字なら URL を返さない ／ http・https 以外の URL は開けないため URL を返さない"
+    },
+    {
+      "criterion": "アプリ側にナレッジ登録フォーム・エスカレーション一覧・line-rag-bot API 呼び出しが存在しない",
+      "origin": "derived",
+      "basis": "v13 §9 #31 ／ v13 §5.7.5 注記 ／ 外部連携設計.md §2-2（Phase 1 に API 連携は存在しない）",
+      "test": "src/ に line-rag-bot への API 呼び出しとナレッジ登録フォームが存在しない"
+    }
+  ],
+  "acceptanceDerived": true,
+  "updatedAt": "2026-09-20T17:54:02.300Z",
+  "provisional": [
+    {
+      "question": "浮遊街コンシェルジュ（line-rag-bot）Streamlit 管理画面の URL をどこから供給するか（正本にも `.env.example` にも Phase 1 用のキーが存在しない）",
+      "options": [
+        "A. 公開環境変数 `NEXT_PUBLIC_CONCIERGE_ADMIN_URL` を新設してクライアントから参照する",
+        "B. サーバ専用の環境変数にして Server Component から props で渡す",
+        "C. 定数としてコードに直書きする"
+      ],
+      "chosen": "A. 公開環境変数 `NEXT_PUBLIC_CONCIERGE_ADMIN_URL` を新設し、未設定時はボタンを描画しない",
+      "rationale": "URL は秘匿値ではない（`画面設計.md` §4 B9 のとおりコンシェルジュ側が自身のログイン機構で認証し、システム間の認証連携は無い）一方で、値は環境ごとに変わるため CLAUDE.md §3.2「設定値はコードに直書きせず環境変数経由」に従う（C は不可）。未設定時にボタンを描画しないのは v13 §5.9.5「空振りの禁止」に従うため。`.env.example` の `LINE_RAG_BOT_ENDPOINT` / `LINE_RAG_BOT_API_KEY` は Phase 2 用（コメントアウト済み）であり、Phase 1 の外部リンク先には使わない。",
+      "specRef": "v13 §5.9.5 ／ §9 #31 ／ 画面設計.md §4 B9 ／ CLAUDE.md §3.2",
+      "reversibility": "参照箇所は導線ボタン1か所と `.env.example` の1行のみ。B へ寄せ直す場合も `NEXT_PUBLIC_` 接頭辞を外して Server Component 経由で渡す変更で済み、DB・API・公開形は一切変わらない（数分で戻せる）。"
+    },
+    {
+      "question": "浮遊街コンシェルジュ（line-rag-bot）Streamlit 管理画面の URL をどこから供給するか（正本にも .env.example にも Phase 1 用のキーが存在しない）",
+      "options": [
+        "A. 公開環境変数 NEXT_PUBLIC_CONCIERGE_ADMIN_URL を新設し、未設定時はボタンを描画しない",
+        "B. サーバ専用の環境変数にして Server Component 経由で渡す",
+        "C. URL をコードに直書きする"
+      ],
+      "chosen": "A. 公開環境変数 NEXT_PUBLIC_CONCIERGE_ADMIN_URL を新設し、未設定時はボタンを描画しない",
+      "rationale": "調査フェーズで置かれた仮決定をそのまま引き継いだ（作り直していない）。URL は秘匿値ではない（画面設計.md §4 B9 のとおり Streamlit 側が自身のログイン機構で認証し、システム間の認証連携は無い）一方、値は環境ごとに変わるため CLAUDE.md §3.2「設定値はコードに直書きせず環境変数経由」に従う（C は不可）。未設定時にボタンを描画しないのは v13 §5.9.5「空振りの禁止」に従うためで、逆方向（Streamlit → アプリ）の PARENT_APP_URL が「未設定ならリンクを出さないだけ」としている形とも揃う。",
+      "specRef": "v13 §5.9.5 ／ v13 §9 #31 ／ 画面設計.md §4 B9 ／ CLAUDE.md §3.2",
+      "reversibility": "参照箇所は導線ボタン1か所と .env.example の1行のみ。B へ寄せ直す場合も NEXT_PUBLIC_ 接頭辞を外して Server Component 経由で渡す変更で済み、DB・API・公開形は一切変わらない（数分で戻せる）。なお Next.js 16 では NEXT_PUBLIC_ の値が next build 時にインライン展開され、ビルド後の環境変数変更に応答しない点は A の付随制約として段取りに明記した。"
+    }
+  ]
+}

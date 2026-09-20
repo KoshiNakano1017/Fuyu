@@ -27,6 +27,23 @@
 正本 v13 §5.8.5・`DB物理設計.md` §6 RLS（`admin` ＋ `core_member`）と
 `API設計.md` L259・`画面設計.md` C8・`WBS_Phase1.md` L340（`admin` のみ）で食い違っている。
 `QUESTIONS.md`「[2026-09-20] WBS `10-4`（宿泊日数手動調整ログ）を操作できるロールが正本と派生文書で食い違う」に起票済み。
+## [2026-09-20 15:40] line-rag-bot管理画面への導線（外部リンクのみ）（Issue #94 ／ WBS `9-2`） — IN PROGRESS
+
+**リスク区分: 中**（ゲート2・3 ／ 承認2回）。§4.1 の「上記に該当しない新規機能」。
+表示ロール（`core_member`／`admin`）は v13 §5.9.1「ナレッジ登録フォーム（§5.7）」行で既に確定しており、
+`src/lib/auth/navigation.ts` の `knowledgeForm`（`/staff/knowledge`・`STAFF_ONLY`）として実装済みのため、
+**本タスクで認可の値域を新たに決めない**。API 連携なし・認証連携なし（画面設計.md §4 B9/C5）。
+完了条件は Issue の雛形が空欄だったため正本から導出した（`origin: derived`）。
+コンシェルジュ管理画面 URL の供給方法は `QUESTIONS.md`「⚡ [2026-09-20] 仮決定で進行：…」に記録。
+
+**段取り（2026-09-20 ／ ゲート2 へ提出）**: `/staff/knowledge` を新規追加し、
+`requireStaff()` ＋ `AccessDenied`（既存 `src/app/admin/morning-meetings/page.tsx` と同型）の上に
+外部リンクボタン1つだけを置く。URL の解決は純関数 `src/lib/concierge/adminLink.ts` に切り出し、
+未設定・空文字・http(s) 以外はボタンを描画しない（v13 §5.9.5 空振りの禁止）。
+`/admin`（C5 管理画面ダッシュボード）は本体がまだ存在しないためスコープ外
+（`admin` は §5.9.1 のとおり `/staff/knowledge` から同じ導線に到達できる）。
+正本内の「ナレッジ登録フォーム」表記の揺れは `QUESTIONS.md`
+「⚡ [2026-09-20] 「ナレッジ登録」の行が正本内でフォームとも外部リンクとも読める」に非ブロックで記録済み。
 
 ## [2026-09-20 14:03] 管理系メニューの到達性（ナビ情報設計）（Issue #92 ／ WBS 2-6） — BLOCKED
 
