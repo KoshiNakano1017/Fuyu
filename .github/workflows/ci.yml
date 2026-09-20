@@ -252,19 +252,6 @@ jobs:
         with:
           version: latest
 
-      - name: 前提の揃っていないマイグレーションを退避
-        if: steps.check.outputs.exists == 'true'
-        run: |
-          set -euo pipefail
-          # 0100 は public.work_categories（別の作業パッケージの成果物）を参照しており、
-          # それ単体では適用できない（同ファイル冒頭が自らそう明記している）。
-          # 残したまま supabase start するとマイグレーション適用が落ち、DB テストが1本も走らない。
-          #
-          # ⚠️ リポジトリのファイルは書き換えない（CLAUDE.md §4.5「既存マイグレーションを書き換えない」）。
-          #    ここで行うのはランナー上の一時退避だけであり、前提テーブルが揃った時点でこの手順は消える。
-          mkdir -p "$RUNNER_TEMP/deferred-migrations"
-          mv supabase/migrations/0100_rag_pgvector_knowledge_chunks.sql "$RUNNER_TEMP/deferred-migrations/"
-
       - name: ローカルスタックを起動（auth.users が要るため素の Postgres では代替できない）
         if: steps.check.outputs.exists == 'true'
         run: supabase start
