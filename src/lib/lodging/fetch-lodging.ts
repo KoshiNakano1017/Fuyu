@@ -7,6 +7,7 @@
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 import type { AllocationMode } from "./availability";
+import type { AccommodationRate } from "./rates";
 
 /** 宿泊形態（`accommodation_types`）。並び順は `display_order`。 */
 export type AccommodationType = {
@@ -216,4 +217,44 @@ async function fetchMemberLabels(memberIds: readonly string[]): Promise<Map<stri
     }
   }
   return labels;
+}
+
+/**
+ * 宿泊料金マスタを全件読む（WBS 3-9 ／ 画面ID C13）。
+ *
+ * **現行行だけに絞らない。** マスタ管理画面は改定の履歴を見せる場所であり、
+ * 期間を閉じた過去の料金も並べる（v13 §5.4.2②「適用期間を区切って新しい行を追加」）。
+ * その日に適用される1行を選ぶのは `rates.ts` の `rateOn()` の仕事である。
+ */
+export async function fetchAccommodationRates(): Promise<AccommodationRate[]> {
+  const supabase = await createServerSupabaseClient();
+
+  const { data, error } = await supabase
+    .from("accommodation_rates")
+    .select("rate_id, room_type, member_category, price_per_night_yen, effective_from, effective_until")
+    .order("room_type", { ascending: true })
+    .order("effective_from", { ascending: false });
+
+  if (error || !data) {
+    // 料金マスタが空でも画面は開く（初期行を入れない設計のため／`0021` の冒頭）
+    return [];
+  }
+
+  return (
+    data as {
+      rate_id: string;
+      room_type: string;
+      member_category: "member" | "non_member";
+      price_per_night_yen: number;
+      effective_from: string;
+      effective_until: string | null;
+    }[]
+  ).map((row) => ({
+    rateId: row.rate_id,
+    roomType: row.room_type,
+    memberCategory: row.member_category,
+    pricePerNightYen: row.price_per_night_yen,
+    effectiveFrom: row.effective_from,
+    effectiveUntil: row.effective_until,
+  }));
 }
