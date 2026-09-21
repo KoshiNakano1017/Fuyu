@@ -1,9 +1,9 @@
 {
   "version": 1,
   "issue": 94,
-  "pr": null,
+  "pr": 96,
   "branch": null,
-  "phase": "plan",
+  "phase": "review",
   "risk": "mid",
   "attempts": {
     "infra": 0,
@@ -21,11 +21,43 @@
     "review": 0
   },
   "tokens": {
-    "input": 136,
-    "output": 84745,
-    "costUsd": 7.644781500000001
+    "input": 262,
+    "output": 170893,
+    "costUsd": 15.366965500000001
   },
-  "testHashes": {},
+  "testHashes": {
+    "e2e/smoke.spec.ts": "ed6ce8db5e0004a2",
+    "tests/acceptance.test.ts": "ba0921981b4630b7",
+    "tests/ai-client.test.ts": "26b0511e481725da",
+    "tests/ai-env.test.ts": "af2ee601c87cfcce",
+    "tests/auth-guard.test.ts": "36f9487ef96e224e",
+    "tests/db-test-infra.test.ts": "b4db59cc79914376",
+    "tests/db/current-operator-id.test.ts": "82e8173ec61178d7",
+    "tests/db/helpers/fixtures.ts": "beddc2651149fe9b",
+    "tests/db/helpers/psql.ts": "d95bcca15e534a0a",
+    "tests/db/lodging-register.test.ts": "b8d167670f70b0f5",
+    "tests/db/login-binding.test.ts": "951155ad26536214",
+    "tests/db/member-display-name.test.ts": "8101ecf136244b02",
+    "tests/db/members-guard-trigger.test.ts": "c0675285d9d0be31",
+    "tests/db/members-schema.test.ts": "1dec944f3943d4c7",
+    "tests/db/morning-meetings-rls.test.ts": "d20220c01e6fa90c",
+    "tests/db/quests-guest-visibility.test.ts": "90a7edbc7e331f04",
+    "tests/db/rag-pgvector.test.ts": "35a7033913d7df2a",
+    "tests/db/rls-and-helper-functions.test.ts": "9ac749d11b2c42ad",
+    "tests/db/rls-policies.test.ts": "3748be28b027dcc3",
+    "tests/db/rooms.test.ts": "cd23e006ce8338de",
+    "tests/fixtures-are-synthetic.test.ts": "9be179b5f7481ed6",
+    "tests/fixtures/quest-board.ts": "2177f6c4931566c8",
+    "tests/helpers/ai-sources.ts": "b976105b854a38e2",
+    "tests/migrations-baseline.test.ts": "cd1b6e29a043b253",
+    "tests/morning-meeting-intake.test.ts": "9256f65a908066c8",
+    "tests/quest-application-gate.test.ts": "daf570f863ab6141",
+    "tests/quest-board.test.ts": "e5bfc002c8c4c8b2",
+    "tests/role-navigation.test.ts": "cf16b87575989f3a",
+    "tests/serving-status.test.ts": "4b3d762719a30c34",
+    "tests/supabase-env.test.ts": "2854c57b5940bac5",
+    "tests/uii.test.ts": "b5791629644723f4"
+  },
   "specRefs": [
     {
       "ref": "v13 §5.7.5",
@@ -81,37 +113,37 @@
   "acceptance": [
     {
       "criterion": "core_member と admin が /staff/knowledge を開くと「浮遊街コンシェルジュ管理画面を開く」ボタンが表示される",
-      "origin": "derived",
+      "origin": "issue",
       "basis": "v13 §5.9.1（「ナレッジ登録フォーム（§5.7）」行 ＝ コアメンバー ◯／運営管理者 ◯）／ v13 §5.7.1 ／ 画面設計.md §4 B9",
-      "test": "コアメンバーと運営管理者は /staff/knowledge に到達できる ／ 管理画面 URL が設定されていればその URL を返す"
+      "test": "tests/staff-knowledge-page.test.ts:`コアメンバーは /staff/knowledge へ入れる` / `運営管理者は /staff/knowledge へ入れる` / `コアメンバーのナビにナレッジ登録の領域が現れる` / `運営管理者のナビにナレッジ登録の領域が現れる` / `ページがコンシェルジュ管理画面への導線ボタンを描画する`、tests/concierge-admin-link.test.ts:`ボタンの文言が「浮遊街コンシェルジュ管理画面を開く」を含む`"
     },
     {
       "criterion": "ボタンから管理画面 URL が別タブで開く（target=\"_blank\" ＋ rel=\"noopener noreferrer\"）",
-      "origin": "derived",
+      "origin": "issue",
       "basis": "画面設計.md §4 B9「タップで別タブで開く（システム間の認証連携なし）」",
-      "test": "導線ボタンは target=\"_blank\" と rel=\"noopener noreferrer\" を持つ"
+      "test": "tests/concierge-admin-link.test.ts:`管理画面 URL が設定されていれば a 要素を返す` / `href に管理画面 URL が入る` / `target=\"_blank\" で別タブで開く` / `rel に noopener が含まれる` / `rel に noreferrer が含まれる`"
     },
     {
       "criterion": "member・guest はナビに当該領域が描画されず、URL を直接叩いても中身を一切描画せず制限画面になる",
-      "origin": "derived",
+      "origin": "issue",
       "basis": "v13 §5.9.2（DOM から除外）・§5.9.3（サーバサイド認可の併置）・§5.9.4（中身をマウントしない）",
-      "test": "一般会員とゲストは /staff/knowledge に到達できない"
+      "test": "tests/staff-knowledge-page.test.ts:`一般会員には非表示である` / `ゲストには非表示である` / `一般会員のナビにナレッジ登録の領域が現れない` / `ゲストのナビにナレッジ登録の領域が現れない` / `一般会員は URL を直接叩いても /staff/knowledge へ入れない` / `ゲストは URL を直接叩いても /staff/knowledge へ入れない` / `custom も /staff/knowledge へ入れない（権限内容が未定義のため ／ DB物理設計 §6-9⑥）` / `ページがサーバサイドで requireStaff() を呼ぶ` / `拒否時にアクセス制限画面を返す` / `認可判定より前にコンシェルジュ導線を描画しない`"
     },
     {
       "criterion": "管理画面 URL が未設定（または開けない値）の環境では、ボタンそのものを描画しない",
-      "origin": "derived",
+      "origin": "issue",
       "basis": "v13 §5.9.5「空振りの禁止」（押しても何も起きない導線を作らない）",
-      "test": "管理画面 URL が未設定・空文字なら URL を返さない ／ http・https 以外の URL は開けないため URL を返さない"
+      "test": "tests/concierge-admin-link.test.ts:`管理画面 URL が未設定なら null を返す` / `管理画面 URL が空文字なら未設定として扱い null を返す` / `管理画面 URL が空白のみなら未設定として扱い null を返す` / `URL として解釈できない値なら null を返す` / `http でも https でもないスキームなら null を返す` / `http の管理画面 URL は開ける値として扱う（ローカルの Streamlit 向け）` / `管理画面 URL が未設定ならボタンそのものを描画しない` / `管理画面 URL が空文字ならボタンそのものを描画しない` / `管理画面 URL が開けない値ならボタンそのものを描画しない`"
     },
     {
       "criterion": "アプリ側にナレッジ登録フォーム・エスカレーション一覧・line-rag-bot API 呼び出しが存在しない",
-      "origin": "derived",
+      "origin": "issue",
       "basis": "v13 §9 #31 ／ v13 §5.7.5 注記 ／ 外部連携設計.md §2-2（Phase 1 に API 連携は存在しない）",
-      "test": "src/ に line-rag-bot への API 呼び出しとナレッジ登録フォームが存在しない"
+      "test": "tests/no-line-rag-bot-integration.test.ts:`/staff/knowledge のページにフォーム部品が1つも無い` / `/staff/knowledge のページが fetch を1度も呼ばない` / `アプリのソースが line-rag-bot のエンドポイント設定を読まない` / `エスカレーション一覧の画面・ルートがアプリに無い` / `エスカレーションを扱う識別子がアプリのソースに無い`"
     }
   ],
-  "acceptanceDerived": true,
-  "updatedAt": "2026-09-20T17:54:02.300Z",
+  "acceptanceDerived": false,
+  "updatedAt": "2026-09-20T18:12:24.236Z",
   "provisional": [
     {
       "question": "浮遊街コンシェルジュ（line-rag-bot）Streamlit 管理画面の URL をどこから供給するか（正本にも `.env.example` にも Phase 1 用のキーが存在しない）",
