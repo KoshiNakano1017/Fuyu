@@ -400,6 +400,46 @@ git config core.hooksPath .githooks
 - PR ごとに Vercel Preview が生成される。UI 変更のレビューは Preview URL で行う
 - Supabase のマイグレーションは自動適用しない。手動で内容を確認してから適用する（データ破壊を防ぐため）
 
+**Vercel の環境変数（2026-09-21 障害を受けて明文化）**
+
+> [!warning] `NEXT_PUBLIC_*` を **Secret 型で登録してはならない**
+> Vercel の環境変数には **Config 型**と **Secret 型（Sensitive）**がある。
+> **Secret 型の値はビルドと Edge ランタイムへ渡らない。**
+> `NEXT_PUBLIC_*` はビルド時にコードへ埋め込まれる変数なので、Secret 型で登録すると
+> **ビルドは成功したまま `undefined` が焼き込まれ、実行時に初めて壊れる。**
+>
+> `vercel env add` の**既定は Secret 型**である。CLI から入れるときは必ず
+> `--type config` を付ける。ダッシュボードから入れるときは Sensitive を有効にしない。
+>
+> ```bash
+> vercel env add NEXT_PUBLIC_SUPABASE_URL production --type config
+> ```
+>
+> `NEXT_PUBLIC_*` の値はブラウザへ配信される公開情報であり（`src/lib/supabase/client.ts`）、
+> Secret 型にしても秘匿の実益は無い。**秘匿したい値は `NEXT_PUBLIC_` を付けないことで守る。**
+
+| 変数 | 型 | 必要な時点 |
+| --- | --- | --- |
+| `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` | **Config** | ビルド時（埋め込み） |
+| `SUPABASE_SERVICE_ROLE_KEY` | Secret 可 | 実行時のみ（Node ランタイム）。本番ビルドでは `scripts/check-env.mjs` が存在を必須にする |
+
+`NEXT_PUBLIC_*` はビルド時に埋め込まれるため、値を変更したら**再デプロイしないと反映されない**。
+
+欠落は `npm run build` の prebuild（`scripts/check-env.mjs`）が検出してビルドを落とす。
+CI の「ビルド」ジョブはダミー値を注入するため緑になる点に注意（そこは実値を検証していない）。
+
+**2026-09-21 の障害の経緯**（再発時に同じ調査を繰り返さないための記録）
+
+`NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` が Secret 型で登録されており、
+ビルドへ値が渡らず `undefined` が埋め込まれた。その結果 `src/middleware.ts` が全経路で例外を投げ、
+Vercel が `MIDDLEWARE_INVOCATION_FAILED`（500）を返してサイト全体が停止した。
+middleware の matcher は静的アセット以外の全経路であるため、**死活監視の `/api/health` まで
+巻き添えで落ち、外形監視からは原因が読めなかった**。Config 型で登録し直して復旧。
+
+- 診断は `vercel logs <デプロイURL>` が決め手になった。外形の 500 だけでは切り分けられない
+- middleware 側は環境変数が無ければ素通りする手当てを入れたが、**それは原因を読めるようにする
+  ための保険**であり、画面は変数が無ければ動かない
+
 ### 6.4 必要な Secrets（GitHub リポジトリ設定）
 
 | 名前 | 用途 |
@@ -564,3 +604,13 @@ git config core.hooksPath .githooks
 > [!warning] 例外は街人番号（`街人#10234`）だけ ― こちらは番号のみで書く
 > 会員を指す番号に氏名・属性・入会時期を添えることは §7.1 違反になる。
 > 街人番号は**概要を付けず、番号のみで参照する**。「分かりやすくするため」の補足を足さない。
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->
