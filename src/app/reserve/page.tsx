@@ -28,6 +28,21 @@ import { createPublicReservationAction, requestReservationCodeAction } from "./a
  * ガードを置かない。**置かないことが仕様である。** 代わりに、書き込みは
  * `createPublicReservation()`（service_role）1箇所に閉じ、そこで OTP 検証を必須にしている。
  */
+/**
+ * ★ **Node ランタイムに固定する。**
+ *
+ * この画面は表示の材料を `service_role`（`createAdminSupabaseClient()`）で読む。
+ * `anon` には GRANT が無いためそうせざるを得ないのだが、
+ * **Edge ランタイムには `SUPABASE_SERVICE_ROLE_KEY` が渡らない**。
+ * 2026-09-21 の本番で実際に `ε GET /reserve` として Edge で実行され、
+ * 「環境変数 SUPABASE_SERVICE_ROLE_KEY が未設定です」で 500 になった
+ * （ログの `ε` が Edge、`λ` が Node。`/orders` は `λ` で正常だった）。
+ *
+ * 既定は Node だが、**明示しておかないと将来また Edge へ寄る**。
+ * service_role を使う画面には必ず付けること。
+ */
+export const runtime = "nodejs";
+
 export default async function ReservePage() {
   const today = new Date().toISOString().slice(0, 10);
 
