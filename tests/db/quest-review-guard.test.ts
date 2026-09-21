@@ -55,6 +55,47 @@ SET    approval_status = '承認完了', approved_by = public.current_member_id(
 WHERE  log_id = '${LOG_ID}';
 `;
 
+/**
+ * その実行者が `work_logs` を UPDATE したとき、**何行が更新されたか**を返す。
+ *
+ * ## なぜ「42501 が返ること」で書けないのか
+ *
+ * `work_logs` の UPDATE ポリシーは `work_logs_update_staff`（`USING (is_staff())`）の1本だけで、
+ * **本人向けの UPDATE ポリシーは意図的に作っていない**（0017 のテーブルコメント
+ * 「差戻し後の再提出は同じ申請に対する別行として積む（上書きしない）」）。
+ *
+ * PostgreSQL の RLS は `USING` と `WITH CHECK` で挙動が違う:
+ *   - `USING` … 条件に合わない行は**最初から対象外**。例外は上がらず **0行更新で正常終了**する
+ *   - `WITH CHECK` … 書き込む値が条件に合わなければ **42501**
+ * 非スタッフは `USING` で落ちるため、`BEFORE UPDATE` のガードトリガーまで**到達しない**。
+ * つまり 42501 を上げる経路が存在しない。
+ *
+ * 同じ状況を `check-ins-and-availability.test.ts`「本人が自分の予約を UPDATE しても 0行」も
+ * この形で検証している。**止まる場所が相手で違う**ことを書き分ける:
+ *   - staff（core_member）… `USING` を通過 → **トリガーが 42501**
+ *   - 非スタッフ … `USING` で **0行**
+ */
+function affectedRows(prelude: string, update: string): string {
+  return query(`
+    ${prelude}
+    WITH changed AS (
+      ${update.trim().replace(/;\s*$/, "")}
+      RETURNING 1
+    )
+    SELECT count(*) FROM changed;
+  `);
+}
+
+/** 試行のあと、承認ステージが動いていないことを見る（結果としての不変）。 */
+function approvalStatusAfter(prelude: string, update: string): string {
+  return query(`
+    ${prelude}
+    ${update}
+    RESET ROLE;
+    SELECT approval_status FROM public.work_logs WHERE log_id = '${LOG_ID}';
+  `);
+}
+
 describeDb("最終承認は管理者のみが行える（v13 §5.3.2・§6 L2147）", () => {
   test("管理者は完了報告を承認完了にできる", () => {
     const status = query(`
@@ -69,13 +110,20 @@ describeDb("最終承認は管理者のみが行える（v13 §5.3.2・§6 L2147
     expect(sqlstateOf(`${asCore}\n${APPROVE}`)).toBe("42501");
   });
 
-  test("一般会員は完了報告を承認完了にできない（42501）", () => {
-    // RLS の行フィルタではなくトリガーで落ちることを確かめる。
-    expect(sqlstateOf(`${asMember}\n${APPROVE}`)).toBe("42501");
+  test("一般会員の承認は 0 行で終わる（RLS の USING で対象外）", () => {
+    expect(affectedRows(asMember, APPROVE)).toBe("0");
   });
 
-  test("member_type が親方でも role が一般会員なら承認できない（v13 §2）", () => {
-    expect(sqlstateOf(`${asOyakata}\n${APPROVE}`)).toBe("42501");
+  test("一般会員が承認を試みても approval_status は 報告済み のまま", () => {
+    expect(approvalStatusAfter(asMember, APPROVE)).toBe("報告済み");
+  });
+
+  test("member_type が親方でも role が一般会員なら承認は 0 行（v13 §2）", () => {
+    expect(affectedRows(asOyakata, APPROVE)).toBe("0");
+  });
+
+  test("member_type が親方の一般会員が試みても approval_status は 報告済み のまま（v13 §2）", () => {
+    expect(approvalStatusAfter(asOyakata, APPROVE)).toBe("報告済み");
   });
 });
 
@@ -96,8 +144,12 @@ describeDb("コアメンバー確認は運営が行える（v13 §5.3.2）", () 
     expect(status).toBe("コアメンバー確認済");
   });
 
-  test("一般会員は確認済にできない（42501）", () => {
-    expect(sqlstateOf(`${asMember}\n${CORE_CONFIRM}`)).toBe("42501");
+  test("一般会員の確認は 0 行で終わる（RLS の USING で対象外）", () => {
+    expect(affectedRows(asMember, CORE_CONFIRM)).toBe("0");
+  });
+
+  test("一般会員が確認を試みても approval_status は 報告済み のまま", () => {
+    expect(approvalStatusAfter(asMember, CORE_CONFIRM)).toBe("報告済み");
   });
 });
 
