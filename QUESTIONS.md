@@ -3349,6 +3349,66 @@ Cloud Functions から Supabase PostgreSQL へ**ネットワーク越しに接�
 
 ---
 
+## [2026-09-21] Phase 1 に必要な4テーブルの DDL が本リポジトリに存在しない（`member_identifiers` / `member_notes` / `member_import_links` / `uii_transactions`）
+
+- ステータス: 未回答
+- 優先度: 高（WBS `10-2`（名寄せロジック）・`10-3`（再訪アラート）をブロック。`member_identifiers` は
+  v13 §5.8.3 が名寄せの初回紐付けに必須とする連絡先の格納先そのもの）
+- 背景: 2026-09-21 に「正本を満たすために足りない DB」を棚卸しした際に判明。
+  `DB物理設計.md` §2 の表はこの4つを**テーブルとして列挙している**が、同書に `CREATE TABLE` が無く、
+  `supabase/migrations/` にも存在しない。dev Supabase の実 DB にも無い（PostgREST の公開オブジェクトは
+  26件で、マイグレーションと完全一致。ドリフトは無い）。
+  - `member_identifiers` — §2「名寄せキー（email/phone/line/discord）。検証済み識別子のみ `(kind, value)` 一意」。
+    §5.3 が部分ユニーク `uq_identifier_verified ... WHERE is_verified = true` を実体として名指ししている
+  - `member_notes` — §2「運営メモ。`core_only`/`admin_only` の可視性制御」。**`0005_rls_policies.sql` は
+    コメントで言及するのみ**で、同書自身が「実体は Vault 側 `01_schema.sql` にのみ存在し、
+    本リポジトリからは確認できない」と書いている（CLAUDE.md §1.1「正本は本リポジトリのみ」に反する状態）
+  - `member_import_links` — §3-14 L997 が「`import_jobs` / `member_import_links` は DDL が本書が初出」と
+    書いているが、**実際に DDL があるのは `import_jobs` だけ**である（本改訂で当該行を訂正した）
+  - `uii_transactions` — §2「定義のみ先行。Phase1 では移行・稼働しない」。一方 §6-1 #10 は
+    「Phase 1 では稼働しないが **RLS は先に張る**」としており、張る対象の表が無い
+- なぜ止めたか: 4つとも**個人情報の格納先か認可の対象**である。`member_identifiers` は連絡先（PII-B）、
+  `member_notes` は運営メモ（可視性制御あり）、`member_import_links` は取込元ファイル名・照合根拠（PII-B）。
+  CLAUDE.md §7.0 は「認可・個人情報の**仕様判断**は必ず先に聞く」と定めており、
+  列構成を推測で起こすことはできない。`member_notes.visibility` の値域は §6-9 ⑤ で既に未確定である。
+- 選択肢:
+  - A. Vault 側 `01_schema.sql` の当該 DDL をオーナーが提示し、それを正として `DB物理設計.md` へ転記したうえで
+    マイグレーション化する（**実データは持ち込まない**。スキーマのみ／CLAUDE.md §7.1）
+  - B. `DB物理設計.md` §2 の表の記述から DDL を新規に起こし、オーナーがレビューして確定する
+  - C. Phase 1 では `member_identifiers` のみ先に作り、残る3つは Phase 2 へ送る
+    （`member_notes` は `10-3` 再訪アラート、`member_import_links` は `10-2` 取込監査を落とすことになる）
+- 推奨: A（理由: 既存の実体があるなら列構成を二重に決めない。§1.1 の二重管理事故を繰り返さないためにも、
+  Vault 側にしか無い状態を解消して本リポジトリへ寄せるのが筋である）
+- 関連ファイル: `docs/spec/detailed-design/DB物理設計.md` §2・§3-14・§6-1、`supabase/migrations/0005_rls_policies.sql`
+
+## [2026-09-21] Phase 1 のテーブルが6つ未作成のまま、依存する画面だけが実装されている
+
+- ステータス: 未回答（**オーナー判断は不要かもしれない。着手順の確認のみ**）
+- 優先度: 中（着手可能だが、どれから入れるかで開く画面が変わる）
+- 背景: 同じ棚卸しで、`DB物理設計.md` に **DDL まで設計済みなのにマイグレーションが無い**表が6つあると判明した。
+  いずれも「仕様の追加は無い」状態であり、設計判断ではなく**実装順の問題**である。
+
+  | テーブル | 設計 | これが無いと開かない画面・機能 | WBS |
+  | --- | --- | --- | --- |
+  | `accommodation_rates` | §3-10 | 宿泊料金の Uii 主・円 副表示、公開予約 `/reserve`、マスタ管理 C13 の宿泊料金 | `3-9` |
+  | `reservation_otps` | §3-6③ | 公開予約ページ `/reserve` の本人確認（未ログイン導線そのもの） | `3-5b` |
+  | `media_assets` | §3-7 | アップロード A10、完了報告 A4 の Before/After 写真、`menu_items.image_media_id` の FK | `2-1c` |
+  | `eumo_grants` | §3-8 | Eumo給付一覧 B10・C12 | `5-5` |
+  | `membership_applications` | §3-5 | 街人登録モーダル A8、街人登録申請一覧 C7 | `12-2` |
+  | `import_jobs` | §3-14 | 会員データ取込の二重取込防止（v13 §8 の再実行安全性） | `10-2` |
+
+  ⚠️ `reservation_form_submissions`（§3-6 の旧構想）は **§9 #46 で撤回済み**のため作らない。
+- なぜ止めたか: 止めてはいない。**どれから着手するかだけ確認したい。**
+  2026-09-21 時点で `/upload`・`/staff/eumo` は「何待ちか」を出す画面に留めてあり、
+  `/reserve` は未作成である（v13 §5.2.3 が定める未ログインの入口が存在しない状態）。
+- 選択肢:
+  - A. `reservation_otps` ＋ `accommodation_rates` を先に入れ、**未ログインの入口 `/reserve` を開ける**
+  - B. `media_assets` を先に入れ、アップロードと完了報告の写真を開ける（`1-4` の GCS 基盤が別途要る）
+  - C. `eumo_grants` を先に入れ、承認済みクエストの給付漏れを塞ぐ
+- 推奨: A（理由: 未ログインの入口が無い状態は、**アプリに辿り着けない人が居る**という点で影響範囲が最も広い。
+  `media_assets` は WBS `1-4`（GCS・署名付きURL）が未着手のため、表だけ作っても画面は開かない）
+- 関連ファイル: `docs/spec/detailed-design/DB物理設計.md` §3-5〜§3-14、`docs/spec/WBS_Phase1.md`
+
 ## 使い方
 
 このファイルは、自律実装ループ（毎晩仕様整理タスクを回す仕組み）が仕様の矛盾・未決事項を
