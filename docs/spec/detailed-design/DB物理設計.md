@@ -148,8 +148,16 @@ CREATE TABLE quest_applications (
   application_id     uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   quest_id           uuid NOT NULL REFERENCES quests(quest_id) ON DELETE CASCADE,
   member_id          uuid NOT NULL REFERENCES members(member_id),
+  -- ⚠️ 2026-09-21 訂正：`指示済み` が欠落していた。正本 v13 §5.3.2 の遷移図と §7 の列挙は
+  --    どちらも `申請中 → 指示済み → …` を含む。CLAUDE.md §1.1 により正本が勝つ。
+  --    実装（`0017_quest_applications_and_work_logs.sql`）は下記の6値で入っている。
   status             text NOT NULL DEFAULT '申請中'
-                        CHECK (status IN ('申請中','承認','差戻し','完了','キャンセル')),
+                        CHECK (status IN ('申請中','指示済み','承認','差戻し','完了','キャンセル')),
+  -- ▼ 実行指示の中身（v13 §5.3-3「いつ・どこで・何を任せるか」）。2026-09-21 追加。
+  --    従来は「誰が審査したか」（reviewed_by）しか無く、**指示そのものを保存できなかった**。
+  scheduled_start_at timestamptz,   -- いつ
+  instruction_place  text,          -- どこで
+  instruction_body   text,          -- 何を
   applied_at         timestamptz NOT NULL DEFAULT now(),
   reviewed_by        uuid REFERENCES members(member_id),
   reviewed_at        timestamptz,
@@ -296,11 +304,20 @@ CREATE INDEX ix_settlement_adj_status ON settlement_adjustments (status) WHERE s
 CREATE INDEX ix_settlement_adj_stale ON settlement_adjustments (occurred_at) WHERE status = '未処理';
 ```
 
-> [!warning] オーナー確認待ち（QUESTIONS.md参照）
-> `settlement_adjustments.waived_by` の**権限範囲**（管理者のみか、コアメンバーにも許すか）と、
-> **90日滞留後の自動免除／督促の挙動**は、QUESTIONS.md「差額繰越（返金・免除運用）の詳細」が未回答のため
-> 確定していない。上記DDLは「誰が免除したかを記録できる」構造のみを用意しており、免除権限のRLS制御・
-> 自動処理バッチの仕様は別途確定後に設計する。
+> [!note] ~~オーナー確認待ち~~ → ✅ **解消済み（2026-08-16 オーナー回答 ／ 2026-09-21 に本節へ追随）**
+> ~~`settlement_adjustments.waived_by` の**権限範囲**と **90日滞留後の自動免除／督促の挙動**は未回答~~
+> → `QUESTIONS.md`「[2026-08-15] 差額繰越（返金・免除運用）の詳細」で**回答済み**である:
+>
+> | 論点 | 確定内容 |
+> | --- | --- |
+> | 返金差額の無期限繰越 | Phase 1 は**許可**する |
+> | 免除操作の権限 | Phase 1 は**コアメンバーにも許可**する（管理者限定にしない） |
+> | 90日滞留後の挙動 | **自動免除も督促も行わず、滞留フラグを立てるだけ** |
+>
+> `API設計.md` §5 と本書 §8 は既に「✅解消済み」と書いており、**本節だけが未回答のまま残っていた**。
+> 実装（`supabase/migrations/0019_orders_and_settlement.sql`）は上表に従い、
+> `settlement_adjustments_update_staff` を `is_staff()` で定義している（`is_admin()` ではない）。
+> 滞留は `is_stale` 列に旗を立てるだけとし、自動処理バッチは作らない。
 
 ### 3-3. ナレッジ・RAG（2026-08-16改訂：line-rag-botへ統合、本リポジトリに新規テーブルなし）
 
@@ -523,6 +540,20 @@ CREATE INDEX ix_eumo_grant_unsent ON eumo_grants (created_at) WHERE status = '�
 CREATE INDEX ix_eumo_grant_stale ON eumo_grants (sent_at) WHERE status = '送付済';
 ```
 
+> [!warning] 2026-09-21 追記：本 DDL は正本 v13 の 2026-08-29 拡張に追随していない
+> 正本 v13 §5.3.1「★ 給付管理の拡張」と §7「★ Eumo給付」は、上記に加えて**2列を必須**としている。
+> 実装（WBS `5-5`／`5-7`）では必ず足すこと（`CLAUDE.md` §1.1 により正本が勝つ）。
+>
+> ```sql
+> ALTER TABLE eumo_grants
+>   ADD COLUMN grant_type text NOT NULL
+>     CHECK (grant_type IN ('quest_reward','first_visit_cashback','registration_cashback','manual')),
+>   ADD COLUMN purpose    text NOT NULL;   -- 「誰に・いくら・何のために」を一覧で追えるようにする
+> ```
+>
+> `grant_type` が無いと、初回来訪キャッシュバック（§5.10.8）・街人登録キャッシュバック（§5.10.5）・
+> 手動起票の3経路がクエスト報酬と区別できず、**過去分の転記（#59）で二重付与を検出できない**。
+
 > [!important] 給付予定は「最終承認」と同時に起票する
 > `work_logs.approval_status = '承認完了'` になった瞬間にのみ `eumo_grants` を作成してください。
 > **コアメンバー確認済の段階では起票しない**こと。確認だけで給付リストに載ると、最終承認前の作業に
@@ -594,6 +625,18 @@ CREATE INDEX ix_rate_current ON accommodation_rates (room_type, member_category)
   WHERE effective_until IS NULL;
 ```
 
+> [!danger] ⚠️ 上記 `room_type` の CHECK は**旧名称のまま**であり、このまま実装してはならない（#55）
+> 列挙されている7値（`コテージA`/`コテージB`/`アースバッグ`/`テント`/`車中泊`/`ゲストハウス`/`サロン`）は
+> **v1.16.0（2026-08-22）の改称前の名前**である。実装済みの `rooms.room_type`（`0006`）と
+> `accommodation_types.room_type`（`0014`）は、いずれも英字6値
+> **`dormitory` / `cottage` / `campsite` / `car` / `earthbag` / `salon`** で入っている。
+> この CHECK のまま `accommodation_rates` を作ると**どの部屋とも結合できない**。
+>
+> `accommodation_rates` は `accommodation_types (room_type)` への外部キーとして定義し直すこと
+> （CHECK を手で並べ直すと、また改称のたびに食い違う）。
+> WBS `3-9`（宿泊料金マスタ）が 🔴 ブロック中なのはこの論点（`QUESTIONS.md`
+> 「[2026-08-26] 宿泊形態の旧名称が正本に残存している」）が未回答のためである。
+
 > [!warning] マスタは「これから作る伝票の既定値」であり、過去伝票の参照先ではない
 > `menu_items.unit_price_yen` を変更しても、**既存の `order_items.unit_price_yen` は変わりません**
 > （注文時点の単価をコピー保持しているため）。この設計を崩して伝票がマスタを参照する形にすると、
@@ -602,7 +645,15 @@ CREATE INDEX ix_rate_current ON accommodation_rates (room_type, member_category)
 
 ### 3-11. 予約経路の記録（v13 §5.2.4 ／ §9 #36。2026-08-20 追加）
 
-既存の `check_ins`（Vault側 `01_schema.sql` で実装済み）に、以下のカラムを追加する。
+> [!important] 2026-09-21 追記：`check_ins` は本リポジトリに新設済みである
+> ~~既存の `check_ins`（Vault側 `01_schema.sql` で実装済み）~~ という前提は**本リポジトリでは成立していなかった**。
+> Vault 側 `migration/01_schema.sql` は移行用のドラフトであり、`supabase/migrations/` へ取り込まれていない。
+> そのため `check_ins` を参照する作業パッケージ（`3-3`・`3-4`・`3-8`・`6-1`・`8-1`・`8-6`）が全て止まっていた。
+> **2026-09-20 オーナー指示（「DB が存在しない場合は実装すること」）により
+> `0014_check_ins_and_accommodation_types.sql` で新設した。**
+> 下記の `reservation_source` は ALTER ではなく**初版 DDL の列として** `0014` に入っている。
+
+既存の `check_ins` に、以下のカラムを追加する（**実装済み**。下記は設計上の出どころとして残す）。
 
 ```sql
 -- 2026-08-23 改訂（v13 §9 #46）：Googleフォーム廃止に伴い 'web_public' を追加し、既定値を変更。
@@ -715,12 +766,21 @@ LEFT JOIN booked b ON b.room_type = t.room_type AND b.date = cal.date;
 - キャンセル分は `cancelled_at IS NULL` の条件で自然に除外される。**`room_assignments` の終了処理に依存しない**のが旧ビューとの差である。
 - パフォーマンスが問題になる場合のみ、マテリアライズドビュー化を検討する（Phase 1 は素のビューで足りる想定）。
 
-> [!note] 列名は既存スキーマとの突合が必要
-> `check_ins` は Vault 側 `01_schema.sql` で実装済みであり、本書は列名を
-> `room_type` / `check_in_date` / `check_out_date` / `adults_count` / `children_count` / `status` / `cancelled_at` と仮定している。
-> **実装着手時に実スキーマと突合すること。** 差異があれば本ビューの定義を実スキーマ側へ合わせる
-> （データモデル図_ER_Diagram.md では予約が `BOOKINGS` という別エンティティとして描かれており、
-> `check_ins` との関係が図とテキストで食い違っている。この整合も同時に取る必要がある）。
+> [!note] ~~列名は既存スキーマとの突合が必要~~ → ✅ **突合済み（2026-09-21）**
+> 本書が仮定していた列名
+> （`room_type` / `check_in_date` / `check_out_date` / `adults_count` / `children_count` / `status` / `cancelled_at`）は、
+> **そのまま `0014_check_ins_and_accommodation_types.sql` の実スキーマになった**。
+> ビュー定義を変更する必要はなく、`0015_room_availability_view.sql` は本節の SQL をほぼそのまま起こしている。
+>
+> 実装で1点だけ補った: **ビューは `security_invoker = false` で作る**。
+> `check_ins` の RLS は「本人の行 ＋ staff」であるため、invoker 権限で走らせると
+> **一般会員には他人の占有が 0 と数えられ、空いていないのに「空き」と表示される**。
+> 本ビューが返すのは日付・形態ごとの集計値だけなので、`v_member_public`（0009）と同じく
+> 「露出してよい列だけで構成したビュー」に該当する。
+> ⚠️ 本ビューに `member_id`・氏名・備考などの行レベルの列を足してはならない。
+>
+> ⚠️ **未解消**: `データモデル図_ER_Diagram.md` は予約を `BOOKINGS` という別エンティティとして描いており、
+> `check_ins` との関係が図とテキストで食い違っている。図の側の追随が要る。
 
 ### 3-13. 宿泊者名簿（`lodging_register_entries`）（v13 §5.2 ／ §6-9 ① の解消。2026-09-05 新設）
 
