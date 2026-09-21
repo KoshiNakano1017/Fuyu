@@ -7,13 +7,29 @@
 // ⚠️ フィクスチャは自作のみ。実在の会員データを一切参照しない（CLAUDE.md §3.2・§7.1）。
 
 import { describeDb, query, sqlstateOf } from "./helpers/psql";
-import { FIXTURE_SQL, loginAsSql, TEST_AUTH_USERS } from "./helpers/fixtures";
+import {
+  FIXTURE_SQL,
+  loginAsSql,
+  STAY_FIXTURE_SQL,
+  TEST_AUTH_USERS,
+  TEST_CHECK_INS,
+} from "./helpers/fixtures";
 
-const asMember = `${FIXTURE_SQL}\n${loginAsSql(TEST_AUTH_USERS.self.id)}\nSET ROLE authenticated;`;
-const asStaff = `${FIXTURE_SQL}\n${loginAsSql(TEST_AUTH_USERS.admin.id)}\nSET ROLE authenticated;`;
+/**
+ * 会員 ＋ 滞在のフィクスチャ。
+ *
+ * ⚠️ 2026-09-20 に `0014_check_ins_and_accommodation_types.sql` が
+ *    `room_assignments.check_in_id` へ外部キーを張った（0006 がコメントで後続へ
+ *    送っていた ALTER の回収）。そのため**架空のチェックインIDでは部屋割当を作れない**
+ *    （23503 になる）。実在する滞在を先に投入する。
+ */
+const SEEDED = `${FIXTURE_SQL}\n${STAY_FIXTURE_SQL}`;
 
-/** テスト内で部屋割当を作るための、任意のチェックインID（`check_ins` は 3-2 まで存在しない）。 */
-const ANY_CHECK_IN = "eeeeeeee-0000-4000-8000-00000000c001";
+const asMember = `${SEEDED}\n${loginAsSql(TEST_AUTH_USERS.self.id)}\nSET ROLE authenticated;`;
+const asStaff = `${SEEDED}\n${loginAsSql(TEST_AUTH_USERS.admin.id)}\nSET ROLE authenticated;`;
+
+/** 部屋割当の対象にする滞在（一般会員 `self` のもの）。 */
+const ANY_CHECK_IN = TEST_CHECK_INS.selfStay.checkinId;
 
 describeDb("rooms のスキーマ・制約（v13 §7）", () => {
   test("初期行が 8 行ある（Issue #31 の完了条件）", () => {
@@ -70,6 +86,7 @@ describeDb("room_assignments のスキーマ・制約（v13 §7・§5.6.8）", (
   test("同じチェックインに ended_at IS NULL の行を2件は作れない（部分一意インデックス）", () => {
     // 終了し忘れた行が残ると「今どの部屋に居るか」が二重になる。
     const state = sqlstateOf(`
+      ${SEEDED}
       INSERT INTO public.room_assignments
         (check_in_id, room_id, room_name_snapshot)
       SELECT '${ANY_CHECK_IN}', room_id, room_name FROM public.rooms LIMIT 1;
@@ -82,6 +99,7 @@ describeDb("room_assignments のスキーマ・制約（v13 §7・§5.6.8）", (
 
   test("部屋移動を行うと履歴が 2 行になる（既存行は終了するだけで上書きしない）", () => {
     const rows = query(`
+      ${SEEDED}
       INSERT INTO public.room_assignments (check_in_id, room_id, room_name_snapshot)
       SELECT '${ANY_CHECK_IN}', room_id, room_name FROM public.rooms LIMIT 1;
 
@@ -101,6 +119,7 @@ describeDb("room_assignments のスキーマ・制約（v13 §7・§5.6.8）", (
     // 過去の宿泊履歴は割当時点の名前で表示する。ここが rooms への参照だと、
     // 部屋をリネームした瞬間に過去の履歴が書き換わる。
     const snapshot = query(`
+      ${SEEDED}
       INSERT INTO public.room_assignments (check_in_id, room_id, room_name_snapshot)
       SELECT '${ANY_CHECK_IN}', room_id, room_name FROM public.rooms WHERE room_name = 'コテージ1';
 
@@ -113,6 +132,7 @@ describeDb("room_assignments のスキーマ・制約（v13 §7・§5.6.8）", (
 
   test("assignment_reason で「初回」と「部屋移動」を区別できる", () => {
     const state = sqlstateOf(`
+      ${SEEDED}
       INSERT INTO public.room_assignments
         (check_in_id, room_id, room_name_snapshot, assignment_reason)
       SELECT '${ANY_CHECK_IN}', room_id, room_name, '不正な理由' FROM public.rooms LIMIT 1;
@@ -122,6 +142,7 @@ describeDb("room_assignments のスキーマ・制約（v13 §7・§5.6.8）", (
 
   test("ended_at が started_at より前なら INSERT できない", () => {
     const state = sqlstateOf(`
+      ${SEEDED}
       INSERT INTO public.room_assignments
         (check_in_id, room_id, room_name_snapshot, started_at, ended_at)
       SELECT '${ANY_CHECK_IN}', room_id, room_name, now(), now() - interval '1 hour'
@@ -195,12 +216,26 @@ describeDb("room_assignments の RLS（PII-B ／ §6-1 #11）", () => {
     expect(enabled).toBe("true");
   });
 
-  test("一般会員には 0行（本人ポリシーは check_ins が要るため 3-2 で追加する）", () => {
-    // 安全側に倒れている。**見えすぎるのではなく見えない**状態。
+  // 2026-09-20：`0014` が `ra_select_self` を追加した（0006 がコメントで後続へ送っていたもの）。
+  // これにより本人は「自分がどの部屋に泊まったか」を読めるようになった（v13 §5.6.8）。
+  test("本人は自分の滞在に紐づく部屋割当を SELECT できる（§5.6.8）", () => {
     const rows = query(`
       ${asStaff}
       INSERT INTO public.room_assignments (check_in_id, room_id, room_name_snapshot)
       SELECT '${ANY_CHECK_IN}', room_id, room_name FROM public.rooms LIMIT 1;
+      RESET ROLE;
+      ${loginAsSql(TEST_AUTH_USERS.self.id)}
+      SET ROLE authenticated;
+      SELECT count(*) FROM public.room_assignments;
+    `);
+    expect(rows).toBe("1");
+  });
+
+  test("他人の滞在に紐づく部屋割当は SELECT できない（誰がどの部屋に泊まったかは PII-B）", () => {
+    const rows = query(`
+      ${asStaff}
+      INSERT INTO public.room_assignments (check_in_id, room_id, room_name_snapshot)
+      SELECT '${TEST_CHECK_INS.otherStay.checkinId}', room_id, room_name FROM public.rooms LIMIT 1;
       RESET ROLE;
       ${loginAsSql(TEST_AUTH_USERS.self.id)}
       SET ROLE authenticated;

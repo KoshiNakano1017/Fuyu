@@ -90,6 +90,59 @@ export const TEST_MEMBERS = {
 /** すべてのフィクスチャのメール。実データ由来でないことの回帰テストに使う。 */
 export const FIXTURE_EMAILS = Object.values(TEST_AUTH_USERS).map((user) => user.email);
 
+export type TestCheckIn = {
+  checkinId: string;
+  memberId: string;
+  /** `accommodation_types.room_type` の6値のいずれか */
+  roomType: string;
+  checkInDate: string;
+  checkOutDate: string;
+  adultsCount: number;
+};
+
+/**
+ * 滞在のフィクスチャ（WBS 3-2 ／ `0014_check_ins_and_accommodation_types.sql`）。
+ *
+ * `room_assignments` は `check_ins` への外部キーを持つ（0014 で 0006 から回収した）。
+ * そのため**部屋割当を作る試験は、先にここの滞在を投入しなければならない**。
+ * 日付を未来の固定値にしているのは、`v_room_availability` が
+ * `current_date` 起点の 180 日窓を持つため（過去日だと窓から外れて残枠の試験ができない）。
+ */
+export const TEST_CHECK_INS = {
+  /** 一般会員（`self`）の滞在。本人ポリシーの試験に使う */
+  selfStay: {
+    checkinId: "00000000-0000-0000-0000-0000000000c1",
+    memberId: TEST_MEMBERS.self.memberId,
+    roomType: "cottage",
+    checkInDate: "2030-05-01",
+    checkOutDate: "2030-05-03",
+    adultsCount: 2,
+  },
+  /** 別人（`oyakata`）の滞在。「他人の行は見えない」を対で検証するために要る */
+  otherStay: {
+    checkinId: "00000000-0000-0000-0000-0000000000c2",
+    memberId: TEST_MEMBERS.oyakata.memberId,
+    roomType: "dormitory",
+    checkInDate: "2030-05-01",
+    checkOutDate: "2030-05-02",
+    adultsCount: 1,
+  },
+};
+
+export function checkInInsertSql(checkIn: TestCheckIn): string {
+  return [
+    "INSERT INTO public.check_ins",
+    "  (checkin_id, member_id, room_type, check_in_date, check_out_date, adults_count)",
+    `VALUES ('${checkIn.checkinId}', '${checkIn.memberId}', '${checkIn.roomType}',`,
+    `        '${checkIn.checkInDate}', '${checkIn.checkOutDate}', ${checkIn.adultsCount});`,
+  ].join("\n");
+}
+
+/** 会員フィクスチャ ＋ 滞在2件。`room_assignments` や `orders` を扱う試験の冒頭で流す。 */
+export const STAY_FIXTURE_SQL = [
+  ...Object.values(TEST_CHECK_INS).map(checkInInsertSql),
+].join("\n");
+
 const AUTH_INSTANCE_ID = "00000000-0000-0000-0000-000000000000";
 
 export function authUserInsertSql(user: TestAuthUser): string {
