@@ -7,21 +7,41 @@
 // ⚠️ この関数は**画面を経由しない経路（curl・JS 改変）でも通る**ことを前提に書く。
 //    `board.ts` の申請ボタン活性もここを根拠にするため、両者が割れることがない。
 
-import { isLockedForViewer, type Quest, type QuestBoardViewer } from "./visibility";
+import {
+  isLockedForViewer,
+  lacksRequiredCertification,
+  type Quest,
+  type QuestBoardViewer,
+} from "./visibility";
 
 /**
  * その閲覧者がそのクエストへ受注申請してよいか。
  *
- * ## 資格要件をここで見ない理由
+ * ## 資格要件の安全ゲート（WBS 5-2 で追加・2026-09-20）
  *
- * `required_certification` のサーバ側拒否は WBS 5-2 の範囲である（本 Issue のスコープ外）。
- * 5-1 は表示のみを固定しており、ここで拒否すると承認されていない範囲の認可を先に入れてしまう。
- * **資格ゲートを足すのは 5-2 で、この関数へ条件を1つ加える形で行う**（判定点を増やさない）。
+ * v13 §5.3-2 が「ユンボ・重機、チェーンソー（間伐）、食品衛生等の業務は、会員マスタの
+ * `certifications` と照合し、**未保有者は受注申請できない**バリデーションを設ける」と定めている。
+ * 5-1 の時点では「5-2 でこの関数へ条件を1つ加える形で行う（判定点を増やさない）」と
+ * 書き残されており、そのとおりに条件を1つ足した。
+ *
+ * **判定点を増やさないことが重要である。** 画面の申請ボタンの活性（`board.ts`）と
+ * API の拒否（`/api/quests/{id}/applications`）が同じ関数を根拠にしているため、
+ * 別の場所に資格判定を書くと、片方だけ緩い状態が生まれる（v13 §5.9.3）。
+ *
+ * ## 施錠とは独立に判定する
+ *
+ * `guest_allowed`（ゲスト開放）と `required_certification`（資格）は**別の軸**である
+ * （v13 §5.10.6 冒頭）。街人登録しても資格は解放されないため、
+ * 「登録で解放される件数」の集計に資格ゲートを混ぜてはならない。
  */
 export function canApplyToQuest(viewer: QuestBoardViewer, quest: Quest): boolean {
   // 募集を終えたクエストへは誰も申請できない。認可以前の受付状態の話。
   if (quest.status !== "open") {
     return false;
   }
-  return !isLockedForViewer(quest, viewer);
+  if (isLockedForViewer(quest, viewer)) {
+    return false;
+  }
+  // 資格の要る作業を未保有者が受注すると、事故は取り返しがつかない（重機・チェーンソー）。
+  return !lacksRequiredCertification(quest, viewer);
 }
