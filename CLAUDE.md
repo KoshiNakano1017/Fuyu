@@ -421,12 +421,24 @@ git config core.hooksPath .githooks
 | 変数 | 型 | 必要な時点 |
 | --- | --- | --- |
 | `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` | **Config** | ビルド時（埋め込み） |
-| `SUPABASE_SERVICE_ROLE_KEY` | Secret 可 | 実行時のみ（Node ランタイム）。本番ビルドでは `scripts/check-env.mjs` が存在を必須にする |
+| `SUPABASE_SERVICE_ROLE_KEY` | **Secret 推奨** | 実行時のみ（Node ランタイム）。~~本番ビルドでは `scripts/check-env.mjs` が存在を必須にする~~ → **2026-09-21 訂正：必須にしてはならない**（下記） |
 
 `NEXT_PUBLIC_*` はビルド時に埋め込まれるため、値を変更したら**再デプロイしないと反映されない**。
 
 欠落は `npm run build` の prebuild（`scripts/check-env.mjs`）が検出してビルドを落とす。
 CI の「ビルド」ジョブはダミー値を注入するため緑になる点に注意（そこは実値を検証していない）。
+
+> [!danger] 実行時のみ使う変数を prebuild で「必須」にしてはならない
+> Secret 型の値は**ビルドへ渡らない**。したがって `SUPABASE_SERVICE_ROLE_KEY` を
+> ビルド時に必須にすると、**正しく設定されていてもビルドが落ちる**
+> （「未設定」と「Secret 型なので見えないだけ」を区別できないため）。
+>
+> 2026-09-21、これを必須にしたまま `main` へマージして**本番デプロイを2回失敗させた**
+> （サイト自体は直前の成功デプロイが配信され続けたため停止はしていない）。
+> **キーを Config 型へ緩めて解決してはならない。** service_role キーは RLS も GRANT も迂回する
+> （`src/lib/supabase/admin.ts`）ので、読み出せない型で保持する意味がある。**直すのは検査側**である。
+>
+> 実行時に欠けていれば `createAdminSupabaseClient()` が変数名付きの例外で知らせる。
 
 **2026-09-21 の障害の経緯**（再発時に同じ調査を繰り返さないための記録）
 
