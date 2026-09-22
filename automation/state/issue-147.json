@@ -1,9 +1,9 @@
 {
   "version": 1,
   "issue": 147,
-  "pr": null,
+  "pr": 149,
   "branch": null,
-  "phase": "implement",
+  "phase": "review",
   "risk": "high",
   "attempts": {
     "infra": 0,
@@ -21,9 +21,9 @@
     "review": 0
   },
   "tokens": {
-    "input": 228,
-    "output": 170237,
-    "costUsd": 14.147058999999999
+    "input": 424,
+    "output": 276774,
+    "costUsd": 25.88222
   },
   "testHashes": {
     "e2e/TEST_PLAN.md": "9e1ff3682d6cdff6",
@@ -308,7 +308,7 @@
     }
   ],
   "acceptanceDerived": false,
-  "updatedAt": "2026-09-22T13:08:58.397Z",
+  "updatedAt": "2026-09-22T13:27:15.974Z",
   "provisional": [
     {
       "question": "調査メモが報告した種類A（正本 v13 §5.12.4 vs 派生文書の「立替実費は記録のみ」）を、リスク区分が高であることを理由に完全停止すべきか",
