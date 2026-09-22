@@ -16,6 +16,27 @@
 
 ## バックログ
 
+## [2026-09-22 10:40] `media_assets.ai_tags[]` カラムの先行用意（Issue #120 ／ WBS `14-6` ★ `media_assets.ai_tags[]` カラムの先行用意） — TODO
+
+**リスク区分: 高**（ゲート1・2・3 ／ 承認3回）。成果物が `media_assets`（PII-B の `geo_location` を持つ表）の
+スキーマに掛かるため、`docs/自律開発ループ設計.md` §4.1 の「DBマイグレーション」に該当する。
+検証の結果が「テスト追加のみ」に収まる可能性はあるが、区分をまたぐ場合は高いほうを採る。
+
+**現況（2026-09-22 時点の実測）**: 本パッケージの実体は **WBS `2-1c`（`media_assets` のスキーマ ＋ RLS）の
+`supabase/migrations/0027_media_assets.sql` で既に投入済み**（PR #119 でマージ済み）。
+`ai_tags text[] NOT NULL DEFAULT '{}'`（L127 付近）と `CREATE INDEX ix_media_ai_tags ... USING gin (ai_tags)` が存在する。
+したがって残作業は **①既存実装が完了条件を満たすかの検証 ②不足分のテスト追加 ③WBS 行の更新** であり、
+新規 DDL は検証で不足が出た場合に限る（既存マイグレーションは書き換えない ／ CLAUDE.md §4.5）。
+
+**完了条件**（`origin: derived` ／ 根拠は正本 v13 §5.11.3・§7）
+1. `media_assets.ai_tags` が `text[] NOT NULL DEFAULT '{}'` で存在し、値を入れずに行を作成できる（v13 §7 L2334「Phase 1 ではカラムのみ用意し値を入れない」）
+2. `ai_tags` に GIN 索引があり、Phase 2 の配列照合検索が索引で引ける（v13 §5.11.3「検索対象：AIタグ（`ai_tags[]`）」／`DB物理設計.md` §3-7 L539）
+3. Phase 1 蓄積分のバックフィル対象行を一意に特定できる（`ai_processing_status = 'pending'` で引ける／v13 §5.11.3「Phase 2 開始時に Phase 1 蓄積分を一括バックフィル」）
+4. 上記1〜3が `tests/db/media-assets.test.ts` の回帰テストで検証される（現状は列の存在のみを検査している）
+
+**スコープ外**: AIタグの生成・バックフィルの実装（Phase 2 ／ 旧 WBS `14-4`）、AIタグ編集履歴テーブル、
+`ai_tags` の編集UI・API、`0027` の書き換え。
+
 ## [2026-09-20 16:05] HTMLモック `prototype_v15.html` の v1.21.0 追随（Issue #99 ／ WBS `18-1` HTMLモック prototype_v15.html の維持・レビュー反映） — IN PROGRESS
 
 **リスク区分: 中**（ゲート2・3 ／ 承認2回）。成果物は `docs/design/prototype_v15.html`（層D・設計成果物）1ファイルで、
