@@ -286,3 +286,40 @@ export async function fetchCurrentSignupCashbackUii(): Promise<number | null> {
   const amount = Number(data.first_cashback_uii);
   return Number.isInteger(amount) && amount > 0 ? amount : null;
 }
+
+/**
+ * 本人の未受領給付（マイログ表示 ／ WBS 8-4 ／ v13 §5.3.1）。
+ *
+ * 出すのは「発行依頼（未送付）」と「発行済み・未受領（送付済）」の2つである。
+ * 受領済みまで並べると、**いま自分が何かする必要があるのか**が読めなくなる。
+ * 行を絞るのは `0023` の `eumo_select_self` であり、他人の給付は返らない。
+ */
+export async function fetchMyPendingGrants(memberId: string): Promise<EumoGrant[]> {
+  const supabase = await createServerSupabaseClient();
+  const { data, error } = await supabase
+    .from("eumo_grants")
+    .select(GRANT_COLUMNS)
+    .eq("member_id", memberId)
+    .in("status", ["未送付", "送付済"])
+    .order("created_at", { ascending: false });
+
+  if (error || data === null) {
+    return [];
+  }
+
+  return (data as unknown as Record<string, unknown>[]).map((row) => ({
+    grantId: String(row.grant_id),
+    memberId: String(row.member_id),
+    // 本人の画面なので表示名は引かない（自分の名前を自分へ出しても意味が無い）
+    memberLabel: "自分",
+    amountUii: Number(row.amount_uii),
+    grantType: row.grant_type as GrantType,
+    purpose: String(row.purpose),
+    status: row.status as GrantStatus,
+    sentTo: row.sent_to === null ? null : String(row.sent_to),
+    sentChannel: (row.sent_channel as SentChannel | null) ?? null,
+    sentAt: row.sent_at === null ? null : String(row.sent_at),
+    failureReason: row.failure_reason === null ? null : String(row.failure_reason),
+    createdAt: String(row.created_at),
+  }));
+}
