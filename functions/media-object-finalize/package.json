@@ -1,0 +1,11 @@
+{
+  "name": "media-object-finalize",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Object Finalize を受けて media_assets を pending → stored にする最小関数（WBS 1-4 ／ v13 §5.11.2 ③④）",
+  "main": "index.mjs",
+  "engines": {
+    "node": ">=20"
+  }
+}
