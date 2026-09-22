@@ -9,6 +9,10 @@
 // 止まる場所が相手で違うことを書き分ける（`quest-review-guard.test.ts` と同じ整理）:
 //   - staff … RLS の USING を通過 → トリガーが 42501
 //   - 非スタッフ … USING で落ちる → 例外は上がらず 0 行更新で正常終了
+//   - DELETE … そもそも GRANT が無い → RLS に到達せず 42501（permission denied for table）
+//
+// 3つ目は 2026-09-22 の CI 初回実行で判明した。DELETE ポリシーを作らないこと（行レベルの全拒否）は
+// 二重目の防御であって、実際に効いているのは一段手前の GRANT である。
 
 import {
   authUserInsertSql,
@@ -147,8 +151,30 @@ describeDb("登録者は後から書き換えられない（v13 §5.12.1）", ()
 });
 
 describeDb("物理削除はできない（論理削除のみ／v13 §5.12.1）", () => {
-  test("運営が DELETE しても 0 行（ポリシーを作っていない）", () => {
-    expect(affectedRows(asAdmin, `DELETE FROM public.shopping_list_items WHERE item_id = '${ITEM_ID}';`)).toBe("0");
+  /**
+   * ⚠️ ここは「0 行」ではなく **42501（permission denied for table）** になる。
+   *
+   * 0028 は `REVOKE ALL` のあと `GRANT SELECT, INSERT, UPDATE` しか与えていないため、
+   * **DELETE は RLS に到達する前にテーブル権限で落ちる。**
+   * DELETE ポリシーを作っていないこと（＝行レベルの全拒否）は二重目の防御であり、
+   * 実際に効いているのは一段手前の GRANT である。
+   *
+   * 2026-09-22 の CI 初回実行で「0 行」を期待して落ち、この順序が確認できた。
+   */
+  test("運営が DELETE しようとすると権限エラーになる（42501）", () => {
+    const sql = `DELETE FROM public.shopping_list_items WHERE item_id = '${ITEM_ID}';`;
+    expect(sqlstateOf(`${asAdmin}
+${sql}`)).toBe("42501");
+  });
+
+  test("拒否されたあとも行は残っている", () => {
+    expect(
+      query(`
+        ${asAdmin}
+        RESET ROLE;
+        SELECT count(*) FROM public.shopping_list_items WHERE item_id = '${ITEM_ID}';
+      `),
+    ).toBe("1");
   });
 });
 
