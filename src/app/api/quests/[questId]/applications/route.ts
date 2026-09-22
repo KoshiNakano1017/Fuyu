@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { createQuestApplication } from "@/lib/quests/applications";
 import { canApplyToQuest } from "@/lib/quests/application-gate";
 import { fetchQuestById, readQuestBoardViewer } from "@/lib/quests/fetch-board";
 
@@ -19,6 +20,12 @@ type RouteContext = {
  *
  * 判定は `canApplyToQuest()` ただ1箇所で行う。画面の申請ボタンの活性も同じ関数を根拠に
  * しており、二重管理しない（v13 §5.9.3）。
+ *
+ * ## 登録（WBS 5-2）は 2026-09-21 に追加した
+ *
+ * `0017_quest_applications_and_work_logs.sql`（受注申請・完了報告の DDL ＋ 遷移ガード）が
+ * 入り、ステータス遷移が DB 側で確定したため、暫定実装になる恐れが無くなった。
+ * 登録するのは `申請中` の1行だけで、指示・承認は運営の審査画面（画面ID B5）が行う。
  */
 export async function POST(_request: Request, context: RouteContext): Promise<NextResponse> {
   const viewer = await readQuestBoardViewer();
@@ -38,10 +45,16 @@ export async function POST(_request: Request, context: RouteContext): Promise<Ne
     return NextResponse.json({ error: "このクエストは受注できません" }, { status: 403 });
   }
 
-  // 受注申請の登録・運営審査・実行指示は WBS 5-2 の範囲。
-  // ここで暫定の登録を入れると、ステータス遷移の設計が 5-2 の承認を経ずに決まってしまう。
-  return NextResponse.json(
-    { error: "受注申請の受付は準備中です" },
-    { status: 501 },
-  );
+  const result = await createQuestApplication({ questId, memberId: viewer.memberId });
+
+  if (!result.ok) {
+    if (result.reason === "duplicate") {
+      // 二重申請は「もう申請済み」であることを伝えてよい。本人の自分の状態であり、
+      // 施錠クエストの内情を漏らすことにはならない。
+      return NextResponse.json({ error: "すでに申請済みです" }, { status: 409 });
+    }
+    return NextResponse.json({ error: "受注申請を登録できませんでした" }, { status: 500 });
+  }
+
+  return NextResponse.json({ applicationId: result.applicationId }, { status: 201 });
 }

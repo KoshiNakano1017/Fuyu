@@ -994,7 +994,11 @@ CREATE UNIQUE INDEX uq_import_job_committed_file
 
 - **`is_verified` に依存しない**ため、移行時（全件 `false`）でも確実に効く。ここが `contact_info` との決定的な違いである
 - 内容が1バイトでも違えば別ハッシュになる。**修正版ファイルの取込は正しく通る**
-- ⚠️ `import_jobs` / `member_import_links` は §6-1 #7 に区分だけが記載されており、**DDL は本書が初出**。
+- ⚠️ ~~`import_jobs` / `member_import_links` は §6-1 #7 に区分だけが記載されており、**DDL は本書が初出**。~~
+  → **2026-09-21 訂正**：本書に DDL があるのは **`import_jobs` だけ**である。
+  **`member_import_links` の DDL は本書にも `supabase/migrations/` にも存在しない**
+  （`member_identifiers` / `member_notes` / `uii_transactions` も同様）。
+  4件まとめて `QUESTIONS.md`「[2026-09-21] Phase 1 に必要な4テーブルの DDL が本リポジトリに存在しない」へ起票した。
   Vault 側 `01_schema.sql` に既存定義がある場合は突合すること（**要確認**）
 
 #### ④ 会員単位の照合：正規化した本名 ＋ 誕生年月

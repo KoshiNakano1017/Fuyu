@@ -10,11 +10,20 @@
 // Vercel も「Ready」と表示したまま、本番サイトだけが全滅していた。
 // 「デプロイが緑＝動く」を成立させるには、値が無いビルドをここで落とすしかない。
 //
-// ── 実行時のみ使う変数について ────────────────────────────────
-// `SUPABASE_SERVICE_ROLE_KEY` は埋め込まれないので、ビルドには要らない。
-// ただし本番で欠けると招待・初回ログイン結合が実行時に落ちる（`src/lib/supabase/admin.ts`）。
-// 本番ビルド（`VERCEL_ENV=production`）でだけ必須にし、それ以外は警告に留める。
-// CI は `VERCEL_ENV` を持たないため、CI を赤くしない。
+// ── 実行時のみ使う変数を「必須」にしてはならない ──────────────────
+// `SUPABASE_SERVICE_ROLE_KEY` は埋め込まれないのでビルドには要らない。
+//
+// ⚠️ **本番ビルドで必須にしてはならない。** 2026-09-21 にそう書いて本番デプロイを壊した。
+//    このキーは Vercel に **Secret（Sensitive）型**で登録されており、Sensitive 型の値は
+//    **ビルドへ渡らない**（NEXT_PUBLIC_* が undefined になったのと同じ仕組み）。
+//    つまり「正しく設定されていてもビルド時には見えない」ため、
+//    必須にすると**設定が正しいのにビルドが落ちる**。
+//
+//    Secret 型のままにするのは正しい。service_role キーは RLS も GRANT も迂回するので
+//    （`src/lib/supabase/admin.ts`）、読み出せない型で保持する意味がある。
+//    したがって**チェック側を直す**のが筋であり、キーを Config 型へ緩めてはならない。
+//
+//    欠落は実行時に `createAdminSupabaseClient()` が変数名付きの例外で知らせる。
 //
 // 使い方:
 //   node scripts/check-env.mjs     （npm run build から自動で呼ばれる）
@@ -78,11 +87,8 @@ if (anonKey === null) {
 
 // ── 本番デプロイでのみ課す追加条件 ────────────────────────────
 if (isVercelProduction) {
-  if (read("SUPABASE_SERVICE_ROLE_KEY") === null) {
-    errors.push(
-      "SUPABASE_SERVICE_ROLE_KEY が未設定です（本番では招待・初回ログイン結合が実行時に落ちます）",
-    );
-  }
+  // ダミー値の混入だけは本番で止める。CI のビルド通過用の値（ci.yml）が
+  // そのまま Vercel へ流れ込む事故は、キーの見た目では気づけない
   for (const [name, value] of [
     ["NEXT_PUBLIC_SUPABASE_URL", url],
     ["NEXT_PUBLIC_SUPABASE_ANON_KEY", anonKey],
@@ -91,9 +97,15 @@ if (isVercelProduction) {
       errors.push(`${name} がダミー値のままです`);
     }
   }
-} else if (read("SUPABASE_SERVICE_ROLE_KEY") === null) {
+}
+
+// ★ 実行時のみ使う変数は**警告に留める**（本番も含む）。冒頭の注記のとおり、
+//   Secret 型の値はビルドへ渡らないため「未設定」と「見えないだけ」を区別できない。
+if (read("SUPABASE_SERVICE_ROLE_KEY") === null) {
   warnings.push(
-    "SUPABASE_SERVICE_ROLE_KEY が未設定です。招待・初回ログイン結合を伴う経路は実行時に失敗します",
+    "SUPABASE_SERVICE_ROLE_KEY がビルド時には見えません。" +
+      "Vercel では Secret 型の値がビルドへ渡らないため、これは正常なことがあります。" +
+      "実際に欠けている場合は実行時に createAdminSupabaseClient() が変数名付きで知らせます",
   );
 }
 
