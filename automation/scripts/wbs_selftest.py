@@ -71,7 +71,7 @@ def main() -> int:
     #   **着手可能な作業パッケージが起票できなくなる**。
     for package_id, want_dropped, want_blocked, note in [
         ("4-1", False, False, "散文の「不要化」を廃止と誤読している"),
-        ("3-9", False, True, "ブロック中が廃止に倒れている"),
+        ("12-4", False, True, "ブロック中が廃止に倒れている"),
         ("13-2", True, False, "取り消し線つき ID の廃止を見落としている"),
     ]:
         package = packages.get(normalize_id(package_id))
@@ -104,7 +104,11 @@ def main() -> int:
     # （現物が変わったのだから）。ブロック解除のたびに、
     # そのとき実際にブロック中の行へ差し替えること。
     # パーサの挙動そのものは、上のリテラル文字列の検査が受け持っている。
-    for package_id, want_blocked in [("2-2", False), ("2-4", False), ("3-9", True), ("5-7", True)]:
+    # 2026-09-22: 3-9 は #55 を実装で回避（room_type を CHECK でなく accommodation_types
+    # への FK にした）ため 🔴 → 🟡 へ変わり検査が落ちた。#55 自体（正本の表記不整合）は
+    # 未解決のドキュメント債務として残るが、実装のブロッカーではなくなったための差し替え。
+    # 3-9 の代わりに、引き続き未解決（#59）でブロック中の 12-4 を固定値に採る。
+    for package_id, want_blocked in [("2-2", False), ("2-4", False), ("12-4", True), ("5-7", True)]:
         package = packages.get(normalize_id(package_id))
         if package is None:
             failures.append(f"{package_id} が WBS に見つかりません（検査を更新してください）")
