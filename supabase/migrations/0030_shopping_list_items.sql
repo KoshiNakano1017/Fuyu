@@ -100,11 +100,16 @@ CREATE TABLE public.shopping_list_items (
   created_at           timestamptz NOT NULL DEFAULT now(),
   updated_at           timestamptz NOT NULL DEFAULT now(),
 
-  -- 見送りは理由と判断者を必ず残す（§5.12.2）。
+  -- 見送りは理由を必ず残す（§5.12.2）。
   -- 却下の履歴が無いと、同じ品目が翌週また登録される。
+  --
+  -- ⚠️ **判断者（decided_by）までは DDL で必須にしない。**
+  --    §5.12.2 が必須と定めているのは**理由**だけである。判断者を CHECK に足すと、
+  --    「誰が」を補えない経路（移行・手動補正）で見送りを記録できなくなり、
+  --    仕様が求めていない必須項目を DDL が増やすことになる（§5.12.1 の「必須は品名のみ」と同じ考え方）。
+  --    実運用で decided_by を入れるのはアプリ層（src/app/shopping/actions.ts）。
   CONSTRAINT ck_shopping_item_skip_reason CHECK (
-    status <> '見送り'
-    OR (btrim(coalesce(skip_reason, '')) <> '' AND decided_by IS NOT NULL)
+    status <> '見送り' OR btrim(coalesce(skip_reason, '')) <> ''
   ),
 
   -- クエスト化済なら必ず紐づくクエストがある。
@@ -112,9 +117,11 @@ CREATE TABLE public.shopping_list_items (
     status <> 'クエスト化済' OR quest_id IS NOT NULL
   ),
 
-  CONSTRAINT ck_shopping_item_purchased_has_time CHECK (
-    status <> '購入済' OR purchased_at IS NOT NULL
-  ),
+  -- ⚠️ 「購入済なら purchased_at が要る」という CHECK は**置かない**。
+  --    §5.12.2 の状態表は 5 値の意味を定めるだけで、購入日時を必須にしていない。
+  --    縛ると「クエストを立てずに誰かが買ってきた」分の手動 `購入済`（§5.12.3）が、
+  --    日時を補えない経路から入らなくなる。購入日時・購入者はアプリ層が入れる
+  --    （0017 の「写真必須はアプリ層で担保する」と同じ分担）。
 
   CONSTRAINT ck_shopping_item_withdraw_reason CHECK (
     withdrawn_at IS NULL OR btrim(coalesce(withdraw_reason, '')) <> ''
@@ -252,10 +259,19 @@ CREATE TRIGGER trg_shopping_list_items_guard
 
 ALTER TABLE public.shopping_list_items ENABLE ROW LEVEL SECURITY;
 
--- 閲覧は全ロール（ゲスト含む）。取下げ済みだけは運営にしか見せない。
+-- 閲覧は全ロール（ゲスト含む／§6「買い物リストの閲覧」）。
+-- 取下げ済みは、運営と**取り下げた本人（登録者）**だけに見せる。
+--
+-- ⚠️ 登録者を外してはならない。UPDATE では**更新後の行**も SELECT ポリシーに掛かるため、
+--    本人が見られない状態（withdrawn_at IS NOT NULL）へは本人が更新できなくなる。
+--    実際に外していたため、§5.12.1「登録者本人が取り下げられる」が 42501 で落ちていた。
 CREATE POLICY shopping_list_items_select_all ON public.shopping_list_items
   FOR SELECT TO authenticated
-  USING ( withdrawn_at IS NULL OR (SELECT public.is_staff()) );
+  USING (
+    withdrawn_at IS NULL
+    OR (SELECT public.is_staff())
+    OR registered_by = (SELECT public.current_member_id())
+  );
 
 -- 登録は本人名義でのみ。ゲスト除外は④のトリガーが service_role 経由も含めて担保する。
 CREATE POLICY shopping_list_items_insert_self ON public.shopping_list_items

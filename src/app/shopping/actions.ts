@@ -26,11 +26,32 @@ import { canRegister, decideStatusChange, type ShoppingAction } from "@/lib/shop
  * （CLAUDE.md §4.1）。立場で分岐すると、親方の肩書きを持つ街人が運営の操作まで通ってしまう。
  */
 
+/** 入力欄へ書き戻すための値。名前はフォームの `name` 属性と一致させる。 */
+export type RegisterFormValues = {
+  itemName: string;
+  quantity: string;
+  unit: string;
+  wantedBy: string;
+  priority: string;
+  referencePriceJpy: string;
+  shopName: string;
+  shopUrl: string;
+  purpose: string;
+};
+
 export type RegisterFormState = {
   status: "idle" | "saved" | "error" | "duplicate";
   message?: string;
   /** 重複候補。利用者に相乗りか「それでも登録」かを選ばせる（自動マージしない）。 */
   duplicates?: { itemId: string; itemName: string }[];
+  /**
+   * 直前の入力値。**再表示のために必ず返す。**
+   *
+   * React はアクションの完了時にフォームを初期状態へ戻すため、これを返さないと
+   * 重複候補を出した瞬間に全入力欄が空になり、「それでも登録する」が品名の
+   * `required` で止まる。利用者は打ち直しを強いられ、§5.12.1 の「30秒で登録」が壊れる。
+   */
+  values?: RegisterFormValues;
 };
 
 const MESSAGE: Record<string, string> = {
@@ -63,23 +84,42 @@ function toTextOrNull(value: FormDataEntryValue | null): string | null {
   return text === "" ? null : text;
 }
 
+/** 入力値をそのまま拾う（検証せず、画面へ書き戻すためだけに使う）。 */
+function readFormValues(formData: FormData): RegisterFormValues {
+  const text = (key: string) => String(formData.get(key) ?? "");
+  return {
+    itemName: text("itemName"),
+    quantity: text("quantity"),
+    unit: text("unit"),
+    wantedBy: text("wantedBy"),
+    priority: text("priority"),
+    referencePriceJpy: text("referencePriceJpy"),
+    shopName: text("shopName"),
+    shopUrl: text("shopUrl"),
+    purpose: text("purpose"),
+  };
+}
+
 /** 「ほしいもの」を登録する（v13 §5.12.1）。必須は品名のみ。 */
 export async function registerShoppingItemAction(
   _prev: RegisterFormState,
   formData: FormData,
 ): Promise<RegisterFormState> {
+  // 入力値は**どの経路で返っても書き戻す**。打ち直しを強いた時点で登録されなくなる。
+  const values = readFormValues(formData);
+
   const viewer = await readViewer();
   if (!viewer.signedIn) {
-    return { status: "error", message: MESSAGE.denied };
+    return { status: "error", message: MESSAGE.denied, values };
   }
   // ★ ゲストは登録できない（v13 §5.12.1 ／ 2026-09-22 オーナー確定）。
   if (!canRegister(viewer.role)) {
-    return { status: "error", message: MESSAGE.guest_denied };
+    return { status: "error", message: MESSAGE.guest_denied, values };
   }
 
   const itemName = String(formData.get("itemName") ?? "").trim();
   if (itemName === "") {
-    return { status: "error", message: MESSAGE.blank_name };
+    return { status: "error", message: MESSAGE.blank_name, values };
   }
 
   // 重複は「候補を出して相乗りへ誘導する」だけ。自動でまとめない（v13 §5.12.1）。
@@ -99,6 +139,7 @@ export async function registerShoppingItemAction(
         status: "duplicate",
         message: "同じものが既に登録されています。相乗りするか、そのまま登録するかを選んでください。",
         duplicates: duplicates.map((d) => ({ itemId: d.itemId, itemName: d.itemName })),
+        values,
       };
     }
   }
@@ -118,10 +159,11 @@ export async function registerShoppingItemAction(
   });
 
   if (!saved) {
-    return { status: "error", message: MESSAGE.failed };
+    return { status: "error", message: MESSAGE.failed, values };
   }
 
   revalidatePath(PATH);
+  // 登録できたときだけ入力値を返さない。次の1件を空のフォームから書き始められる。
   return { status: "saved", message: "ほしいものとして登録しました。" };
 }
 
