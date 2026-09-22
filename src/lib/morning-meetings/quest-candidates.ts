@@ -149,3 +149,127 @@ export function markCandidate(
       : candidate,
   );
 }
+
+/**
+ * `extracted_quest_candidates`（jsonb）を型のある候補列へ戻す。
+ *
+ * ## 壊れた要素は落とす。例外にしない
+ *
+ * この列は jsonb であり、DB は中身の形を保証しない（スキーマは「配列であること」までしか
+ * 縛っていない）。生成側の版が上がって項目が増減することもある。ここで例外を投げると
+ * **1件の壊れた候補のせいで議事録一覧そのものが開かなくなる**ため、
+ * 読めた候補だけを返す。運営は画面から再生成できる。
+ */
+export function parseStoredCandidates(value: unknown): StoredQuestCandidate[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((entry, index) => {
+    if (typeof entry !== "object" || entry === null) {
+      return [];
+    }
+    const row = entry as Record<string, unknown>;
+    const title = typeof row.title === "string" ? row.title.trim() : "";
+    if (title === "") {
+      // タイトルの無い候補は画面で選びようがない（押すボタンに名前が付かない）。
+      return [];
+    }
+
+    return [
+      {
+        candidateId: typeof row.candidateId === "string" ? row.candidateId : `c${index + 1}`,
+        title,
+        headcount: toPositiveInteger(row.headcount, 1),
+        estimatedMinutes: toPositiveInteger(row.estimatedMinutes, 60),
+        assigneeCandidates: Array.isArray(row.assigneeCandidates)
+          ? row.assigneeCandidates.filter((name): name is string => typeof name === "string")
+          : [],
+        sourceQuote: typeof row.sourceQuote === "string" ? row.sourceQuote : "",
+        status: toCandidateStatus(row.status),
+        publishedQuestId:
+          typeof row.publishedQuestId === "string" ? row.publishedQuestId : undefined,
+      },
+    ];
+  });
+}
+
+function toPositiveInteger(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 1
+    ? Math.round(value)
+    : fallback;
+}
+
+function toCandidateStatus(value: unknown): QuestCandidateStatus {
+  return value === "published" || value === "dismissed" ? value : "pending";
+}
+
+/** 補正フォームの入力（すべて文字列）を検証した結果。 */
+export type CorrectionParseResult =
+  | { ok: true; correction: QuestCandidateCorrection }
+  | { ok: false; reason: "blank_title" | "invalid_headcount" | "invalid_minutes" | "invalid_reward" };
+
+/**
+ * 補正フォームの入力を `QuestCandidateCorrection` へ変換する。
+ *
+ * ## 空欄と 0 を区別する
+ *
+ * 空欄は「補正しない（AI の抽出値をそのまま使う）」であり、`0` は「0 を指定した」である。
+ * まとめて falsy として扱うと、**報酬 0 Uii のつもりが未設定（`null`）になる**。
+ *
+ * ## 報酬額だけ検証が厳しい理由
+ *
+ * 金額だからである（CLAUDE.md §4.4）。人数・時間は多少ずれても運営が board 上で直せるが、
+ * 報酬額はそのまま受注者への支払い根拠になる。整数・非負のみを通し、
+ * 少しでも解釈の要る入力（`1,000`・`１０００`・`abc`）は**黙って読み替えず弾く**。
+ */
+export function parseCandidateCorrection(input: {
+  title?: string;
+  headcount?: string;
+  estimatedMinutes?: string;
+  rewardUii?: string;
+}): CorrectionParseResult {
+  const title = (input.title ?? "").trim();
+  if (input.title !== undefined && title === "") {
+    return { ok: false, reason: "blank_title" };
+  }
+
+  const headcount = parseOptionalInteger(input.headcount, { min: 1 });
+  if (headcount === "invalid") {
+    return { ok: false, reason: "invalid_headcount" };
+  }
+  const estimatedMinutes = parseOptionalInteger(input.estimatedMinutes, { min: 1 });
+  if (estimatedMinutes === "invalid") {
+    return { ok: false, reason: "invalid_minutes" };
+  }
+  const rewardUii = parseOptionalInteger(input.rewardUii, { min: 0 });
+  if (rewardUii === "invalid") {
+    return { ok: false, reason: "invalid_reward" };
+  }
+
+  return {
+    ok: true,
+    correction: {
+      title: title === "" ? undefined : title,
+      headcount: headcount,
+      estimatedMinutes: estimatedMinutes,
+      rewardUii: rewardUii,
+    },
+  };
+}
+
+/** 空欄なら `undefined`（補正しない）、読めなければ `"invalid"` を返す。 */
+function parseOptionalInteger(
+  raw: string | undefined,
+  bounds: { min: number },
+): number | undefined | "invalid" {
+  const text = (raw ?? "").trim();
+  if (text === "") {
+    return undefined;
+  }
+  if (!/^\d+$/.test(text)) {
+    return "invalid";
+  }
+  const value = Number(text);
+  return value >= bounds.min ? value : "invalid";
+}
