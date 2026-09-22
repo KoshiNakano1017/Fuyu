@@ -10,6 +10,7 @@ import {
   MAX_IMAGE_BYTES,
   MAX_VIDEO_BYTES,
   MEDIA_PURPOSE_PRESETS,
+  normalizeCaptureMetadata,
 } from "@/lib/media/upload-policy";
 
 /** 判定を通すための最小の要求。個々のテストは必要な項目だけを上書きする。 */
@@ -166,5 +167,42 @@ describe("ストレージ上のオブジェクト名", () => {
     expect(buildMediaObjectName({ mediaId, extension: "mp4", uploadedAt: january })).toContain(
       "media/2026/01/",
     );
+  });
+});
+
+// ── 2026-09-22 追加：撮影メタデータ（Exif 由来・クライアント申告）の受け入れ判定 ──────
+
+describe("撮影メタデータの正規化（v13 §5.11.7 ③）", () => {
+  test("読めない撮影日時はアップロードを止めず、値だけを捨てる", () => {
+    expect(normalizeCaptureMetadata({ takenAt: "きのう" }).takenAt).toBeNull();
+  });
+
+  test("未来の撮影日時は受け付けない（端末の時計ずれ・改変）", () => {
+    const nextYear = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
+    expect(normalizeCaptureMetadata({ takenAt: nextYear }).takenAt).toBeNull();
+  });
+
+  test("日本時間で申告された撮影日時を UTC へ揃えて保存する", () => {
+    expect(normalizeCaptureMetadata({ takenAt: "2026-09-22T07:30:00+09:00" }).takenAt).toBe(
+      "2026-09-21T22:30:00.000Z",
+    );
+  });
+
+  test("緯度・経度の範囲外を受け付けない", () => {
+    expect(normalizeCaptureMetadata({ geoLocation: "91.000000,139.767050" }).geoLocation).toBeNull();
+  });
+
+  test("座標の形でない文字列を受け付けない", () => {
+    expect(normalizeCaptureMetadata({ geoLocation: "東京駅" }).geoLocation).toBeNull();
+  });
+
+  test("座標は小数6桁へ揃える（端末ごとの桁数の揺れを持ち込まない）", () => {
+    expect(normalizeCaptureMetadata({ geoLocation: "35.6812,139.76705" }).geoLocation).toBe(
+      "35.681200,139.767050",
+    );
+  });
+
+  test("撮影メタデータが無い投稿でも両方 null で成立する", () => {
+    expect(normalizeCaptureMetadata({})).toEqual({ takenAt: null, geoLocation: null });
   });
 });

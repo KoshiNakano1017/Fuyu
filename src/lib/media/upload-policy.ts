@@ -188,3 +188,59 @@ export function buildMediaObjectName(params: {
   const month = String(params.uploadedAt.getUTCMonth() + 1).padStart(2, "0");
   return `media/${year}/${month}/${params.mediaId}.${params.extension}`;
 }
+
+/**
+ * 撮影メタデータ（Exif 由来）の受け入れ判定。
+ *
+ * ## クライアントから来る値であることを忘れない
+ *
+ * 撮影日時・位置は**画面が Exif から読んで送ってくる**（`src/lib/media/exif.ts`）。
+ * つまり利用者が自由に差し替えられる値であり、サーバは形だけを検証して受ける。
+ * 「この写真は本当にその場所で撮られた」ことの保証ではない——そこまでを保証する手段は
+ * Phase 1 には無く、保証したかのように扱わないことが重要である。
+ *
+ * ## 形が違うものは 400 ではなく `null` にする
+ *
+ * 撮影メタデータは**あれば便利な補助情報**であり、アップロードの成否を左右しない。
+ * 端末や画像編集アプリによって Exif の書き方は揺れるので、読めない値でアップロードを
+ * 失敗させると、利用者には「なぜか写真が上げられない」としか見えない。
+ */
+export type CaptureMetadata = { takenAt: string | null; geoLocation: string | null };
+
+/** `"35.681200,139.767050"` の形。緯度は ±90、経度は ±180 の範囲。 */
+const GEO_LOCATION_PATTERN = /^-?\d{1,3}(\.\d{1,8})?,-?\d{1,3}(\.\d{1,8})?$/;
+
+export function normalizeCaptureMetadata(input: {
+  takenAt?: unknown;
+  geoLocation?: unknown;
+}): CaptureMetadata {
+  return {
+    takenAt: normalizeTakenAt(input.takenAt),
+    geoLocation: normalizeGeoLocation(input.geoLocation),
+  };
+}
+
+function normalizeTakenAt(value: unknown): string | null {
+  if (typeof value !== "string" || value.trim() === "") {
+    return null;
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  // 未来の日時は撮影日時として成立しない（端末の時計ずれ・改変）。
+  // 1日分の余裕を持たせるのは、タイムゾーンのずれた端末を弾きすぎないため。
+  const tomorrow = Date.now() + 24 * 60 * 60 * 1000;
+  return parsed.getTime() > tomorrow ? null : parsed.toISOString();
+}
+
+function normalizeGeoLocation(value: unknown): string | null {
+  if (typeof value !== "string" || !GEO_LOCATION_PATTERN.test(value.trim())) {
+    return null;
+  }
+  const [latitude, longitude] = value.trim().split(",").map(Number);
+  if (Math.abs(latitude) > 90 || Math.abs(longitude) > 180) {
+    return null;
+  }
+  return `${latitude.toFixed(6)},${longitude.toFixed(6)}`;
+}
