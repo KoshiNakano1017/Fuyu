@@ -3,7 +3,7 @@
 // CLAUDE.md §4.4：認可に関わるロジックは必ずテストを書く。
 // v13 §5.12 の設計判断が、そのままテスト群になっている。
 //
-// ⚠️ 同じ規則は DB 側にもある（`shopping_list_items_guard()` ／ 0028）。
+// ⚠️ 同じ規則は DB 側にもある（`shopping_list_items_guard()` ／ 0030）。
 //    片方だけ変えてはならない。ここが緑でもトリガーが緩ければ service_role 経由で抜ける。
 
 import { canRegister, decideStatusChange } from "@/lib/shopping/status";

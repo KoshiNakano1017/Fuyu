@@ -1,5 +1,6 @@
 -- =====================================================================
--- 0028_shopping_list_items.sql
+-- 0030_shopping_list_items.sql（main 合流時に 0028 から連番を付け替え。
+--   0028 は lodging_register_check_in_fk、0029 は oyakata_member_no_and_nickname が使用済み）
 --
 -- WBS: 5-8（買い物リストの登録・一覧・ステータス管理）
 --      5-9（買い物リストからの買い出しクエスト化）

@@ -114,7 +114,7 @@ erDiagram
     ROOMS {
         uuid id PK "部屋ID"
         string room_number "部屋番号"
-        string room_type "部屋タイプ (コテージ/ゲストハウス/テント等)"
+        string room_type "部屋タイプ (ドミトリー/コテージ/キャンプサイト等・§5.4.2 の6形態)"
         integer capacity "収容定員"
         string status "ステータス (available/occupied/maintenance/closed)"
         text notes "備考"
@@ -572,7 +572,7 @@ erDiagram
 #### **ROOMS** - 部屋台帳
 - **主キー**: `id` (UUID)
 - 物理的な部屋またはベッド枠をマスタ化
-- `room_type`: `コテージ` / `ゲストハウス` / `アースバッグ` / `テント` / `車中泊` / `サロン` 等（運用上は6種）
+- `room_type`: `ドミトリー` / `コテージ`（3棟A・B・C） / `キャンプサイト` / `車中泊` / `アースバッグ` / `サロン` の6種（v13 §5.4.2 確定表）
 - `capacity`: 1部屋 = 1収容枠とは限らない
 - `status`: `available` / `occupied` / `maintenance` / `closed`
 - `place_id`（任意）: FEL の `Place`（畑・建物等）に紐づけ可能
@@ -1316,6 +1316,6 @@ Status: 実装前レビュー待ち
 | 1.0.0 | 2026-08-17 | 初版作成（論理設計レベル）。 |
 
 > [!important] 残枠は**エンティティを持たない**
-> 「ゲストハウス残り◯／アースバッグ残り◯」は保存カラム・専用テーブルを持たず、
+> 「ドミトリー残り◯／アースバッグ残り◯」は保存カラム・専用テーブルを持たず、
 > **`ROOMS` × `ROOM_ASSIGNMENTS` から都度算出**する（DB物理設計.md §3-12 の `v_room_availability` ビュー）。
 > 加減算方式にするとダブルブッキングを招くため、残高カラムと同じ原則（正本 §9 #25）で明細を正本とする。

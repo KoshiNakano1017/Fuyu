@@ -457,15 +457,43 @@ CREATE INDEX ix_reservation_otps_email ON reservation_otps (email, created_at DE
 > 指す想定で設計済みだったため、参照先が「未設計」から「実テーブル」に変わるだけで既存カラムの
 > 変更は不要。
 
+> [!important] ★ 列構成は正本 v13 §7 の全面採用で確定した（2026-09-22 オーナー決定 **C**）
+> `QUESTIONS.md`「[2026-09-20] `media_assets` の列構成が正本 v13 §7 と `DB物理設計.md` §3-7 の
+> DDL で食い違う」の決着であり、**本節の DDL を正本へ追随させた**（CLAUDE.md §1.1・§7.0.1）。
+> 実装は `supabase/migrations/0027_media_assets.sql`（PR #119）。変更点は4つ。
+>
+> | # | 変更 | 正本の根拠 |
+> | --- | --- | --- |
+> | ① | `media_type` の値域を ~~`('photo','video')`~~ → **`('image','video','pdf')`** | §7「ファイル種別（image / video / pdf）」 |
+> | ② | `content_type` / `file_size_bytes` / `usage_scene[]` を追加 | §7「`contentType`、ファイルサイズ、`usage_scene[]`」 |
+> | ③ | `ai_tags text[]` を追加（本節は v1.21.0 の反映漏れだった） | §7 ／ §9 #57 |
+> | ④ | 紐付けキー `knowledge_id` / `category_id` を追加 | §7「紐付けキー（quest_id / knowledge_id / place_id / category_id）」 |
+>
+> ⚠️ `pdf` は §5.11.7「対応形式」（画像・動画のみ）と食い違うが、v13 L1274・L1315 が
+> 「写真・PDF の添付」「画像・動画・PDFは Cloud Storage へ格納」と述べており、**PDF の投入経路は
+> ナレッジ添付**である。決定 C はこの正本内部の自己矛盾を `pdf` を持つ側へ寄せて解消する。
+>
+> ⚠️ `upload_state` は**正本にも本節にも無い列**だが実装で新設した。理由は DDL 内のコメントを参照。
+
 ```sql
 CREATE TABLE media_assets (
   media_id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   member_id               uuid NOT NULL REFERENCES members(member_id),  -- アップロード者（全ロール可）
-  media_type              text NOT NULL CHECK (media_type IN ('photo','video')),
+  -- ★ 値域は正本 §7 の3値（2026-09-22 決定 C）。旧 ('photo','video') は採らない
+  media_type              text NOT NULL CHECK (media_type IN ('image','video','pdf')),
+  -- 署名付きURLへ焼き込んだ Content-Type をそのまま保存する（v13 §5.11.5）
+  content_type             text NOT NULL CHECK (btrim(content_type) <> ''),
+  -- 実体のバイト数。署名発行の時点では未確定のため NULL を許し、Object Finalize で確定値を書き戻す
+  file_size_bytes           bigint CHECK (file_size_bytes IS NULL OR file_size_bytes > 0),
   storage_path             text NOT NULL,   -- Cloud Storage for Firebase（統一メディア基盤、署名付きURL方式）
   thumbnail_path            text,            -- 動画のサムネイル（静止画は storage_path と同一で可）
   purpose_tags              text[] NOT NULL DEFAULT '{}',  -- 例: ['instagram'], ['資料作成','ブログ']
+  usage_scene               text[] NOT NULL DEFAULT '{}',  -- 利用シーン（正本 §7）。Phase 2 の検索軸
   place_id                  uuid,            -- 拠点タグ（カフェ／アースバッグ／畑 等）。FEL共通スキーマ側のためFK制約なし
+  -- ▼ 紐付けキー（正本 §7）。参照先マスタが未作成のため FK は張らず値だけ持つ
+  --   （rooms.place_id と同じ作法。参照先を作る作業パッケージが ALTER で FK を足す）
+  knowledge_id              uuid,
+  category_id               uuid,
   taken_at                  timestamptz,     -- Exif由来の撮影日時（ユーザーに入力させない）
   geo_location              text,            -- Exif由来の位置情報
   -- ▼ 全ロール開放に伴う項目（v13 §5.11.7 ／ §9 #33。2026-08-20 追加）
@@ -474,6 +502,18 @@ CREATE TABLE media_assets (
   deleted_at                timestamptz,     -- 論理削除。運営措置による非表示化も同経路
   deleted_by                uuid REFERENCES members(member_id),
   delete_reason             text,
+  -- ▼ アップロードの生死（★ 実装で新設。正本にも本節の旧版にも無い）
+  --
+  --   v13 §5.11.2 note の孤児ファイル検出は「pending のまま実体が現れない行」を消すが、
+  --   その判定に ai_processing_status は**使えない**。Phase 1 は AI 解析を動かさないため
+  --   全行が pending のまま残り、正常な行まで巻き込んで消えるからである。
+  --   「実体が着いたか」と「AI が処理したか」は起こる時点も担当も違うため列を分ける。
+  --     pending … 署名付きURLを発行し、レコードだけ先に作った状態（§5.11.2 ①-b）
+  --     stored  … Object Finalize が実体の到着を通知した状態（同 ③）
+  --     expired … 実体が現れないまま期限を過ぎ、定期ジョブが失効させた状態
+  upload_state              text NOT NULL DEFAULT 'pending'
+                              CHECK (upload_state IN ('pending','stored','expired')),
+  stored_at                 timestamptz,     -- Object Finalize を受け取った時刻
   -- ▼ Phase 2 で使用（Phase 1 は値を入れない。後から列を足すと全件の再解析が必要になるため先に用意する）
   ai_caption                text,            -- AI自動生成キャプション案（採用前は未編集の生成結果のまま）
   ai_caption_edited         boolean NOT NULL DEFAULT false,  -- 利用者が編集済みか（生成結果の丸写しと区別）
@@ -481,20 +521,43 @@ CREATE TABLE media_assets (
   ai_processed_at           timestamptz,     -- AI解析完了時刻。NULLの間は「解析中」表示
   ai_processing_status      text NOT NULL DEFAULT 'pending'
                               CHECK (ai_processing_status IN ('pending','processing','done','failed')),
+  -- ★ AIタグ（エンジンは Claude／人間編集可・編集履歴つき／v13 §5.11.3・§9 #57）
+  ai_tags                    text[] NOT NULL DEFAULT '{}',
   linked_quest_id            uuid REFERENCES quests(quest_id),      -- クエスト完了報告からの登録（任意）
   linked_work_log_id         uuid REFERENCES work_logs(log_id),      -- 同上（Before/After写真からの導線）
   created_at                 timestamptz NOT NULL DEFAULT now(),
   updated_at                 timestamptz NOT NULL DEFAULT now(),
   -- 用途タグは最低1つ必須（Phase 2 の検索・推薦が成立しなくなるため／v13 §5.11.7）
-  CONSTRAINT ck_media_purpose_tags_required CHECK (cardinality(purpose_tags) >= 1)
+  CONSTRAINT ck_media_purpose_tags_required CHECK (cardinality(purpose_tags) >= 1),
+  -- 論理削除には操作者が要る（「誰が消したか分からない非表示化」を残さない／運営措置の監査）
+  CONSTRAINT ck_media_deleted_has_operator CHECK (deleted_at IS NULL OR deleted_by IS NOT NULL),
+  -- 実体が着いていないのに到着時刻だけがある状態を作らない
+  CONSTRAINT ck_media_stored_at_agrees CHECK ((upload_state = 'stored') = (stored_at IS NOT NULL))
 );
 CREATE INDEX ix_media_member ON media_assets (member_id);
 CREATE INDEX ix_media_purpose_tags ON media_assets USING gin (purpose_tags);
+CREATE INDEX ix_media_ai_tags ON media_assets USING gin (ai_tags);
 CREATE INDEX ix_media_processing_status ON media_assets (ai_processing_status)
   WHERE ai_processing_status IN ('pending','processing');
 -- 一覧表示は削除済みを除外する（論理削除のため常に条件が付く）
 CREATE INDEX ix_media_active ON media_assets (created_at DESC) WHERE deleted_at IS NULL;
 CREATE INDEX ix_media_place ON media_assets (place_id) WHERE deleted_at IS NULL;
+-- 孤児ファイル検出の定期ジョブが引く索引（v13 §5.11.2 note）
+CREATE INDEX ix_media_pending_upload ON media_assets (created_at) WHERE upload_state = 'pending';
+```
+
+**先送りしていた外部キーの回収（2026-09-22）**
+
+`0017`（`work_logs`）と `0018`（`menu_items`）は本表が未作成だったため「FK を張らず値だけ持つ」形で
+作られ、**本表を作る作業パッケージが ALTER を足すこと**と申し送られていた。`0027` で3本とも接続した。
+
+```sql
+ALTER TABLE work_logs  ADD CONSTRAINT fk_worklog_before_photo
+  FOREIGN KEY (before_photo_media_id) REFERENCES media_assets(media_id);
+ALTER TABLE work_logs  ADD CONSTRAINT fk_worklog_after_photo
+  FOREIGN KEY (after_photo_media_id)  REFERENCES media_assets(media_id);
+ALTER TABLE menu_items ADD CONSTRAINT fk_menu_items_image
+  FOREIGN KEY (image_media_id)        REFERENCES media_assets(media_id);
 ```
 
 - **AI処理は非同期**：アップロード直後は`ai_processing_status='pending'`で即座に一覧へ反映し、
@@ -598,9 +661,9 @@ COMMENT ON COLUMN menu_items.category IS
 ```sql
 CREATE TABLE accommodation_rates (
   rate_id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  room_type          text NOT NULL
-                        CHECK (room_type IN ('コテージA','コテージB','アースバッグ',
-                                             'テント','車中泊','ゲストハウス','サロン')),
+  room_type          text NOT NULL REFERENCES accommodation_types(room_type),
+                        -- ▲ 旧: CHECK による直書き列挙（コテージA/B・テント・ゲストハウス等の日本語旧名称）だった。
+                        -- 0014 で実装済みの accommodation_types（英字6値）への FK に差し替えた（v13 §5.4.2・#55）。
   member_category    text NOT NULL DEFAULT 'member'
                         CHECK (member_category IN ('member','non_member')),
   price_per_night_yen integer NOT NULL CHECK (price_per_night_yen >= 0),
@@ -625,17 +688,15 @@ CREATE INDEX ix_rate_current ON accommodation_rates (room_type, member_category)
   WHERE effective_until IS NULL;
 ```
 
-> [!danger] ⚠️ 上記 `room_type` の CHECK は**旧名称のまま**であり、このまま実装してはならない（#55）
-> 列挙されている7値（`コテージA`/`コテージB`/`アースバッグ`/`テント`/`車中泊`/`ゲストハウス`/`サロン`）は
-> **v1.16.0（2026-08-22）の改称前の名前**である。実装済みの `rooms.room_type`（`0006`）と
-> `accommodation_types.room_type`（`0014`）は、いずれも英字6値
-> **`dormitory` / `cottage` / `campsite` / `car` / `earthbag` / `salon`** で入っている。
-> この CHECK のまま `accommodation_rates` を作ると**どの部屋とも結合できない**。
->
-> `accommodation_rates` は `accommodation_types (room_type)` への外部キーとして定義し直すこと
-> （CHECK を手で並べ直すと、また改称のたびに食い違う）。
-> WBS `3-9`（宿泊料金マスタ）が 🔴 ブロック中なのはこの論点（`QUESTIONS.md`
-> 「[2026-08-26] 宿泊形態の旧名称が正本に残存している」）が未回答のためである。
+> [!success] ~~上記 `room_type` の CHECK は旧名称のまま～このまま実装してはならない（#55）~~ → ✅ **解消（2026-09-21）**
+> 旧文言が列挙していた7値（`コテージA`/`コテージB`/`アースバッグ`/`テント`/`車中泊`/`ゲストハウス`/`サロン`）は
+> **v1.16.0（2026-08-22）の改称前の名前**であり、実装済みの `rooms.room_type`（`0006`）・
+> `accommodation_types.room_type`（`0014`）の英字6値
+> **`dormitory` / `cottage` / `campsite` / `car` / `earthbag` / `salon`** と結合できなかった。
+> **`accommodation_rates.room_type` を `accommodation_types (room_type)` への外部キーへ差し替えて解消した**
+> （CHECK の手書き列挙をやめたため、次に改称があっても値の食い違いが起きない）。
+> WBS `3-9`（宿泊料金マスタ）のブロック要因だった `QUESTIONS.md`「[2026-08-26] 宿泊形態の旧名称が正本に残存している」は
+> 本改訂の反映により**表記面は解消**。3-9 の残ブロックが他にないかは WBS 側で別途確認すること。
 
 > [!warning] マスタは「これから作る伝票の既定値」であり、過去伝票の参照先ではない
 > `menu_items.unit_price_yen` を変更しても、**既存の `order_items.unit_price_yen` は変わりません**
@@ -994,7 +1055,11 @@ CREATE UNIQUE INDEX uq_import_job_committed_file
 
 - **`is_verified` に依存しない**ため、移行時（全件 `false`）でも確実に効く。ここが `contact_info` との決定的な違いである
 - 内容が1バイトでも違えば別ハッシュになる。**修正版ファイルの取込は正しく通る**
-- ⚠️ `import_jobs` / `member_import_links` は §6-1 #7 に区分だけが記載されており、**DDL は本書が初出**。
+- ⚠️ ~~`import_jobs` / `member_import_links` は §6-1 #7 に区分だけが記載されており、**DDL は本書が初出**。~~
+  → **2026-09-21 訂正**：本書に DDL があるのは **`import_jobs` だけ**である。
+  **`member_import_links` の DDL は本書にも `supabase/migrations/` にも存在しない**
+  （`member_identifiers` / `member_notes` / `uii_transactions` も同様）。
+  4件まとめて `QUESTIONS.md`「[2026-09-21] Phase 1 に必要な4テーブルの DDL が本リポジトリに存在しない」へ起票した。
   Vault 側 `01_schema.sql` に既存定義がある場合は突合すること（**要確認**）
 
 #### ④ 会員単位の照合：正規化した本名 ＋ 誕生年月
