@@ -40,8 +40,17 @@ const OYAKATA = TEST_MEMBERS.oyakata;
  */
 const SETUP_SQL = FIXTURE_SQL + "\n" + STAY_FIXTURE_SQL;
 
-/** `self` の滞在（`TEST_CHECK_INS.selfStay`）を指す。FK 制約を満たす実在の checkin_id。 */
-const ANY_CHECK_IN = TEST_CHECK_INS.selfStay.checkinId;
+/**
+ * `oyakata` の滞在（`TEST_CHECK_INS.otherStay`）を指す。FK 制約を満たす実在の checkin_id。
+ *
+ * ⚠️ **`selfStay`（`self` の滞在）を指してはならない。** 本ファイルは「`self` 会員を物理削除しても
+ * 名簿行は残る」ことを検証するために `DELETE FROM members WHERE member_id = SELF.memberId` を
+ * 複数回実行する。`checkin_id` が `self` の滞在を指していると、`check_ins.member_id` の FK
+ * （`members` への参照。`ON DELETE` 句なし＝デフォルト RESTRICT）が先に違反し、
+ * 名簿とは無関係な理由（23503）で会員削除そのものが失敗する。`oyakata` はこのファイルで
+ * 一度も物理削除されないため、`otherStay` を指せば名簿の FK 検証と会員削除の両方が両立する。
+ */
+const ANY_CHECK_IN = TEST_CHECK_INS.otherStay.checkinId;
 
 const ENTRY_ID = "dddddddd-0000-4000-8000-00000000e001";
 
