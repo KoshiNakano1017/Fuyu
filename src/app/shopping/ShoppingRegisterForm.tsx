@@ -63,11 +63,18 @@ export function ShoppingRegisterForm() {
   // 登録できたときだけ閉じる。重複候補・エラーは**開いたまま**でないと、
   // 「それでも登録する」も入力の直しもモーダルの外からは行えない。
   // 閉じるのは `close()` だけにして、状態の更新は `onClose`（イベント）側へ寄せる。
+  //
+  // ⚠️ 依存は `state.status` ではなく **`state` そのもの**にする。
+  // status だけを見ると "saved" → "saved" で値が変わらず、**2件目以降の登録で
+  // この効果が再実行されない**。アクションは毎回新しいオブジェクトを返す
+  // （`actions.ts` の各 return）ため、`state` なら登録のたびに必ず走る。
+  // 閉じ損ねると保存できた旨がモーダルの裏に隠れ、利用者は失敗したと思って
+  // 再送信する（＝重複登録）。
   useEffect(() => {
     if (state.status === "saved") {
       dialogRef.current?.close();
     }
-  }, [state.status]);
+  }, [state]);
 
   return (
     <div className="flex flex-col gap-2">
