@@ -59,6 +59,24 @@ gcloud storage buckets update "gs://${BUCKET}" \
   --project "${PROJECT_ID}" \
   --lifecycle-file "${SCRIPT_DIR}/media-bucket-lifecycle.json"
 
+# CORS（WBS 14-2 アップロード画面）
+#
+# ⚠️ **これが無いとブラウザからのアップロードは1件も成功しない。**
+#    実体は端末 → ストレージへ直接送られる（v13 §5.11.2 不可侵ルール1）ため、ブラウザは
+#    別オリジンへの PUT として preflight を投げる。バケットに CORS が無いと preflight が
+#    拒否され、**署名も IAM も正しいのにアップロードだけが失敗する**（画面には
+#    「通信に失敗しました」としか出ず、原因が読めない失敗様式になる）。
+#
+# 許可するオリジンは環境ごとに違う。既定は開発用のローカルだけで、Vercel の URL は
+# MEDIA_CORS_ORIGINS へカンマ区切りで渡す。
+#   例: export MEDIA_CORS_ORIGINS="http://localhost:3000,https://fuyu.vercel.app"
+CORS_ORIGINS="${MEDIA_CORS_ORIGINS:-http://localhost:3000}"
+CORS_FILE="$(mktemp)"
+sed "s|__ORIGINS__|$(printf '%s' "${CORS_ORIGINS}" | sed 's/,/","/g')|" "${SCRIPT_DIR}/media-bucket-cors.json" > "${CORS_FILE}"
+gcloud storage buckets update "gs://${BUCKET}" --project "${PROJECT_ID}" --cors-file "${CORS_FILE}"
+rm -f "${CORS_FILE}"
+echo "-- CORS 許可オリジン: ${CORS_ORIGINS}"
+
 # -----------------------------------------------------------------------------
 # 2. サービスアカウント — 用途ごとに分ける
 #
