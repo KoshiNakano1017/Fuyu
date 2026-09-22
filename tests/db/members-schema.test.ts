@@ -15,6 +15,10 @@ const MEMBERS_COLUMNS = [
   "member_id",
   "auth_user_id",
   "legacy_member_no",
+  // `0029`（WBS `2-7`）で追加した親方会員番号。街人番号（`legacy_member_no`）と
+  // **同じ行に共存できる**ことが要件であり（親方兼街人 ／ v13 §9 #26 ／ 2026-09-10 決定）、
+  // 接頭辞1列では表現できない。
+  "oyakata_member_no",
   "nickname",
   "member_type",
   "role",

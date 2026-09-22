@@ -25,6 +25,7 @@ export type Visibility = "visible" | "limited" | "hidden";
 export type AreaKey =
   | "home"
   | "quests"
+  | "shoppingList"
   | "cafeOrder"
   | "myPage"
   | "upload"
@@ -53,7 +54,11 @@ const ALL: Record<Role, Visibility> = {
   core_member: "visible",
   member: "visible",
   guest: "visible",
-  // `custom` は権限内容が未定義（DB物理設計 §6-9⑥）。暫定で `member` 相当として扱う。
+  // `custom`（出資者・VIP）は **`member`（街人）と同等**として扱う。
+  // これは暫定ではなく**正式仕様**である（2026-09-22 オーナー決定 ／ v13 §9 #66・
+  // 決定ログ §22-3）。出資者・VIP はバッジ表示や呼称などの演出で区別し、
+  // **認可へは持ち込まない**（`member_type` を認可に使わない原則と同じ考え方）。
+  // ⚠️ したがって `custom` に staff 相当を足さないこと。足すなら v13 §2 の側から改訂する。
   custom: "visible",
 };
 
@@ -86,6 +91,14 @@ export const AREAS: readonly Area[] = [
     label: "クエスト",
     path: "/quests",
     // ゲストは △（限定クエストのみ）。§6 権限マトリクスの「〇（限定あり）」と同義。
+    visibility: { ...ALL, guest: "limited" },
+  },
+  {
+    key: "shoppingList",
+    label: "買い物リスト",
+    path: "/shopping",
+    // ゲストは △（閲覧のみ・登録不可／v13 §5.12.1・§6 ／ 2026-09-22 オーナー確定）。
+    // 経路自体は開ける。登録フォームと操作ボタンを描画しないのはページ側の責務。
     visibility: { ...ALL, guest: "limited" },
   },
   { key: "cafeOrder", label: "カフェ注文", path: "/orders", visibility: ALL },

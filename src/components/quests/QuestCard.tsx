@@ -10,6 +10,7 @@ type QuestCardProps = {
 const ORIGIN_LABELS: Record<QuestBoardItem["originType"], string> = {
   manual: "運営が起案",
   morning_meeting_auto: "朝会から自動抽出",
+  shopping_list: "買い物リストから",
 };
 
 /**

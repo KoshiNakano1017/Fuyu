@@ -37,13 +37,22 @@ export async function sendInvitationAction(
   });
 
   if (result.ok) {
-    return { status: "sent", message: "招待を送信しました（有効期限24時間）。" };
+    // ⚠️ 文言は実装（リンクではなく案内メール ／ WBS `2-1d`）と対で維持する。
+    return {
+      status: "sent",
+      message:
+        "案内メールを送信しました。会員がログイン画面でこのアドレスを入力すると6桁コードが届きます（受付は24時間）。",
+    };
   }
 
   const MESSAGE: Record<string, string> = {
     member_not_found: "指定された会員が見つかりません。",
     already_active: "この会員は既にログインできる状態のため、招待は送れません。",
     not_staff: "この操作を行う権限がありません。",
+    // 招待の窓（台帳の行）は開いているため、会員が自分でログインを始めれば成立する。
+    // 運営が自力で直せる失敗なので、他の失敗と文面を分ける。
+    mail_not_configured:
+      "メール送信の設定（Resend の API キー）が未了のため送れませんでした。招待の記録は残っています。運営管理者へ連絡してください。",
     failed: "送信に失敗しました。時間をおいて再試行してください。",
   };
   return { status: "error", message: MESSAGE[result.reason] ?? MESSAGE.failed };
