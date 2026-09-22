@@ -100,3 +100,21 @@ export function isTodaysStay(params: {
   }
   return params.checkInDate === params.today;
 }
+
+/**
+ * キャンセル理由の種別（WBS 3-3 ／ v13 §7 ／ `0014` の CHECK 制約と同じ3値）。
+ *
+ * ★ **この値域を `cancellation.ts` ではなくここへ置く。**
+ *   `cancellation.ts` はサーバ専用（`createServerSupabaseClient()` を import する）であり、
+ *   選択肢を描くだけのクライアント部品がそこから値を取ると、
+ *   **サーバ用の Supabase クライアントがブラウザ側のバンドルへ引き込まれてビルドが落ちる**
+ *   （2026-09-22 に Vercel のプレビューで実際に落ちた）。
+ *   値域は判定と同じ「純粋な知識」なので、純関数モジュールに置くのが自然である。
+ */
+export type CancelReasonType = "会員都合" | "ノーショー" | "運営都合";
+
+export const CANCEL_REASON_TYPES: readonly CancelReasonType[] = [
+  "会員都合",
+  "ノーショー",
+  "運営都合",
+];

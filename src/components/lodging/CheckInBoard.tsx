@@ -4,7 +4,9 @@ import Link from "next/link";
 import { useActionState } from "react";
 
 import { SUBMIT_IDLE, type SubmitState } from "@/lib/forms/submit-state";
-import { CANCEL_REASON_TYPES } from "@/lib/lodging/cancellation";
+// ⚠️ 値域は純関数モジュールから取る。`cancellation.ts` はサーバ専用であり、
+//    ここから import するとサーバ用 Supabase クライアントがブラウザ側へ引き込まれる。
+import { CANCEL_REASON_TYPES } from "@/lib/lodging/checkin-ops";
 // 型だけを取る（`fetch-checkin-board.ts` はサーバ専用モジュール）。
 import type { CheckInBoardRow } from "@/lib/lodging/fetch-checkin-board";
 
