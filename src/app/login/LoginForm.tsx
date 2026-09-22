@@ -23,7 +23,7 @@ export function LoginForm() {
   const codeSent = sendState.status === "code_sent";
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex w-full flex-col gap-6">
       <form action={send} className="flex flex-col gap-3">
         <label className="flex flex-col gap-1 text-sm">
           メールアドレス
@@ -34,10 +34,10 @@ export function LoginForm() {
             autoComplete="email"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
-            className="rounded border border-neutral-300 px-3 py-2"
+            className="w-full rounded border border-neutral-300 px-3 py-2"
           />
         </label>
-        <button type="submit" className="rounded bg-neutral-900 px-4 py-2 text-white">
+        <button type="submit" className="w-full rounded bg-neutral-900 px-4 py-2 text-white">
           {codeSent ? "コードを再送する" : "確認コードを送る"}
         </button>
       </form>
@@ -55,10 +55,10 @@ export function LoginForm() {
               inputMode="numeric"
               autoComplete="one-time-code"
               maxLength={6}
-              className="rounded border border-neutral-300 px-3 py-2 tracking-widest"
+              className="w-full rounded border border-neutral-300 px-3 py-2 tracking-widest"
             />
           </label>
-          <button type="submit" className="rounded bg-neutral-900 px-4 py-2 text-white">
+          <button type="submit" className="w-full rounded bg-neutral-900 px-4 py-2 text-white">
             ログイン
           </button>
         </form>

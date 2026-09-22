@@ -21,12 +21,16 @@ export default async function LoginPage() {
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-6 p-6">
-      <h1 className="text-2xl font-bold">ログイン</h1>
-      <p className="text-sm text-neutral-600">
-        登録されているメールアドレスへ、6桁の確認コードをお送りします。
-      </p>
-      <LoginForm />
+    <main className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center gap-6 p-6 sm:p-8">
+      <div className="flex flex-col gap-6 rounded-lg border border-neutral-200 p-6 sm:p-8">
+        <div className="flex flex-col gap-2">
+          <h1 className="text-2xl font-bold">ログイン</h1>
+          <p className="text-sm text-neutral-600">
+            登録されているメールアドレスへ、6桁の確認コードをお送りします。
+          </p>
+        </div>
+        <LoginForm />
+      </div>
     </main>
   );
 }
