@@ -44,7 +44,7 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 /**
  * GCS のオブジェクトメタデータから、`media_assets` へ書き戻す値を作る。
  *
- * `storage_path` はバケット名を含まないオブジェクト名である（`0021_media_assets.sql` の注記）。
+ * `storage_path` はバケット名を含まないオブジェクト名である（`0027_media_assets.sql` の注記）。
  * GCS の `name` がまさにその形なので、そのまま突き合わせる。
  */
 export function buildStoredPatch(objectMetadata) {

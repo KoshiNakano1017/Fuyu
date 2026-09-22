@@ -21,7 +21,7 @@ type RouteContext = {
  *
  * v13 §5.11.2 の不可侵ルール4 は「ロール判定の実装箇所は Supabase（RLS ＋ Edge Function）のみ」
  * と定める。ここで `visibility` や `role` を見て分岐すると、同じ規則が
- * `0021_media_assets.sql` の RLS とこのファイルの2箇所に散る。
+ * `0027_media_assets.sql` の RLS とこのファイルの2箇所に散る。
  *
  * そこで**行が引けたこと自体を認可の結果として扱う**。RLS が
  * 「本人 ＋ staff は全件／それ以外は `公開` かつ未削除のみ」を既に表現しているため、
