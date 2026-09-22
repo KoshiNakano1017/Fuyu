@@ -1,13 +1,5 @@
+import { roleDisplayName } from "@/lib/auth/role-labels";
 import type { Role } from "@/lib/auth/session";
-
-/** 利用者向けのロール表示名。内部識別子（`core_member` 等）をそのまま見せない。 */
-const ROLE_LABEL: Record<Role, string> = {
-  admin: "管理者",
-  core_member: "コアメンバー",
-  member: "街人",
-  guest: "ゲスト",
-  custom: "カスタム権限",
-};
 
 /**
  * アクセス制限画面（v13 §5.9.4）。
@@ -38,9 +30,8 @@ export function AccessDenied({
       <dl className="flex flex-col gap-2 text-sm">
         <div className="flex gap-2">
           <dt className="text-neutral-600">現在の権限</dt>
-          <dd className="font-medium">
-            {currentRole ? ROLE_LABEL[currentRole] : "未ログイン"}
-          </dd>
+          {/* 表示名の出所は `role-labels.ts` ただ1つ（WBS 2-5）。画面ごとに表を持たない */}
+          <dd className="font-medium">{roleDisplayName(currentRole)}</dd>
         </div>
         <div className="flex gap-2">
           <dt className="text-neutral-600">必要な権限</dt>

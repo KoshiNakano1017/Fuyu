@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 
+import { ADMIN_REQUIRED_LABEL, STAFF_REQUIRED_LABEL } from "./role-labels";
 import { isAdmin, isStaff, readViewer, type Role, type Viewer } from "./session";
 
 /** 認可に失敗した理由。アクセス制限画面（v13 §5.9.4）の表示に使う。 */
@@ -49,7 +50,7 @@ export async function requireStaff(): Promise<Extract<Viewer, { signedIn: true }
   if (!isStaff(viewer.role)) {
     throw new AccessDeniedError({
       currentRole: viewer.role,
-      requiredRoleLabel: "管理者 または コアメンバー",
+      requiredRoleLabel: STAFF_REQUIRED_LABEL,
     });
   }
   return viewer;
@@ -60,7 +61,7 @@ export async function requireAdmin(): Promise<Extract<Viewer, { signedIn: true }
   if (!isAdmin(viewer.role)) {
     throw new AccessDeniedError({
       currentRole: viewer.role,
-      requiredRoleLabel: "管理者",
+      requiredRoleLabel: ADMIN_REQUIRED_LABEL,
     });
   }
   return viewer;
