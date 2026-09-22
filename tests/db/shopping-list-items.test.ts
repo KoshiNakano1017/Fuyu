@@ -147,8 +147,14 @@ describeDb("登録者は後から書き換えられない（v13 §5.12.1）", ()
 });
 
 describeDb("物理削除はできない（論理削除のみ／v13 §5.12.1）", () => {
-  test("運営が DELETE しても 0 行（ポリシーを作っていない）", () => {
-    expect(affectedRows(asAdmin, `DELETE FROM public.shopping_list_items WHERE item_id = '${ITEM_ID}';`)).toBe("0");
+  // ⚠️ RLS ポリシーが無いだけでなく、DELETE の GRANT 自体を与えていない
+  //   （`0030_shopping_list_items.sql` の REVOKE ALL → SELECT/INSERT/UPDATE のみ GRANT）。
+  //   GRANT が無いと RLS の評価まで到達せず、0 行ではなく 42501 で落ちる
+  //   （`lodging_register_entries` の DELETE 全拒否と同じ作法）。
+  test("運営でも DELETE できない（42501・GRANT 自体が無い）", () => {
+    expect(
+      sqlstateOf(`${asAdmin}\nDELETE FROM public.shopping_list_items WHERE item_id = '${ITEM_ID}';`),
+    ).toBe("42501");
   });
 });
 
