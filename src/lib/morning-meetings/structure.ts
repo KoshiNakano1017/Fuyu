@@ -176,3 +176,28 @@ export async function structureMorningMeeting(params: {
     buildStructuringRequest(params.minutesBody),
   );
 }
+
+/**
+ * ナレッジ候補を、議事録サマリーへ追記する節として整形する（v13 §5.7.4 ②）。
+ *
+ * ## なぜ専用のテーブルへ入れないのか
+ *
+ * ナレッジ候補の保存先（`knowledge_chunks` ＝ `0100` のベクトル基盤）は
+ * **WBS `1-6`（pgvector有効化・RAG基盤）と `9-1`（ナレッジ検索）の担当**であり、
+ * 4-2 の範囲外である。一方、同じ1回の呼び出しで返ってくる以上（§5.7.4 ②）、
+ * **捨てると再生成のたびにモデル呼び出しが必要になる**。
+ *
+ * そこで Phase 1 は `summary_text`（人がそのまま読めるテキスト）の末尾に節として残す。
+ * 構造化された投入は `1-6`／`9-1` が来たときに、ここから移送する
+ * （`QUESTIONS.md`「[2026-09-22] 朝会のナレッジ候補の恒久的な保存先」）。
+ */
+export function formatKnowledgeCandidatesText(candidates: readonly KnowledgeCandidate[]): string {
+  if (candidates.length === 0) {
+    return "";
+  }
+
+  return [
+    "■ナレッジ候補（未登録）",
+    ...candidates.map((candidate) => `・${candidate.title}: ${candidate.body}`),
+  ].join("\n");
+}
