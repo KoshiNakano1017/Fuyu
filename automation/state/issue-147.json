@@ -6,7 +6,7 @@
   "phase": "review",
   "risk": "high",
   "attempts": {
-    "infra": 234,
+    "infra": 237,
     "verify": 0,
     "review": 0
   },
@@ -16,7 +16,7 @@
     "review": null
   },
   "repeatedFingerprint": {
-    "infra": 107,
+    "infra": 110,
     "verify": 0,
     "review": 0
   },
@@ -308,7 +308,7 @@
     }
   ],
   "acceptanceDerived": false,
-  "updatedAt": "2026-09-22T21:58:33.715Z",
+  "updatedAt": "2026-09-22T22:02:04.472Z",
   "provisional": [
     {
       "question": "調査メモが報告した種類A（正本 v13 §5.12.4 vs 派生文書の「立替実費は記録のみ」）を、リスク区分が高であることを理由に完全停止すべきか",
