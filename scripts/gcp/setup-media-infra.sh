@@ -27,6 +27,22 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "== プロジェクト: ${PROJECT_ID} ／ バケット: ${BUCKET} ／ ロケーション: ${LOCATION}"
 
+# -----------------------------------------------------------------------------
+# 0. 必要な API を有効化する
+#
+#    ⚠️ 新しいプロジェクトでは既定で無効なものがある。有効化を先にやらないと、
+#       後続の gcloud が「API が無効」で落ち、どこまで作られたのか分からなくなる。
+#       有効化済みなら何も起きない（冪等）。
+# -----------------------------------------------------------------------------
+
+gcloud services enable \
+  storage.googleapis.com \
+  iam.googleapis.com \
+  cloudtasks.googleapis.com \
+  cloudbilling.googleapis.com \
+  billingbudgets.googleapis.com \
+  --project "${PROJECT_ID}"
+
 # ⚠️ メディア用バケットを line-rag-bot と同じプロジェクトに置くかは未決である
 #    （`QUESTIONS.md`「[2026-09-19] メディア用 GCS バケットを `line-rag-bot` と同一 GCP
 #    プロジェクトに置くか」／推奨 B＝専用プロジェクト）。本スクリプトは
@@ -55,6 +71,17 @@ gcloud storage buckets update "gs://${BUCKET}" \
   --public-access-prevention
 
 # ライフサイクル（v13 §5.11.4）
+#
+#   media-bucket-lifecycle.json の5つの規則:
+#     ① media/ を 30日 → Nearline（撮りたては頻繁に見るが1か月で参照が落ちる）
+#     ② media/ を 90日 → Coldline
+#     ③ media/ を 365日 → Archive（Phase 2 の検索対象からは外れないが取り出しコストは上がる）
+#     ④ tmp/ を 7日で削除（サムネイル生成前の一時ファイル・失敗したアップロード）
+#     ⑤ 未完了の再開可能アップロードを 1日で破棄
+#
+#   ⚠️ JSON にコメントキー（"_comment" 等）を入れてはならない。gcloud が
+#      「Found invalid JSON/YAML for the lifecycle rule」で落ちる（2026-09-22 に実際に踏んだ）。
+#      規則の意図は上のとおりここへ書く。
 gcloud storage buckets update "gs://${BUCKET}" \
   --project "${PROJECT_ID}" \
   --lifecycle-file "${SCRIPT_DIR}/media-bucket-lifecycle.json"
