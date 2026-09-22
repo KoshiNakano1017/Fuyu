@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import { GuestUnlockBanner } from "@/components/quests/GuestUnlockBanner";
 import { QuestCard } from "@/components/quests/QuestCard";
 import { requireSignedIn } from "@/lib/auth/guard";
@@ -28,6 +30,11 @@ export default async function QuestsPage() {
   return (
     <main className="mx-auto flex max-w-2xl flex-col gap-4 p-6">
       <h1 className="text-2xl font-bold">クエスト</h1>
+
+      {/* 受けた仕事の報告は別画面（画面ID A4 ／ WBS 5-3）。板を混ぜない */}
+      <Link href="/reports" className="text-sm underline underline-offset-4">
+        受注したクエストの作業報告へ
+      </Link>
 
       {banner !== null && <GuestUnlockBanner banner={banner} />}
 

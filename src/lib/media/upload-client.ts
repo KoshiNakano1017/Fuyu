@@ -1,3 +1,5 @@
+import { readCaptureMetadataFromFile } from "./exif";
+
 /**
  * アップロード画面（WBS 14-2）とサーバの受け渡しの形、およびブラウザ側の小さな決まりごと。
  *
@@ -77,4 +79,100 @@ function clampPercent(value: number): number {
     return 0;
   }
   return value > 100 ? 100 : value;
+}
+
+/**
+ * 1件をストレージへ送る（WBS 14-1 ／ v13 §5.11.2）。アップロード画面と完了報告（WBS 5-3）の
+ * 両方が使う。**画面ごとに同じ手順を書かない** — 署名の取り方や `x-goog-content-length-range` の
+ * 扱いが画面ごとにずれると、片方だけストレージ側に拒否される。
+ */
+export type UploadOutcome = { ok: true; mediaId: string } | { ok: false; message: string };
+
+/**
+ * 1件をアップロードする。
+ *   ① Exif から撮影日時・位置を読む（JPEG のみ）→ ② 署名付きURLを受け取る → ③ ストレージへ PUT
+ *
+ * ③ が終わっても**アプリへ完了を通知しない**。記録は Object Finalize が起点である
+ * （v13 §5.11.2 note）。通知に頼ると、通信断やアプリ離脱で「実体はあるのに記録が無い」状態になる。
+ */
+export async function uploadFileToStorage(params: {
+  file: File;
+  purposeTags: readonly string[];
+  onProgress?: (percent: number) => void;
+}): Promise<UploadOutcome> {
+  const { file, purposeTags } = params;
+  const onProgress = params.onProgress ?? (() => {});
+  const capture = await readCaptureMetadataFromFile(file);
+
+  let ticket: SignedUploadTicket;
+  try {
+    const response = await fetch("/api/media/signed-upload-url", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        contentType: file.type,
+        purposeTags,
+        declaredSizeBytes: file.size,
+        takenAt: capture.takenAt,
+        geoLocation: capture.geoLocation,
+      }),
+    });
+    const body: unknown = await response.json();
+    if (!response.ok) {
+      return { ok: false, message: readErrorMessage(body) };
+    }
+    ticket = body as SignedUploadTicket;
+  } catch {
+    return { ok: false, message: "通信に失敗しました。電波の良い場所で再試行してください。" };
+  }
+
+  return putToStorage(ticket, file, onProgress);
+}
+
+function readErrorMessage(body: unknown): string {
+  if (typeof body === "object" && body !== null) {
+    const error = (body as { error?: unknown }).error;
+    if (typeof error === "string" && error !== "") {
+      return error;
+    }
+  }
+  return "アップロードの受付に失敗しました。";
+}
+
+function putToStorage(
+  ticket: SignedUploadTicket,
+  file: File,
+  onProgress: (percent: number) => void,
+): Promise<UploadOutcome> {
+  return new Promise((resolve) => {
+    const request = new XMLHttpRequest();
+    request.open(ticket.method, ticket.uploadUrl);
+
+    for (const [name, value] of Object.entries(toBrowserHeaders(ticket.requiredHeaders))) {
+      request.setRequestHeader(name, value);
+    }
+
+    request.upload.addEventListener("progress", (event) => {
+      if (event.lengthComputable && event.total > 0) {
+        onProgress(Math.floor((event.loaded / event.total) * 100));
+      }
+    });
+    request.addEventListener("load", () => {
+      resolve(
+        request.status >= 200 && request.status < 300
+          ? { ok: true, mediaId: ticket.mediaId }
+          : // ⚠️ ストレージの応答本文を画面へ出さない。署名付きURLの一部が混ざりうるため
+            //    （v13 §5.11.2 トレードオフ：URL を知る者は誰でも開ける）。
+            { ok: false, message: `保存に失敗しました（${request.status}）。再試行してください。` },
+      );
+    });
+    request.addEventListener("error", () =>
+      resolve({ ok: false, message: "通信に失敗しました。再試行してください。" }),
+    );
+    request.addEventListener("abort", () =>
+      resolve({ ok: false, message: "アップロードが中断されました。" }),
+    );
+
+    request.send(file);
+  });
 }
