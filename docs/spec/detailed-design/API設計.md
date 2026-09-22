@@ -262,12 +262,20 @@ up: "[[浮遊街アプリ 総合要件定義・設計書_v13]]"
 
 | メソッド | パス | 概要 | 認可 | 対応DB |
 | --- | --- | --- | --- | --- |
-| POST | `/api/media/signed-upload-url` | Cloud Storage for Firebaseへの署名付きアップロードURL発行 | 全員 | ― |
+| POST | `/api/media/signed-upload-url` | Cloud Storage for Firebaseへの署名付きアップロードURL発行（V4・PUT・10分・`contentType` 固定・`x-goog-content-length-range` 付き）。同時に `media_assets` へ `pending` を先行作成する（v13 §5.11.2 ①） | 全員 | `media_assets` |
+| POST | `/api/media/{id}/signed-view-url` | **★ 閲覧用の署名付きURL発行（2026-09-22 追記）**。GET・5分。`visibility = '運営のみ'` は2分（v13 §5.11.2 ⑥）。認可は RLS に委ね、行が引けないものは 404 を返す | 全員（RLS が公開範囲で絞る） | `media_assets` |
 | POST | `/api/media` | 用途タグ・メタデータ登録（AI解析を非同期トリガー）。**アップロード完了の確定は本APIではなくGCS Object Finalizeイベントが起点**（クライアント通知に依存しない・v13 §5.11.2） | 全員（本人のみ） | `media_assets` |
 | PATCH | `/api/media/{id}/purpose` | 用途タグの追加・変更（AI再解析を非同期トリガー） | 本人 | `media_assets` |
 | GET | `/api/media?purpose=instagram&sort=relevance` | 用途タグでの絞り込み・適合度順取得 | 本人（自分のアップロード分のみ） | `media_assets` |
 | PATCH | `/api/media/{id}/caption` | AIキャプション案の編集・確定 | 本人 | `media_assets` |
 | DELETE | `/api/media/{id}` | 削除 | 本人 | `media_assets` |
+
+> [!note] ★ 閲覧URL発行を GET ではなく POST にした理由（2026-09-22）
+> 本エンドポイントは正本 v13 §5.11.2 の ⑤⑥ に当たるが、**本節の初版（2026-08-16）に記載が無かった**。
+> 署名付きURLは発行のたびに新しい鍵を配る副作用のある操作であり、GET にするとブラウザや
+> プロキシが結果をキャッシュして失効済みのURLが再利用される。そのため同節の発行系
+> （`POST /api/media/signed-upload-url`）に合わせた。実装は
+> `src/app/api/media/[mediaId]/signed-view-url/route.ts`（PR #119）。
 
 > [!warning] 非機能要件・オーナー確認事項（画面設計.md §6 #5〜#7と同一論点）
 > AI解析（Gemini）は`POST /api/media`のレスポンスをブロックしない非同期処理とする（`ai_processing_status`
@@ -611,6 +619,7 @@ paths:
 
 | 日付 | 内容 |
 | --- | --- |
+| **2026-09-22** | **§2-10 に閲覧用の署名付きURL発行 `POST /api/media/{id}/signed-view-url` を追加**。正本 v13 §5.11.2 の ⑤⑥（GET・5分／内部専用2分）に当たる経路が本節の初版（2026-08-16）から欠けており、WBS `1-4`（署名付きURL基盤）の実装（PR #119）で必要になったため。あわせて `POST /api/media/signed-upload-url` の概要へ、発行する署名の具体（V4・PUT・10分・`contentType` 固定・`x-goog-content-length-range`）と `media_assets` への `pending` 先行作成を明記し、対応DBを ~~―~~ → `media_assets` へ改めた。 |
 | **2026-09-05** | **§1-1（`anon` ロールの権限は原則ゼロ）と §1-2（監査ログ方針と保管設計の関係）を新設**。①非機能 **F-9**（ネットワーク層の防御）への回答として、直アクセス経路は Vercel WAF が効かないため **`anon` 権限の削り込みが実質的なファイアウォールになる**という原則を明記し、**本書のエンドポイント一覧を全件突き合わせて `anon` のテーブル権限が不要であることを検証**した（`GRANT`/`REVOKE` の DDL 本体は `DB物理設計.md` §6 が正）。②§1 の監査ログ方針（`operator_id`＋`reason` の必須化）を**変更せず**、「記録したものをどこへ・どれだけ置くか」を `システムアーキテクチャ.md`「監査ログの保管構成」へ委ねる役割分担を明記。③**A6 の「AI対話履歴」が §2-6 のとおり本体 DB に存在しない**（発生源は `line-rag-bot` 側）ことを新規論点として起票。 |
 | 2026-08-28 | §2-10 `POST /api/media` の概要を正本 v13 §5.11.2 に整合させる修正。「アップロード完了通知」という表現が、正本の「完了確定はGCS Object Finalizeイベント起点・クライアント完了通知に依存しない」（非機能要件詳細.md §2-2と同旨）と食い違っていたため、本APIの役割を用途タグ・メタデータ登録に限定する記述へ改めた（正本優先ルールの適用。CLAUDE.md §1.1）。 |
 | **2026-08-23** | **Googleフォーム連携の廃止と公開予約ページ化を反映（v13 §9 #46〜#49）**。①§2-2 の `POST /api/reservations/webhook` と §4 Webhook一覧 #1 を**廃止**として取消線化。②§3-4 のドラフトyamlを削除し、**`POST /api/public/reservations` の正式スキーマ**へ差し替え（宿泊形態6種のenum・送迎・**任意**の事前予約注文・同意版数・名寄せ候補の返却方針・409/429）。③§2-2b に公開予約ページ関連7エンドポイント（OTP発行/検証・公開予約作成・公開残枠・公開料金・事前予約注文・日別食数サマリー）を新設し、**anonキーで直接DBを触らせない**旨と Turnstile／レート制限／OTP試行制限を明記。④§1 のべき等性方針から外部Webhook前提の記述を撤回。⑤`GET /api/admin/stay-calendar` に日別食数サマリーを追加。⑥オーナー確認事項 #2 を「不要になった」へ更新。 |
