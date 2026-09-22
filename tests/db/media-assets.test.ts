@@ -6,9 +6,12 @@
 //       `supabase/migrations/0027_media_assets.sql`、
 //       2026-09-22 オーナー決定 C（正本 §7 の全面採用）。
 //
+// 末尾に WBS 14-6（AIタグ用カラム `ai_tags[]` の先行追加）の受入テストを足した。
+// 根拠: v13 §5.11.3（AIタグ付けの方式・Phase）・§7「★ メディアアセット」・§9 #57。
+//
 // ⚠️ フィクスチャは自作のみ。実在の会員データを一切参照しない（CLAUDE.md §3.2・§7.1）。
 
-import { describeDb, query, sqlstateOf } from "./helpers/psql";
+import { describeDb, query, queryRows, sqlstateOf } from "./helpers/psql";
 import { FIXTURE_SQL, loginAsSql, TEST_AUTH_USERS, TEST_MEMBERS } from "./helpers/fixtures";
 
 const PUBLIC_MEDIA_ID = "00000000-0000-0000-0000-00000000ab01";
@@ -320,5 +323,131 @@ describeDb("先送りされていた外部キーの接続（0017・0018 の申�
       VALUES ('テスト商品', 'フード', 500, '00000000-0000-0000-0000-00000000ffff');
     `);
     expect(state).toBe("23503");
+  });
+});
+
+// ───────────────────────────────────────────────────────────
+// WBS 14-6（AIタグ用カラム `ai_tags[]` の先行追加）の受入テスト。
+//
+// 既存の L127「`ai_tags` 列が存在する」は列の有無しか見ておらず、
+// 型・NOT NULL・既定値・GIN 索引・バックフィル対象の抽出は無検査だった。
+// この5点が崩れると、Phase 2 開始時に「全件の遡及解析が必要になる」
+// （v13 §7 note「Phase 1 で『入れないが持つ』カラム」）状態へ戻ってしまい、
+// 崩れたこと自体に誰も気づけない。だから機械で固定する。
+// ───────────────────────────────────────────────────────────
+
+/** Phase 2 の配列照合検索（`ai_tags @> ARRAY[...]`）を支える索引（v13 §5.11.3 検索対象）。 */
+const AI_TAGS_INDEX = "ix_media_ai_tags";
+
+/** `ai_tags` の1列だけを information_schema から引く。 */
+function aiTagsColumn(attribute: string): string {
+  return `
+    SELECT ${attribute} FROM information_schema.columns
+    WHERE  table_schema = 'public' AND table_name = 'media_assets' AND column_name = 'ai_tags';
+  `;
+}
+
+describeDb("Phase 1 は ai_tags を「入れないが持つ」（v13 §7 ／ §5.11.3 Phase 行）", () => {
+  test("ai_tags は text の配列である", () => {
+    // 検索対象は「AIタグ（`ai_tags[]`）」（v13 §5.11.3）。
+    // jsonb や text 1個へ縮めると配列照合の索引が張れない
+    expect(query(aiTagsColumn("udt_name"))).toBe("_text");
+  });
+
+  test("ai_tags は NOT NULL である", () => {
+    expect(query(aiTagsColumn("is_nullable"))).toBe("NO");
+  });
+
+  test("ai_tags の既定値は空配列である", () => {
+    expect(query(aiTagsColumn("column_default"))).toBe("'{}'::text[]");
+  });
+
+  test("★ ai_tags に値を入れずに行を作れる（Phase 1 は値を入れない）", () => {
+    expect(sqlstateOf(insertMedia("", ""))).toBeNull();
+  });
+
+  test("★ 値を入れずに作った行の ai_tags は空配列になる（NULL ではない）", () => {
+    // 「未解析」を NULL で表すと、Phase 2 の配列照合が NULL 行を取りこぼす
+    expect(
+      query(`${insertMedia("", "")} SELECT ai_tags FROM public.media_assets;`),
+    ).toBe("{}");
+  });
+
+  test("★ ai_tags に NULL を明示した行は作れない（23502）", () => {
+    expect(sqlstateOf(insertMedia(", ai_tags", ", NULL"))).toBe("23502");
+  });
+});
+
+describeDb("Phase 2 の配列照合検索が索引で引ける（v13 §5.11.3 検索対象）", () => {
+  test(`${AI_TAGS_INDEX} が GIN で作られている`, () => {
+    // btree へ落ちていると `@>` に使えず、枚数に比例した全走査になる
+    const indexes = queryRows(`
+      SELECT c.relname
+      FROM   pg_index i
+      JOIN   pg_class c ON c.oid = i.indexrelid
+      JOIN   pg_am am ON am.oid = c.relam
+      WHERE  i.indrelid = 'public.media_assets'::regclass AND am.amname = 'gin'
+        AND  c.relname = '${AI_TAGS_INDEX}';
+    `);
+    expect(indexes).toEqual([AI_TAGS_INDEX]);
+  });
+
+  test(`★ 配列照合（@>）の実行計画が ${AI_TAGS_INDEX} を使う`, () => {
+    // 全走査を選ばせない状態で計画を採ると、「索引が使える形か」だけを見られる。
+    // 行数ゼロの試験 DB では費用比較で全走査が勝つため、比較そのものを外す
+    const plan = query(`
+      SET LOCAL enable_seqscan = off;
+      EXPLAIN (COSTS OFF)
+      SELECT media_id FROM public.media_assets WHERE ai_tags @> ARRAY['畑']::text[];
+    `);
+    expect(plan).toContain(AI_TAGS_INDEX);
+  });
+
+  test("タグを含む行は配列照合で引ける", () => {
+    expect(
+      query(`
+        ${insertMedia(", ai_tags", ", ARRAY['畑','収穫']")}
+        SELECT count(*) FROM public.media_assets WHERE ai_tags @> ARRAY['畑']::text[];
+      `),
+    ).toBe("1");
+  });
+
+  test("★ タグを含まない行は配列照合で引けない", () => {
+    expect(
+      query(`
+        ${insertMedia(", ai_tags", ", ARRAY['畑','収穫']")}
+        SELECT count(*) FROM public.media_assets WHERE ai_tags @> ARRAY['厨房']::text[];
+      `),
+    ).toBe("0");
+  });
+});
+
+describeDb("Phase 2 開始時のバックフィル対象を特定できる（v13 §5.11.3 Phase 行）", () => {
+  test("★ ai_* を入れずに作った Phase 1 の行は pending として抽出される", () => {
+    expect(
+      query(`
+        ${insertMedia("", "")}
+        SELECT count(*) FROM public.media_assets WHERE ai_processing_status = 'pending';
+      `),
+    ).toBe("1");
+  });
+
+  test("★ 解析済み（done）の行はバックフィル対象に入らない", () => {
+    expect(
+      query(`
+        ${insertMedia(", ai_processing_status, ai_processed_at", ", 'done', now()")}
+        SELECT count(*) FROM public.media_assets WHERE ai_processing_status = 'pending';
+      `),
+    ).toBe("0");
+  });
+
+  test("バックフィル対象は ai_tags が空の行と一致する（取りこぼしも余りも無い）", () => {
+    expect(
+      query(`
+        ${insertMedia("", "")}
+        SELECT count(*) FROM public.media_assets
+        WHERE  ai_processing_status = 'pending' AND cardinality(ai_tags) = 0;
+      `),
+    ).toBe("1");
   });
 });

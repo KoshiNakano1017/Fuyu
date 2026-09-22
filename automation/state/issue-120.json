@@ -3,7 +3,7 @@
   "issue": 120,
   "pr": null,
   "branch": null,
-  "phase": "plan",
+  "phase": "implement",
   "risk": "high",
   "attempts": {
     "infra": 1,
@@ -21,11 +21,67 @@
     "review": 0
   },
   "tokens": {
-    "input": 112,
-    "output": 61789,
-    "costUsd": 6.2754445
+    "input": 202,
+    "output": 97028,
+    "costUsd": 10.230331
   },
-  "testHashes": {},
+  "testHashes": {
+    "e2e/smoke.spec.ts": "ed6ce8db5e0004a2",
+    "tests/acceptance.test.ts": "ba0921981b4630b7",
+    "tests/accommodation-rates.test.ts": "c6fe0752abed4c8e",
+    "tests/ai-client.test.ts": "26b0511e481725da",
+    "tests/ai-env.test.ts": "af2ee601c87cfcce",
+    "tests/auth-guard.test.ts": "36f9487ef96e224e",
+    "tests/concierge-admin-link.test.ts": "9c74468cb3723c2e",
+    "tests/db-test-infra.test.ts": "b4db59cc79914376",
+    "tests/db/accommodation-rates.test.ts": "4580ed3e6630dc91",
+    "tests/db/check-ins-and-availability.test.ts": "dd5b7f024e5723b1",
+    "tests/db/current-operator-id.test.ts": "82e8173ec61178d7",
+    "tests/db/helpers/fixtures.ts": "a19cb8b08e440a6d",
+    "tests/db/helpers/psql.ts": "d95bcca15e534a0a",
+    "tests/db/lodging-register.test.ts": "30b65e1be2f195fd",
+    "tests/db/login-binding.test.ts": "951155ad26536214",
+    "tests/db/media-assets.test.ts": "7056a46ab127be72",
+    "tests/db/member-display-name.test.ts": "8101ecf136244b02",
+    "tests/db/members-guard-trigger.test.ts": "c0675285d9d0be31",
+    "tests/db/members-schema.test.ts": "1dec944f3943d4c7",
+    "tests/db/morning-meetings-rls.test.ts": "d20220c01e6fa90c",
+    "tests/db/quest-review-guard.test.ts": "64707ab63ba3c3a3",
+    "tests/db/quests-guest-visibility.test.ts": "90a7edbc7e331f04",
+    "tests/db/rag-pgvector.test.ts": "35a7033913d7df2a",
+    "tests/db/rls-and-helper-functions.test.ts": "9ac749d11b2c42ad",
+    "tests/db/rls-policies.test.ts": "3748be28b027dcc3",
+    "tests/db/rooms.test.ts": "593113cb58ea14ca",
+    "tests/fixtures-are-synthetic.test.ts": "9be179b5f7481ed6",
+    "tests/fixtures/quest-board.ts": "2177f6c4931566c8",
+    "tests/helpers/ai-sources.ts": "b976105b854a38e2",
+    "tests/helpers/concierge-sources.ts": "a3b2ceefd9c779bf",
+    "tests/home-entry.test.ts": "9077e2c7ff02ef55",
+    "tests/lodging-calendar.test.ts": "1225291bb46635a2",
+    "tests/lodging-cancellation.test.ts": "0b007d98e5ede355",
+    "tests/lodging-register.test.ts": "8da422d56bcbdd87",
+    "tests/media-env.test.ts": "342023269f6ec655",
+    "tests/media-signed-url.test.ts": "42e219fc5ae67d82",
+    "tests/media-upload-policy.test.ts": "946d75bbc7ad7c97",
+    "tests/middleware-resilience.test.ts": "ffd48fd3af959071",
+    "tests/migrations-baseline.test.ts": "cd1b6e29a043b253",
+    "tests/morning-meeting-intake.test.ts": "9256f65a908066c8",
+    "tests/morning-meeting-structuring.test.ts": "d0e67577b5031207",
+    "tests/no-line-rag-bot-integration.test.ts": "78a9bcd933b7ea04",
+    "tests/order-totals.test.ts": "4ab4cfe04b9eae89",
+    "tests/orders-menu.test.ts": "9597bcd5b03c6a07",
+    "tests/quest-application-gate.test.ts": "daf570f863ab6141",
+    "tests/quest-board.test.ts": "e5bfc002c8c4c8b2",
+    "tests/quest-review.test.ts": "1e04017f5b38bb31",
+    "tests/reservation-otp.test.ts": "746960f1c378a1ab",
+    "tests/role-navigation.test.ts": "cf16b87575989f3a",
+    "tests/room-availability.test.ts": "5f1e319a1a1878da",
+    "tests/serving-status.test.ts": "4b3d762719a30c34",
+    "tests/staff-knowledge-page.test.ts": "41e23e6ba5ee51d7",
+    "tests/supabase-env.test.ts": "2e12df77018a4f12",
+    "tests/uii.test.ts": "b5791629644723f4",
+    "tests/unsettled-totals.test.ts": "e90a9b97fa9fb23f"
+  },
   "specRefs": [
     {
       "ref": "v13 §5.11.3 用途タグと「おすすめ表示」",
@@ -56,30 +112,30 @@
   "acceptance": [
     {
       "criterion": "`media_assets.ai_tags` が `text[] NOT NULL DEFAULT '{}'` で存在し、値を入れずに行を作成できる（空配列になる）",
-      "origin": "derived",
-      "basis": "v13 §7 L2334「Phase 1 ではカラムのみ用意し値を入れない」",
-      "test": "ai_tags の型は text[] である／ai_tags は NOT NULL である／ai_tags の既定値は空配列 '{}' である／ai_tags を指定せずに行を作ると空配列になる／ai_tags に NULL を入れた行は作れない（23502）"
+      "origin": "issue",
+      "basis": "v13 §7 L2334（Phase 1 ではカラムのみ用意し値を入れない）／L2336-2337 note",
+      "test": "tests/db/media-assets.test.ts: `ai_tags は text の配列である` ／ `ai_tags は NOT NULL である` ／ `ai_tags の既定値は空配列である` ／ `★ ai_tags に値を入れずに行を作れる（Phase 1 は値を入れない）` ／ `★ 値を入れずに作った行の ai_tags は空配列になる（NULL ではない）` ／ `★ ai_tags に NULL を明示した行は作れない（23502）`"
     },
     {
       "criterion": "`ai_tags` に GIN 索引 `ix_media_ai_tags` があり、Phase 2 の配列照合検索が索引で引ける",
-      "origin": "derived",
-      "basis": "v13 §5.11.3 L2029「検索対象：…AIタグ（`ai_tags[]`）」",
-      "test": "GIN 索引 ix_media_ai_tags が media_assets に存在する／ix_media_ai_tags のアクセスメソッドは gin である／ai_tags の配列照合（@>）で該当行だけを引ける"
+      "origin": "issue",
+      "basis": "v13 §5.11.3 L2029（検索対象：…AIタグ（`ai_tags[]`））／L2037（登録時に構造化し検索時は照合だけ）",
+      "test": "tests/db/media-assets.test.ts: `ix_media_ai_tags が GIN で作られている` ／ `★ 配列照合（@>）の実行計画が ix_media_ai_tags を使う` ／ `タグを含む行は配列照合で引ける` ／ `★ タグを含まない行は配列照合で引けない`"
     },
     {
       "criterion": "Phase 1 蓄積分のバックフィル対象行を `ai_processing_status = 'pending'` で一意に特定できる",
-      "origin": "derived",
-      "basis": "v13 §5.11.3 L2042「Phase 2 開始時に Phase 1 蓄積分を一括バックフィル」",
-      "test": "ai_processing_status='pending' で Phase 1 蓄積分（バックフィル対象）を抽出できる／AI を動かしていない行は ai_tags が空のまま pending である"
+      "origin": "issue",
+      "basis": "v13 §5.11.3 L2042（Phase 2 開始時に Phase 1 蓄積分を一括バックフィル）",
+      "test": "tests/db/media-assets.test.ts: `★ ai_* を入れずに作った Phase 1 の行は pending として抽出される` ／ `★ 解析済み（done）の行はバックフィル対象に入らない` ／ `バックフィル対象は ai_tags が空の行と一致する（取りこぼしも余りも無い）`"
     },
     {
       "criterion": "上記3点が `tests/db/media-assets.test.ts` の回帰テストで検証される（現状は列の存在のみを検査している）",
-      "origin": "derived",
-      "basis": "v13 §7 L2336-2337 note「スキーマは Phase 1 で用意し、値は Phase 2 で埋める」",
-      "test": "上記10本の追加をもって満たす（単独のテストは置かない）"
+      "origin": "issue",
+      "basis": "v13 §7 L2336-2337 note（スキーマは Phase 1 で用意し、値は Phase 2 で埋める）",
+      "test": "tests/db/media-assets.test.ts の末尾3ブロック（`Phase 1 は ai_tags を「入れないが持つ」…` ／ `Phase 2 の配列照合検索が索引で引ける…` ／ `Phase 2 開始時のバックフィル対象を特定できる…`）。既存 L127「ai_tags 列が存在する」は残置"
     }
   ],
-  "acceptanceDerived": true,
-  "updatedAt": "2026-09-22T06:53:52.801Z",
+  "acceptanceDerived": false,
+  "updatedAt": "2026-09-22T07:04:51.019Z",
   "provisional": []
 }
