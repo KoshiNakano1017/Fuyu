@@ -439,7 +439,15 @@ def dispense(issues: list[dict], cap: int, wbs: Path, dry: bool) -> tuple[list[s
         out = sh([
             "gh", "workflow", "run", "wbs-to-issue.yml", "--repo", REPO,
             "-f", f"package={item['id']}", "-f", "resolve=false",
-            "-f", "draft=false", "-f", "start_loop=true",
+            # ⚠️ 2026-09-20: `draft=false` から修正。
+            # CLAUDE.md §「完了条件」は «起票支援エージェントが正本から導出して記入する
+            # （オーナーの記入を待たない）／wbs-to-issue.yml の draft（既定 true）» と
+            # 定めているのに、ここが `draft=false` を明示的に渡して `issue-draft` を
+            # 飛ばしていた。結果、払い出した Issue の完了条件が雛形のまま PM へ渡り、
+            # pm-define の «空欄で導出の材料が無い → 停止» に毎回該当して
+            # `auto:blocked` になっていた（実測: 2026-09-20 に 5-2・2-1c・10-2・12-1 の
+            # 4件が連続で同一理由で停止）。オーナーへ同じ質問を繰り返す原因はここ。
+            "-f", "draft=true", "-f", "start_loop=true",
         ], check=False)
         acted.append(item["id"])
         del out

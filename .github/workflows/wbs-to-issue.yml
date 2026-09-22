@@ -355,7 +355,13 @@ jobs:
           LABELS="from-wbs"
           FROM_WBS="$(cat /tmp/labels.txt)"
           [ -n "$FROM_WBS" ] && LABELS="${LABELS},${FROM_WBS}"
-          [ "${{ steps.gate.outputs.apply_auto }}" = "true" ] && LABELS="${LABELS},auto"
+          # ⚠️ 2026-09-20: draft=true のときはここで `auto` を付けない。
+          #    付けると AUTOMATION_PAT の作成イベントで auto-01-plan.yml が即発火し、
+          #    下の「起票支援エージェント」が完了条件を書き終える前に PM が
+          #    雛形のままの本文を読む（レース）。`auto` は起草の完了後に付ける。
+          if [ "${{ steps.gate.outputs.apply_auto }}" = "true" ] && [ "${{ inputs.draft }}" != "true" ]; then
+            LABELS="${LABELS},auto"
+          fi
 
           echo "付与するラベル: ${LABELS}"
 
@@ -390,6 +396,21 @@ jobs:
           prompt: |
             automation/agents/issue-draft.md を読み、その指示に従うこと。
             対象 Issue 番号: ${{ steps.create.outputs.number }}
+
+      # ⚠️ 2026-09-20 新設。`auto` は「起草が終わってから」付ける。
+      #    上の create ステップで付けてしまうと、起草と auto-01-plan が同時に走り、
+      #    PM が雛形のままの完了条件を読んで «空欄で導出の材料が無い → 停止» に
+      #    該当してしまう（実測: 2026-09-20 の 5-2・2-1c・10-2・12-1 の4件）。
+      #    GITHUB_TOKEN ではなく AUTOMATION_PAT を使う理由は create ステップと同じ。
+      - name: 起草の完了後に auto を付ける
+        if: inputs.draft && steps.gate.outputs.apply_auto == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
+        run: |
+          set -euo pipefail
+          gh issue edit "${{ steps.create.outputs.number }}" \
+            --repo "${{ github.repository }}" --add-label "auto"
+          echo "起草の完了を待って auto を付与しました（#${{ steps.create.outputs.number }}）"
 
       - name: 実行サマリー
         run: |
