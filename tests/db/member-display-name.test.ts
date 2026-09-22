@@ -30,14 +30,6 @@ type DisplayNameFixture = {
   memberType: string;
 };
 
-/**
- * 取込元。`0029` の CHECK（取込由来でない会員はニックネーム必須）を満たすために要る。
- *
- * ニックネーム未設定を試験できるのは**移行会員だけ**である。アプリから作った会員に
- * 表示名が無い状態は WBS `2-7` で禁止したため、その組み合わせは DB が受け付けない。
- */
-const IMPORTED_FROM = "テスト用取込（架空）";
-
 const WITH_NICKNAME: DisplayNameFixture = {
   memberId: "00000000-0000-0000-0000-0000000000c1",
   nickname: "テストきこり",
@@ -54,14 +46,10 @@ const WITHOUT_NICKNAME: DisplayNameFixture = {
   memberType: "街人（一般）",
 };
 
-/** 空白だけのニックネーム。「設定済み」と誤認すると画面に空の名前が並ぶ（§6-4 の `NULLIF(btrim(...))`）。 */
-const BLANK_NICKNAME: DisplayNameFixture = {
-  memberId: "00000000-0000-0000-0000-0000000000c3",
-  nickname: "   ",
-  legacyMemberNo: "T-0412",
-  oyakataMemberNo: null,
-  memberType: "街人（一般）",
-};
+// ⚠️ 空白だけのニックネームのフィクスチャは `0029` で**投入できなくなった**
+//    （`chk_members_nickname_not_blank`）。「空白は未設定として扱う」の検証は
+//    `tests/db/oyakata-member-no-and-nickname.test.ts`（保存を拒否する側）へ移した。
+//    ビュー側の `NULLIF(btrim(...))` は 0029 より前の行に対する二段目の防御として残っている。
 
 /** 立場は親方だが街人番号を持つ会員。表示は街人番号（2026-09-10 決定）。 */
 const OYAKATA_WITH_MACHIBITO_NO: DisplayNameFixture = {
@@ -101,17 +89,16 @@ function memberSql(fixture: DisplayNameFixture): string {
   return [
     "INSERT INTO public.members",
     "  (member_id, nickname, legacy_member_no, oyakata_member_no, member_type, role,",
-    "   account_status, imported_from)",
+    "   account_status)",
     `VALUES ('${fixture.memberId}', ${sqlText(fixture.nickname)},`,
     `        ${sqlText(fixture.legacyMemberNo)}, ${sqlText(fixture.oyakataMemberNo)},`,
-    `        '${fixture.memberType}', 'member', 'active', '${IMPORTED_FROM}');`,
+    `        '${fixture.memberType}', 'member', 'active');`,
   ].join("\n");
 }
 
 const FIXTURES_SQL = [
   WITH_NICKNAME,
   WITHOUT_NICKNAME,
-  BLANK_NICKNAME,
   OYAKATA_WITH_MACHIBITO_NO,
   OYAKATA_ONLY,
   NO_NUMBER_AT_ALL,
@@ -134,10 +121,6 @@ describeDb("完了条件8: 他者向け表示名（2026-09-10 決定 ／ DB物�
 
   test("ニックネーム未設定なら会員番号で表示される", () => {
     expect(displayNameOf(WITHOUT_NICKNAME.memberId)).toBe("街人#T-0327");
-  });
-
-  test("空白だけのニックネームは未設定として扱われる", () => {
-    expect(displayNameOf(BLANK_NICKNAME.memberId)).toBe("街人#T-0412");
   });
 
   test("親方兼街人は街人番号で表示される（`member_type` は表示番号を変えない）", () => {

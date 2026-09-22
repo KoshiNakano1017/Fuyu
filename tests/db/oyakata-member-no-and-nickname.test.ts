@@ -102,7 +102,7 @@ describeDb("next_oyakata_member_no()（採番 ／ 0029）", () => {
   });
 });
 
-describeDb("members.nickname の必須化（0029 ／ v13 §9 #62）", () => {
+describeDb("members.nickname（0029 ／ v13 §9 #62）", () => {
   test("取込由来の会員はニックネーム未設定でも INSERT できる（移行370名 ／ §6.2）", () => {
     // §5.2c が「本名を初期値に入れてはならない」と定めるため、移行時に埋める値が無い。
     // オーナー決定も「設定されるまでの間だけ会員番号で表示する」と未設定を許している。
@@ -110,14 +110,19 @@ describeDb("members.nickname の必須化（0029 ／ v13 §9 #62）", () => {
     expect(result.ok).toBe(true);
   });
 
-  test("★ アプリから作る会員はニックネームが無いと 23514 で拒否される", () => {
-    // 「本登録時の必須入力」を DB 側でも担保する関門（WBS 12-1 のフォームは未実装）。
-    const sqlstate = sqlstateOf(insertMember("nickname", "NULL"));
-    expect(sqlstate).toBe("23514");
+  test("ニックネームを持たない会員はサーバ側から作れる（必須化は DB で縛らない）", () => {
+    // ★ 初版は「取込由来でない会員は nickname 必須」の CHECK を置いていたが、
+    //    `imported_from` を「アプリ経由で作られたか」の代理にすると、
+    //    サーバ側で表示名を持たない会員行を正当に作る経路（k匿名コホートの試験など）を
+    //    巻き添えで落とすことが CI で判明したため外した。
+    //    オーナー決定が求めるのは**本登録フォームでの必須入力**（WBS 12-1）である。
+    const result = runSql(insertMember("nickname", "NULL"));
+    expect(result.ok).toBe(true);
   });
 
-  test("空白だけのニックネームは 23514 で拒否される", () => {
-    // 通すと `v_member_public` の NULLIF(btrim(...)) を抜けた空文字が画面に並ぶ。
+  test("★ 空白だけのニックネームは 23514 で拒否される（0029 以降は保存できない）", () => {
+    // 「未設定」と「設定済み」の境界を壊す値。以前はビュー側の NULLIF(btrim(...)) だけが
+    // 受け止めており、保存自体は通っていた（`member-display-name` の旧フィクスチャ）。
     const sqlstate = sqlstateOf(insertMember("nickname", "'   '"));
     expect(sqlstate).toBe("23514");
   });

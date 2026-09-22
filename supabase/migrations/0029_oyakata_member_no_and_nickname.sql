@@ -17,7 +17,7 @@
 -- ここで作るもの:
 --   ① `members.oyakata_member_no`（親方会員番号の専用列）
 --   ② `seq_oyakata_member_no` ＋ `next_oyakata_member_no()`（採番）
---   ③ ニックネームの必須化（CHECK 2本）
+--   ③ ニックネームの空白禁止（CHECK 1本。必須化の本体はアプリ層 ／ 下記 ③ の理由）
 --   ④ `v_member_public.display_name` を親方会員番号へ対応させる（差し替え）
 --
 -- ここで作らないもの:
@@ -100,38 +100,43 @@ REVOKE ALL ON SEQUENCE public.seq_oyakata_member_no FROM authenticated;
 
 
 -- =============================================================================
--- ③ ニックネームの必須化
+-- ③ ニックネームの必須化（DB 側は「空白の禁止」までに絞る）
 --
--- 必須化は2段に分ける。**NOT NULL は置けない。**
--- 移行370名は `nickname` 未設定で入り（`会員データモデル` §6.2「`NULL` のまま投入する」）、
--- §5.2c が「**本名を初期値として入れてはならない**」と定めているため、埋める値が無い。
+-- **NOT NULL は置けない。** 移行370名は `nickname` 未設定で入り
+-- （`会員データモデル` §6.2「`NULL` のまま投入する」）、§5.2c が
+-- 「**本名を初期値として入れてはならない**」と定めているため、埋める値が無い。
 -- オーナー決定も「既存370名には**次回ログイン時に設定を求め**、
 -- 設定されるまでの間だけ会員番号で表示する」であり、**未設定の状態を許している**。
 --
--- したがって DB で必須にできる（すべきな）のは「**アプリから作る会員**」だけである。
+-- ★ **「取込由来でない会員（`imported_from IS NULL`）は `nickname` 必須」という
+--    CHECK は入れない。** 初版では入れていたが、CI で**無関係な2機能のテストを壊した**
+--    （`tests/db/rag-pgvector.test.ts` の k匿名コホート、`member-display-name` の
+--    フィクスチャ）。いずれも**サーバ側で表示名を持たない会員行を正当に作る**例であり、
+--    `imported_from`（取込元の記録）を「アプリ経由で作られたか」の代理にすると、
+--    そうした経路を巻き添えで落とす。オーナー決定が求めているのは
+--    **本登録フォームでの必須入力**（WBS `12-1`）であって、
+--    あらゆる INSERT を DB で縛ることではない。
 --
---   CHECK 1（空白の禁止）: 全行に効く。`'   '` を「設定済み」と誤認すると
---     `v_member_public` の `NULLIF(btrim(...))` を通り抜けた空文字が画面に並ぶ。
---   CHECK 2（本登録では必須）: `imported_from IS NULL` ＝ 取込由来でない行、
---     すなわちアプリから作られた会員に `nickname` を要求する。
---     移行行は `imported_from` が入る（`会員データモデル` §6.1）ため対象外になる。
+--    したがって必須化の本体はアプリ層に置く:
+--      - `src/lib/members/nickname.ts` … 唯一の入力検査（空白・長さ・制御文字・なりすまし）
+--      - `/nickname`                   … 既存370名向け（ログイン直後に設定を求める）
+--      - WBS `12-1` の本登録フォーム    … 必須入力（未実装。上の検査を必ず通すこと）
 --
--- ⚠️ CHECK 2 はアプリ側の入力検査（`src/lib/members/nickname.ts`）と対で維持すること。
---    DB 側だけが残るとエラーが SQLSTATE 23514 になり、利用者に意味が伝わらない。
+-- DB に残すのは**空白だけの値の禁止**である。これは「未設定」と「設定済み」の境界を
+-- 壊す値（`'   '`）を入れさせないためで、表示側の `NULLIF(btrim(...))` と二重になる。
+-- ⚠️ 本 CHECK により **`0029` 以降は空白だけの `nickname` を保存できない**。
+--    `v_member_public` の `NULLIF(btrim(...))` は、**0029 より前に入った行**と
+--    service_role 経由の直接投入に対する二段目の防御として残す。
 -- =============================================================================
 
 ALTER TABLE public.members
   ADD CONSTRAINT chk_members_nickname_not_blank
   CHECK (nickname IS NULL OR btrim(nickname) <> '');
 
-ALTER TABLE public.members
-  ADD CONSTRAINT chk_members_nickname_required_when_app_registered
-  CHECK (imported_from IS NOT NULL OR nickname IS NOT NULL);
-
 COMMENT ON COLUMN public.members.nickname IS
   '他者向け表示名。未設定時に full_name へフォールバックしてはならない（会員データモデル §5.2c）。'
-  '取込由来でない会員（imported_from IS NULL ＝ アプリからの登録）では必須（WBS 2-7 ／ v13 §9 #62）。'
-  '移行370名は未設定のまま入り、次回ログイン時に /nickname で設定を求める';
+  '必須化（v13 §9 #62）の本体はアプリ層（src/lib/members/nickname.ts ／ /nickname ／ WBS 12-1 のフォーム）。'
+  'DB 側は空白だけの値を拒否するところまで。移行370名は未設定のまま入り、次回ログイン時に設定を求める';
 
 
 -- =============================================================================

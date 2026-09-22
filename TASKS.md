@@ -34,7 +34,7 @@
 オーナー指示で実装。v13 §9 #62 ／ 決定ログ §22-4。`0029_oyakata_member_no_and_nickname.sql` で
 `members.oyakata_member_no`（`OYA-`＋3桁・採番の起点45）を新設し、`v_member_public.display_name` を
 **nickname → 街人番号 → 親方会員番号 → `member_id` 先頭8文字**の4段へ差し替えた。
-ニックネームは CHECK 2本（空白のみ禁止 ／ `imported_from IS NULL` では必須）＋ `src/lib/members/nickname.ts` で必須化し、
+ニックネームの必須化は `src/lib/members/nickname.ts`（入力検査の唯一の出所）に置き、DB 側は空白禁止の CHECK 1本までとし（`imported_from` を代理にした初版の CHECK は無関係な経路を落とすため CI で判明後に撤去）、
 既存370名向けに `/nickname`（ログイン直後・強制しない）を置いた。
 
 ★ 採番を**専用列**にしたのは、2026-09-10 決定「両方の番号を持つ会員は街人番号で表示」＋ §9 #26（親方兼街人は1レコード）より
