@@ -1,6 +1,7 @@
 import { requireSignedIn } from "@/lib/auth/guard";
 import { isStaff } from "@/lib/auth/session";
 import { fetchShoppingItems, type ShoppingItem } from "@/lib/shopping/fetch-items";
+import { isOpenableShopUrl } from "@/lib/shopping/shop-url";
 import { canRegister, decideEdit } from "@/lib/shopping/status";
 
 import { ShoppingItemEditForm } from "./ShoppingItemEditForm";
@@ -142,11 +143,19 @@ export default async function ShoppingPage() {
               {(item.shopName || item.shopUrl) && (
                 <p className="text-xs text-neutral-500">
                   入手先：{item.shopName}
-                  {item.shopUrl && (
-                    <a href={item.shopUrl} className="ml-1 underline" rel="noreferrer noopener" target="_blank">
-                      商品ページ
-                    </a>
-                  )}
+                  {/*
+                    リンクにするのは開けるURLだけ（`shop-url.ts`）。
+                    保存時にも弾いているが、**この検証を入れる前に保存された行**が残るため
+                    描画側でも判定する。開けない値は文字として出す（黙って消さない）。
+                  */}
+                  {item.shopUrl &&
+                    (isOpenableShopUrl(item.shopUrl) ? (
+                      <a href={item.shopUrl} className="ml-1 underline" rel="noreferrer noopener" target="_blank">
+                        商品ページ
+                      </a>
+                    ) : (
+                      <span className="ml-1">{item.shopUrl}</span>
+                    ))}
                 </p>
               )}
               {item.status === "見送り" && item.skipReason && (

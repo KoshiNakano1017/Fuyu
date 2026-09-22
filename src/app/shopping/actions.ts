@@ -16,6 +16,7 @@ import {
   withdrawShoppingItem,
 } from "@/lib/shopping/fetch-items";
 import { buildShoppingQuestDraft } from "@/lib/shopping/quest-draft";
+import { readShopUrlInput } from "@/lib/shopping/shop-url";
 import { canRegister, decideEdit, decideStatusChange, type ShoppingAction } from "@/lib/shopping/status";
 
 /**
@@ -60,6 +61,7 @@ const MESSAGE: Record<string, string> = {
   denied: "この操作を行う権限がありません。",
   guest_denied: "ゲストは買い物リストへ登録できません。",
   blank_name: "品名を入力してください。",
+  bad_shop_url: "入手先URLは http:// または https:// で始まるものを入力してください。",
   blank_reason: "理由を入力してください。",
   not_staff: "買う・見送りの判断は運営のみが行えます。",
   not_owner: "自分が登録した品目のみ取り下げられます。",
@@ -130,6 +132,13 @@ export async function registerShoppingItemAction(
     return { status: "error", message: MESSAGE.blank_name, values };
   }
 
+  // 開けないURLは保存せず、入力し直してもらう（`shop-url.ts`）。
+  // 重複検知より前に弾く。重複候補を出したあとで形式エラーを返すと、選び直しが無駄になる。
+  const shopUrl = readShopUrlInput(toTextOrNull(formData.get("shopUrl")));
+  if (shopUrl === undefined) {
+    return { status: "error", message: MESSAGE.bad_shop_url, values };
+  }
+
   // 重複は「候補を出して相乗りへ誘導する」だけ。自動でまとめない（v13 §5.12.1）。
   const confirmed = String(formData.get("confirmDuplicate") ?? "") === "1";
   if (!confirmed) {
@@ -159,7 +168,7 @@ export async function registerShoppingItemAction(
     wantedBy: toTextOrNull(formData.get("wantedBy")),
     purpose: toTextOrNull(formData.get("purpose")),
     shopName: toTextOrNull(formData.get("shopName")),
-    shopUrl: toTextOrNull(formData.get("shopUrl")),
+    shopUrl,
     referencePriceJpy: toNumberOrNull(formData.get("referencePriceJpy")),
     priority: toPriority(formData.get("priority")),
     registeredBy: viewer.memberId,
@@ -208,6 +217,13 @@ export async function editShoppingItemAction(formData: FormData): Promise<void> 
     return;
   }
 
+  // 登録と同じ検証を編集にも通す（`shop-url.ts`）。ここが抜けていると、
+  // 一度登録した品目を編集するだけで検証を迂回できる。
+  const shopUrl = readShopUrlInput(toTextOrNull(formData.get("shopUrl")));
+  if (shopUrl === undefined) {
+    return;
+  }
+
   await updateShoppingItemFields({
     itemId,
     edit: {
@@ -217,7 +233,7 @@ export async function editShoppingItemAction(formData: FormData): Promise<void> 
       wantedBy: toTextOrNull(formData.get("wantedBy")),
       purpose: toTextOrNull(formData.get("purpose")),
       shopName: toTextOrNull(formData.get("shopName")),
-      shopUrl: toTextOrNull(formData.get("shopUrl")),
+      shopUrl,
       referencePriceJpy: toNumberOrNull(formData.get("referencePriceJpy")),
       priority: toPriority(formData.get("priority")),
     },
