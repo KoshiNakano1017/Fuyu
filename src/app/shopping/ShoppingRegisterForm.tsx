@@ -145,11 +145,16 @@ function FormBody({
       <div className="grid grid-cols-2 gap-3">
         <label className="flex flex-col gap-1 text-sm">
           数量（任意）
+          {/*
+            DB は `quantity > 0` を CHECK している（0030）。`min` は下限を**含む**ため
+            「0 より大きい」をそのまま書けない。0 を弾ける最小の下限をブラウザ側の目安として置き、
+            実際の判定はサーバ側（`registerShoppingItemAction`）が行う（編集フォームと同じ）。
+          */}
           <input
             type="number"
             name="quantity"
             defaultValue={values?.quantity ?? ""}
-            min="0"
+            min="0.01"
             step="any"
             className="rounded border border-neutral-300 px-3 py-2"
           />

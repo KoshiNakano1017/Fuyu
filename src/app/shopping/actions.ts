@@ -134,6 +134,14 @@ export async function registerShoppingItemAction(
     return { status: "error", message: MESSAGE.blank_name, values };
   }
 
+  // 数量は DB 側が `quantity > 0` を CHECK しており（0030）、0 や負数は INSERT ごと弾かれる。
+  // ここで弾かないと「保存に失敗しました。時間をおいて再試行してください」しか返せず、
+  // 何を直せばよいか分からないまま、その品目を永久に登録できない（編集側と同じ判定を置く）。
+  const quantity = toNumberOrNull(formData.get("quantity"));
+  if (quantity !== null && quantity <= 0) {
+    return { status: "error", message: MESSAGE.bad_quantity, values };
+  }
+
   // 開けないURLは保存せず、入力し直してもらう（`shop-url.ts`）。
   // 重複検知より前に弾く。重複候補を出したあとで形式エラーを返すと、選び直しが無駄になる。
   const shopUrl = readShopUrlInput(toTextOrNull(formData.get("shopUrl")));
@@ -165,7 +173,7 @@ export async function registerShoppingItemAction(
 
   const saved = await insertShoppingItem({
     itemName,
-    quantity: toNumberOrNull(formData.get("quantity")),
+    quantity,
     unit: toTextOrNull(formData.get("unit")),
     wantedBy: toTextOrNull(formData.get("wantedBy")),
     purpose: toTextOrNull(formData.get("purpose")),
