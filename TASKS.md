@@ -51,6 +51,7 @@
 ⚠️ **残 10%**: 日次送信数の監視（§2-6a①）と、超過リクエストが実際に弾かれることの実測。
 
 ## [2026-09-22 10:40] `media_assets.ai_tags[]` カラムの先行用意（Issue #120 ／ WBS `14-6` ★ `media_assets.ai_tags[]` カラムの先行用意） — TODO
+## [2026-09-22 10:40] `media_assets.ai_tags[]` カラムの先行用意（Issue #120 ／ WBS `14-6` ★ `media_assets.ai_tags[]` カラムの先行用意） — IN PROGRESS
 
 **リスク区分: 高**（ゲート1・2・3 ／ 承認3回）。成果物が `media_assets`（PII-B の `geo_location` を持つ表）の
 スキーマに掛かるため、`docs/自律開発ループ設計.md` §4.1 の「DBマイグレーション」に該当する。
@@ -70,6 +71,11 @@
 
 **スコープ外**: AIタグの生成・バックフィルの実装（Phase 2 ／ 旧 WBS `14-4`）、AIタグ編集履歴テーブル、
 `ai_tags` の編集UI・API、`0027` の書き換え。
+
+**段取り（2026-09-22 ／ ゲート2 待ち）**: 変更は `tests/db/media-assets.test.ts`（受入テスト10本の追加）・
+`docs/spec/WBS_Phase1.md` の `14-6` 行・`TASKS.md`・`LOOP_LOG.md` の4ファイル。
+**`supabase/migrations/` は変更しない**（完了条件1〜3に対応する DDL が `0027` に揃っていることを実測済み。
+不足が判明したら停止して起票する）。新規依存パッケージ無し。詳細は Issue #120 の段取りコメント。
 
 ## [2026-09-20 16:05] HTMLモック `prototype_v15.html` の v1.21.0 追随（Issue #99 ／ WBS `18-1` HTMLモック prototype_v15.html の維持・レビュー反映） — IN PROGRESS
 

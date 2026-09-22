@@ -4,7 +4,7 @@
   "pr": null,
   "branch": null,
   "phase": "plan",
-  "risk": null,
+  "risk": "high",
   "attempts": {
     "infra": 1,
     "verify": 0,
@@ -21,13 +21,65 @@
     "review": 0
   },
   "tokens": {
-    "input": 34,
-    "output": 15282,
-    "costUsd": 1.6819865000000003
+    "input": 112,
+    "output": 61789,
+    "costUsd": 6.2754445
   },
   "testHashes": {},
-  "specRefs": [],
-  "acceptance": [],
-  "acceptanceDerived": false,
-  "updatedAt": "2026-09-22T01:38:35.036Z"
+  "specRefs": [
+    {
+      "ref": "v13 §5.11.3 用途タグと「おすすめ表示」",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "2012-2048"
+    },
+    {
+      "ref": "v13 §7 ★ メディアアセット（新規／§5.11）【Phase 1】",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "2325-2337"
+    },
+    {
+      "ref": "v13 §9 #57 AIタグ付け・人間編集・検索モード拡張",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "2565"
+    },
+    {
+      "ref": "DB物理設計 §3-7 media_assets",
+      "path": "docs/spec/detailed-design/DB物理設計.md",
+      "lines": "525,539"
+    },
+    {
+      "ref": "0027_media_assets.sql（ai_tags の DDL と GIN 索引）",
+      "path": "supabase/migrations/0027_media_assets.sql",
+      "lines": "135,169"
+    }
+  ],
+  "acceptance": [
+    {
+      "criterion": "`media_assets.ai_tags` が `text[] NOT NULL DEFAULT '{}'` で存在し、値を入れずに行を作成できる（空配列になる）",
+      "origin": "derived",
+      "basis": "v13 §7 L2334「Phase 1 ではカラムのみ用意し値を入れない」",
+      "test": "ai_tags の型は text[] である／ai_tags は NOT NULL である／ai_tags の既定値は空配列 '{}' である／ai_tags を指定せずに行を作ると空配列になる／ai_tags に NULL を入れた行は作れない（23502）"
+    },
+    {
+      "criterion": "`ai_tags` に GIN 索引 `ix_media_ai_tags` があり、Phase 2 の配列照合検索が索引で引ける",
+      "origin": "derived",
+      "basis": "v13 §5.11.3 L2029「検索対象：…AIタグ（`ai_tags[]`）」",
+      "test": "GIN 索引 ix_media_ai_tags が media_assets に存在する／ix_media_ai_tags のアクセスメソッドは gin である／ai_tags の配列照合（@>）で該当行だけを引ける"
+    },
+    {
+      "criterion": "Phase 1 蓄積分のバックフィル対象行を `ai_processing_status = 'pending'` で一意に特定できる",
+      "origin": "derived",
+      "basis": "v13 §5.11.3 L2042「Phase 2 開始時に Phase 1 蓄積分を一括バックフィル」",
+      "test": "ai_processing_status='pending' で Phase 1 蓄積分（バックフィル対象）を抽出できる／AI を動かしていない行は ai_tags が空のまま pending である"
+    },
+    {
+      "criterion": "上記3点が `tests/db/media-assets.test.ts` の回帰テストで検証される（現状は列の存在のみを検査している）",
+      "origin": "derived",
+      "basis": "v13 §7 L2336-2337 note「スキーマは Phase 1 で用意し、値は Phase 2 で埋める」",
+      "test": "上記10本の追加をもって満たす（単独のテストは置かない）"
+    }
+  ],
+  "acceptanceDerived": true,
+  "updatedAt": "2026-09-22T06:53:52.801Z",
+  "provisional": []
 }
