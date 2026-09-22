@@ -70,8 +70,8 @@ export default async function AdminDashboardPage() {
         <SummaryCard
           title="本日の滞在"
           value={`${headcount}名 / ${stays.length}件`}
-          href="/staff/calendar"
-          linkLabel="宿泊予定カレンダーへ"
+          href="/staff/checkins"
+          linkLabel="チェックイン／チェックアウトへ"
         />
         <SummaryCard
           title="未提供の注文"

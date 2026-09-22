@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import { AccessDenied } from "@/components/auth/AccessDenied";
 import { RevisitAlerts } from "@/components/customers/RevisitAlerts";
 import { MenuBoard } from "@/components/orders/MenuBoard";
@@ -53,6 +55,11 @@ export default async function StaffOrdersPage() {
   return (
     <main className="mx-auto flex max-w-5xl flex-col gap-8 p-6">
       <h1 className="text-2xl font-bold">店員用タブレット</h1>
+
+      {/* 入館の操作は別画面（画面ID A1 ／ WBS 3-2）。同じ端末から辿れるようにする */}
+      <Link href="/staff/checkins" className="text-sm underline underline-offset-4">
+        チェックイン／チェックアウトへ
+      </Link>
 
       <RevisitAlerts alerts={revisitAlerts} />
 
