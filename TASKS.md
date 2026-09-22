@@ -16,7 +16,7 @@
 
 ## バックログ
 
-## [2026-09-22 10:40] `media_assets.ai_tags[]` カラムの先行用意（Issue #120 ／ WBS `14-6` ★ `media_assets.ai_tags[]` カラムの先行用意） — IN PROGRESS
+## [2026-09-22 10:40] `media_assets.ai_tags[]` カラムの先行用意（Issue #120 ／ WBS `14-6` ★ `media_assets.ai_tags[]` カラムの先行用意） — DONE（2026-09-22 ／ 新規 DDL 無し・回帰テストで固定）
 
 **リスク区分: 高**（ゲート1・2・3 ／ 承認3回）。成果物が `media_assets`（PII-B の `geo_location` を持つ表）の
 スキーマに掛かるため、`docs/自律開発ループ設計.md` §4.1 の「DBマイグレーション」に該当する。
@@ -41,6 +41,22 @@
 `docs/spec/WBS_Phase1.md` の `14-6` 行・`TASKS.md`・`LOOP_LOG.md` の4ファイル。
 **`supabase/migrations/` は変更しない**（完了条件1〜3に対応する DDL が `0027` に揃っていることを実測済み。
 不足が判明したら停止して起票する）。新規依存パッケージ無し。詳細は Issue #120 の段取りコメント。
+
+**検証結果（2026-09-22 ／ ローカルスタックへ全マイグレーションを適用して実測）**
+
+| 完了条件 | 結果 | 実測した事実 |
+| --- | --- | --- |
+| 1. `text[] NOT NULL DEFAULT '{}'`／値を入れずに行を作れる | ✅ 充足 | `udt_name = _text` ／ `is_nullable = NO` ／ `column_default = '{}'::text[]`。`ai_tags` を省いた INSERT は成功し、値は `{}`（NULL ではない）。`ai_tags = NULL` は `23502` で拒否される |
+| 2. GIN 索引で配列照合を引ける | ✅ 充足 | `ix_media_ai_tags` の access method は `gin`。`ai_tags @> ARRAY['畑']` の実行計画が同索引を使う |
+| 3. バックフィル対象を `ai_processing_status = 'pending'` で特定できる | ✅ 充足 | `ai_*` を入れずに作った行は `pending` として抽出され、`done` の行は抽出されない。`pending` の集合と `cardinality(ai_tags) = 0` の集合が一致する |
+| 4. 上記が回帰テストで検証される | ✅ 充足 | `tests/db/media-assets.test.ts` に13件を追加（テスト設計フェーズのコミット `a402233`）。`npx jest tests/db` は 17 suites / 359 件すべて緑 |
+
+**新規 DDL は追加していない。** 完了条件1〜3に対応する DDL は `0027_media_assets.sql`（L135・L169）に
+すべて揃っており、不足が無かったため段取りの宣言どおり `supabase/migrations/` を変更していない。
+
+追加したテストが「常に緑になるだけの空振り」でないことは、ローカル DB で `ai_tags` の NOT NULL・DEFAULT・
+GIN 索引を意図的に落として確認した（13件のうち7件が落ち、戻すと再び緑）。Phase 2 開始時に
+「全件の遡及解析が必要になる」状態へスキーマが退行したら、これで CI が気づく。
 
 ## [2026-09-20 16:05] HTMLモック `prototype_v15.html` の v1.21.0 追随（Issue #99 ／ WBS `18-1` HTMLモック prototype_v15.html の維持・レビュー反映） — IN PROGRESS
 
