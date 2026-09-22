@@ -2,15 +2,24 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AccessDenied } from "@/components/auth/AccessDenied";
+import { CashbackPanel } from "@/components/customers/CashbackPanel";
 import { SlipEditor } from "@/components/customers/SlipEditor";
 import { AccessDeniedError, requireAdmin } from "@/lib/auth/guard";
 import { sumUnsettled } from "@/lib/billing/unsettled";
 import { fetchCustomerDetail } from "@/lib/customers/fetch-customers";
+import { judgeFirstVisitCashback } from "@/lib/eumo/grants";
+import {
+  countVisits,
+  fetchCashbackStatus,
+  fetchCurrentSignupCashbackUii,
+  fetchMemberOrigin,
+} from "@/lib/eumo/store";
 import { fetchStayingCheckIns } from "@/lib/orders/fetch-orders";
 
 import {
   cancelOrderAction,
   editSlipAction,
+  issueFirstVisitCashbackAction,
   issueSettlementQrAction,
   reassignPurchaserAction,
   toggleSettlementStatusAction,
@@ -49,13 +58,29 @@ export default async function CustomerDetailPage({
   }
 
   const { memberId } = await params;
-  const [customer, stayingCheckIns] = await Promise.all([
-    fetchCustomerDetail(memberId),
-    fetchStayingCheckIns(),
-  ]);
+  const [customer, stayingCheckIns, origin, visitCount, cashbackStatus, planCashbackUii] =
+    await Promise.all([
+      fetchCustomerDetail(memberId),
+      fetchStayingCheckIns(),
+      // 初回来訪キャッシュバックの材料（v13 §5.10.8 ①：**保存カラムを持たず都度算出**）
+      fetchMemberOrigin(memberId),
+      countVisits(memberId),
+      fetchCashbackStatus(memberId),
+      fetchCurrentSignupCashbackUii(),
+    ]);
   if (customer === null) {
     notFound();
   }
+
+  const cashbackJudgement = judgeFirstVisitCashback({
+    memberType: origin?.memberType ?? customer.memberType,
+    visitCount,
+    existingCashbackStatus: cashbackStatus,
+    // 会員行を読めなかった場合は「移行由来かどうか」を判定できない。
+    // 分からないときは自動起票へ倒さず「要確認」へ倒す（二重付与は取り消せない）。
+    isImportedMember: origin?.isImportedMember ?? true,
+    planCashbackUii,
+  });
 
   const unsettled = sumUnsettled(customer.orders);
   // 付け替え先は「滞在中のユーザー」を既定とする（v13 §5.6.2）。本人は候補から外す。
@@ -118,6 +143,14 @@ export default async function CustomerDetailPage({
           </div>
         )}
       </header>
+
+      <CashbackPanel
+        memberId={customer.memberId}
+        memberType={customer.memberType}
+        visitCount={visitCount}
+        judgement={cashbackJudgement}
+        issue={issueFirstVisitCashbackAction}
+      />
 
       <section className="flex flex-col gap-3">
         <h2 className="text-xl font-bold">注文履歴</h2>

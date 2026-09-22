@@ -21,6 +21,14 @@ import {
   reassignPurchaser,
 } from "@/lib/orders/slip-store";
 import { canIssueSettlementQr } from "@/lib/billing/settlement-qr";
+import { judgeFirstVisitCashback } from "@/lib/eumo/grants";
+import {
+  countVisits,
+  fetchCashbackStatus,
+  fetchCurrentSignupCashbackUii,
+  fetchMemberOrigin,
+  insertGrant,
+} from "@/lib/eumo/store";
 
 /**
  * 顧客管理画面の操作（WBS 7-2 伝票管理 ／ 7-3 精算QR）。
@@ -321,4 +329,78 @@ export async function toggleSettlementStatusAction(
   }
   revalidatePath(`/admin/customers/${order.purchaserId}`);
   return { status: "done", message: "未会計へ戻しました。精算QRは失効しています。" };
+}
+
+/**
+ * 初回来訪キャッシュバックの起票（WBS 12-4 ／ v13 §5.10.8 ②④）。
+ *
+ * ## 自動起票と手動起票を1つの入口にまとめている
+ *
+ * 判定（`judgeFirstVisitCashback()`）が `auto_draft` を返したときはその額で、
+ * `needs_review` のときは**運営が額を入力して**起こす。入口を分けると
+ * 「要確認」の人だけ別画面へ行くことになり、現場ではどちらかが使われなくなる。
+ *
+ * ## 二重付与は書く直前にもう一度見る
+ *
+ * 画面に出した判定は描画した時点のものである。その間に別の端末で起票されているかもしれない。
+ * eumo の送金はアプリ外であり、**二重に送ると取り消せない**（v13 §5.10.8 ③）。
+ */
+export async function issueFirstVisitCashbackAction(
+  _prev: SubmitState,
+  formData: FormData,
+): Promise<SubmitState> {
+  const viewer = await readStaffViewer();
+  if (viewer === null) {
+    return fail("not_staff");
+  }
+
+  const memberId = String(formData.get("memberId") ?? "").trim();
+  const [origin, visitCount, existing, planCashbackUii] = await Promise.all([
+    fetchMemberOrigin(memberId),
+    countVisits(memberId),
+    fetchCashbackStatus(memberId),
+    fetchCurrentSignupCashbackUii(),
+  ]);
+  if (origin === null) {
+    return fail("not_found");
+  }
+
+  const judgement = judgeFirstVisitCashback({
+    memberType: origin.memberType,
+    visitCount,
+    existingCashbackStatus: existing,
+    isImportedMember: origin.isImportedMember,
+    planCashbackUii,
+  });
+
+  if (judgement.kind === "already_issued") {
+    return { status: "error", message: "この会員には既にキャッシュバックの給付があります。" };
+  }
+  if (judgement.kind === "not_applicable") {
+    return { status: "error", message: judgement.note };
+  }
+
+  // `needs_review` のときは運営が額を決める。自動判定できた場合はその額を使う。
+  const inputAmount = Number(formData.get("amountUii") ?? Number.NaN);
+  const amountUii = judgement.kind === "auto_draft" ? judgement.amountUii : inputAmount;
+  if (!Number.isInteger(amountUii) || amountUii <= 0) {
+    return { status: "error", message: "給付額は1以上の整数（Uii）で入力してください。" };
+  }
+
+  const saved = await insertGrant({
+    member_id: memberId,
+    amount_uii: amountUii,
+    grant_type: "first_visit_cashback",
+    purpose: `初回来訪キャッシュバック（通算${visitCount}回目の来訪時に起票）`,
+  });
+  if (!saved) {
+    return fail("failed");
+  }
+
+  revalidatePath(`/admin/customers/${memberId}`);
+  revalidatePath("/staff/eumo");
+  return {
+    status: "done",
+    message: `初回来訪キャッシュバック ${amountUii} Uii を発行依頼として起票しました。`,
+  };
 }
