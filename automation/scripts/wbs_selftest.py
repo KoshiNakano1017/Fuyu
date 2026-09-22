@@ -71,7 +71,7 @@ def main() -> int:
     #   **着手可能な作業パッケージが起票できなくなる**。
     for package_id, want_dropped, want_blocked, note in [
         ("4-1", False, False, "散文の「不要化」を廃止と誤読している"),
-        ("12-4", False, True, "ブロック中が廃止に倒れている"),
+        ("2-5", False, True, "ブロック中が廃止に倒れている"),
         ("13-2", True, False, "取り消し線つき ID の廃止を見落としている"),
     ]:
         package = packages.get(normalize_id(package_id))
@@ -107,10 +107,12 @@ def main() -> int:
     # 2026-09-22: 3-9 は #55 を実装で回避（room_type を CHECK でなく accommodation_types
     # への FK にした）ため 🔴 → 🟡 へ変わり検査が落ちた。#55 自体（正本の表記不整合）は
     # 未解決のドキュメント債務として残るが、実装のブロッカーではなくなったための差し替え。
-    # 同日、5-7 も #59 論点1（過去発行分は個別手動起票）の決定で 🔴 → 🟡 へ変わった
-    # （論点2は未確定のため自動起票ロジックのみ着手保留・行全体のブロックは解けた）。
-    # 3-9・5-7 の代わりに、引き続き未解決（#58／#59論点2）でブロック中の 12-4・2-5 を固定値に採る。
-    for package_id, want_blocked in [("2-2", False), ("2-4", False), ("12-4", True), ("2-5", True)]:
+    # 同日、#59 が全面決着（論点1＝個別手動起票／論点2＝要確認フォールバックへ一本化）した
+    # ことで 5-7・12-4 も 🔴 → 🟢 へ変わった。
+    # 3-9・5-7・12-4 の代わりに、引き続き未解決（#58）でブロック中の 2-5 を固定値に採る。
+    # ⚠️ 現時点で WBS 上「🔴 ブロック中」の作業パッケージ行は 2-5 のみ。2-5 も解決したら
+    # 別の固定値へ差し替えること（このコメントごと）。
+    for package_id, want_blocked in [("2-2", False), ("2-4", False), ("2-5", True)]:
         package = packages.get(normalize_id(package_id))
         if package is None:
             failures.append(f"{package_id} が WBS に見つかりません（検査を更新してください）")
