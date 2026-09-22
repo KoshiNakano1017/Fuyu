@@ -4,9 +4,11 @@ import { notFound } from "next/navigation";
 import { AccessDenied } from "@/components/auth/AccessDenied";
 import { CashbackPanel } from "@/components/customers/CashbackPanel";
 import { SlipEditor } from "@/components/customers/SlipEditor";
+import { StayHistorySection } from "@/components/customers/StayHistorySection";
 import { AccessDeniedError, requireAdmin } from "@/lib/auth/guard";
 import { sumUnsettled } from "@/lib/billing/unsettled";
 import { fetchCustomerDetail } from "@/lib/customers/fetch-customers";
+import { fetchStayHistory } from "@/lib/customers/fetch-stay-history";
 import { judgeFirstVisitCashback } from "@/lib/eumo/grants";
 import {
   countVisits,
@@ -32,8 +34,8 @@ import {
  *
  * - **氏名・住所・電話番号**（PII-A）。表示名は `v_member_public` のニックネーム／会員番号。
  *   宿泊法の申告項目は専用画面（WBS 2-4・3-2）が扱う
- * - **宿泊タブ（§5.6.8）・宿泊形態の変更（§5.6.9）**。WBS `3-10` の担当であり、
- *   要件のみ確定・詳細設計が未整備の段階にある
+ * - **宿泊形態の変更（§5.6.9）**。WBS `3-10` の担当であり、要件のみ確定・詳細設計が未整備の段階にある
+ *   （宿泊履歴の表示＝§5.6.8 ／ WBS `8-6` は実装済み）
  * - **手動調整行（まかない補助・割引 ／ §5.6.2）**。物理設計が存在せず、
  *   `QUESTIONS.md`「[2026-09-20] 伝票の編集履歴ログ・精算グループ・手動調整行の
  *   物理設計が存在しない」でオーナー判断待ち
@@ -58,8 +60,15 @@ export default async function CustomerDetailPage({
   }
 
   const { memberId } = await params;
-  const [customer, stayingCheckIns, origin, visitCount, cashbackStatus, planCashbackUii] =
-    await Promise.all([
+  const [
+    customer,
+    stayingCheckIns,
+    origin,
+    visitCount,
+    cashbackStatus,
+    planCashbackUii,
+    stayHistory,
+  ] = await Promise.all([
       fetchCustomerDetail(memberId),
       fetchStayingCheckIns(),
       // 初回来訪キャッシュバックの材料（v13 §5.10.8 ①：**保存カラムを持たず都度算出**）
@@ -67,6 +76,8 @@ export default async function CustomerDetailPage({
       countVisits(memberId),
       fetchCashbackStatus(memberId),
       fetchCurrentSignupCashbackUii(),
+      // 宿泊履歴（泊まった部屋 ／ v13 §5.6.8）
+      fetchStayHistory(memberId),
     ]);
   if (customer === null) {
     notFound();
@@ -151,6 +162,8 @@ export default async function CustomerDetailPage({
         judgement={cashbackJudgement}
         issue={issueFirstVisitCashbackAction}
       />
+
+      <StayHistorySection history={stayHistory} />
 
       <section className="flex flex-col gap-3">
         <h2 className="text-xl font-bold">注文履歴</h2>
