@@ -9,12 +9,14 @@ import {
   createShoppingQuest,
   fetchApprovedItems,
   fetchShoppingItems,
+  fetchShoppingItemsByIds,
   insertShoppingItem,
+  updateShoppingItemFields,
   updateShoppingItemStatus,
   withdrawShoppingItem,
 } from "@/lib/shopping/fetch-items";
 import { buildShoppingQuestDraft } from "@/lib/shopping/quest-draft";
-import { canRegister, decideStatusChange, type ShoppingAction } from "@/lib/shopping/status";
+import { canRegister, decideEdit, decideStatusChange, type ShoppingAction } from "@/lib/shopping/status";
 
 /**
  * 買い物リストの Server Action（v13 §5.12 ／ WBS 5-8・5-9）。
@@ -84,6 +86,12 @@ function toTextOrNull(value: FormDataEntryValue | null): string | null {
   return text === "" ? null : text;
 }
 
+/** 優先度は3値のみ（v13 §5.12.1）。それ以外が送られてきたら `通常` に倒す。 */
+function toPriority(value: FormDataEntryValue | null): "至急" | "通常" | "いつでも" {
+  const text = String(value ?? "");
+  return text === "至急" || text === "いつでも" ? text : "通常";
+}
+
 /** 入力値をそのまま拾う（検証せず、画面へ書き戻すためだけに使う）。 */
 function readFormValues(formData: FormData): RegisterFormValues {
   const text = (key: string) => String(formData.get(key) ?? "");
@@ -144,7 +152,6 @@ export async function registerShoppingItemAction(
     }
   }
 
-  const priority = String(formData.get("priority") ?? "通常");
   const saved = await insertShoppingItem({
     itemName,
     quantity: toNumberOrNull(formData.get("quantity")),
@@ -154,7 +161,7 @@ export async function registerShoppingItemAction(
     shopName: toTextOrNull(formData.get("shopName")),
     shopUrl: toTextOrNull(formData.get("shopUrl")),
     referencePriceJpy: toNumberOrNull(formData.get("referencePriceJpy")),
-    priority: priority === "至急" || priority === "いつでも" ? priority : "通常",
+    priority: toPriority(formData.get("priority")),
     registeredBy: viewer.memberId,
   });
 
@@ -165,6 +172,58 @@ export async function registerShoppingItemAction(
   revalidatePath(PATH);
   // 登録できたときだけ入力値を返さない。次の1件を空のフォームから書き始められる。
   return { status: "saved", message: "ほしいものとして登録しました。" };
+}
+
+/**
+ * 登録した品目の内容を直す（v13 §5.12.1「編集・取下げは登録者本人と運営が行える」）。
+ *
+ * 通してよい相手は **登録者本人と運営**で、取下げ（`changeShoppingItemStatusAction` の
+ * `withdraw`）と同じである。一方で**動かせるのは内容だけ**であり、状態は動かさない。
+ * 判定は純関数 `decideEdit()` が持ち、ここは入出力の詰め替えに徹する。
+ */
+export async function editShoppingItemAction(formData: FormData): Promise<void> {
+  const viewer = await readViewer();
+  if (!viewer.signedIn) {
+    return;
+  }
+
+  const itemId = String(formData.get("itemId") ?? "");
+  const itemName = String(formData.get("itemName") ?? "").trim();
+
+  const items = await fetchShoppingItemsByIds([itemId]);
+  const item = items[0];
+  if (item === undefined) {
+    return;
+  }
+
+  const decision = decideEdit({
+    actorRole: viewer.role,
+    current: item.status,
+    withdrawn: item.withdrawnAt !== null,
+    isOwner: item.registeredBy === viewer.memberId,
+    itemName,
+  });
+
+  if (!decision.allowed) {
+    return;
+  }
+
+  await updateShoppingItemFields({
+    itemId,
+    edit: {
+      itemName,
+      quantity: toNumberOrNull(formData.get("quantity")),
+      unit: toTextOrNull(formData.get("unit")),
+      wantedBy: toTextOrNull(formData.get("wantedBy")),
+      purpose: toTextOrNull(formData.get("purpose")),
+      shopName: toTextOrNull(formData.get("shopName")),
+      shopUrl: toTextOrNull(formData.get("shopUrl")),
+      referencePriceJpy: toNumberOrNull(formData.get("referencePriceJpy")),
+      priority: toPriority(formData.get("priority")),
+    },
+  });
+
+  revalidatePath(PATH);
 }
 
 /** 「自分も欲しい」（相乗り）。 */
