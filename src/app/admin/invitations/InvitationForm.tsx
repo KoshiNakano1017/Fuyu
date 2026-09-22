@@ -30,7 +30,7 @@ export function InvitationForm() {
         />
       </label>
       <button type="submit" className="rounded bg-neutral-900 px-4 py-2 text-white">
-        招待を送信する
+        案内メールを送信する
       </button>
       {state.message ? (
         <p className={state.status === "error" ? "text-sm text-red-700" : "text-sm text-green-700"}>

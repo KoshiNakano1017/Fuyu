@@ -54,7 +54,11 @@ const ALL: Record<Role, Visibility> = {
   core_member: "visible",
   member: "visible",
   guest: "visible",
-  // `custom` は権限内容が未定義（DB物理設計 §6-9⑥）。暫定で `member` 相当として扱う。
+  // `custom`（出資者・VIP）は **`member`（街人）と同等**として扱う。
+  // これは暫定ではなく**正式仕様**である（2026-09-22 オーナー決定 ／ v13 §9 #66・
+  // 決定ログ §22-3）。出資者・VIP はバッジ表示や呼称などの演出で区別し、
+  // **認可へは持ち込まない**（`member_type` を認可に使わない原則と同じ考え方）。
+  // ⚠️ したがって `custom` に staff 相当を足さないこと。足すなら v13 §2 の側から改訂する。
   custom: "visible",
 };
 
