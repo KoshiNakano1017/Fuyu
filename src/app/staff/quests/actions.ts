@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 
 import type { SubmitState } from "@/lib/forms/submit-state";
 import { readViewer } from "@/lib/auth/session";
+import { buildQuestRewardGrant } from "@/lib/eumo/grants";
+import { hasQuestRewardGrant, insertGrant } from "@/lib/eumo/store";
 import {
   canInstruct,
   decideReview,
@@ -146,6 +148,60 @@ export async function reviewWorkLogAction(
       .insert({ log_id: logId, reviewer_id: viewer.memberId });
   }
 
+  // ★ 最終承認と同時に Eumo 給付を起票する（WBS 5-5 ／ v13 §7 L2594）。
+  //   起票を運営の別操作にすると、承認したのに報酬の依頼が立っていない報告が積み上がる。
+  //   **コアメンバー確認済の段階では起こさない** — 最終承認を admin に限った意味が消えるため。
+  const grantNote = action === "approve" ? await issueQuestRewardGrant(logId) : null;
+
   revalidatePath("/staff/quests");
-  return { status: "done", message: "審査を記録しました。" };
+  return {
+    status: "done",
+    message: grantNote === null ? "審査を記録しました。" : `審査を記録しました。${grantNote}`,
+  };
+}
+
+/**
+ * 承認完了した作業報告から Eumo 給付（`quest_reward`）を起こす。
+ *
+ * 戻り値は画面へ足す一文である。**起票できなかったことを黙って飲み込まない**
+ * （報酬額が未設定のクエストは朝会からの自動起案で普通に生まれる）。
+ * 二重起票は `hasQuestRewardGrant()` が報告単位で防ぐ（差戻し後の再提出は別の報告である）。
+ */
+async function issueQuestRewardGrant(logId: string): Promise<string | null> {
+  const supabase = await createServerSupabaseClient();
+  const { data, error } = await supabase
+    .from("work_logs")
+    .select("member_id, quest_id, quests(title, reward_uii)")
+    .eq("log_id", logId)
+    .maybeSingle();
+
+  if (error || data === null) {
+    return null;
+  }
+  if (await hasQuestRewardGrant(logId)) {
+    return null;
+  }
+
+  // PostgREST の埋め込みは1件でも配列で来ることがある。どちらの形でも読めるようにする。
+  const embedded = data.quests as unknown;
+  const quest = (Array.isArray(embedded) ? embedded[0] : embedded) as
+    | { title?: unknown; reward_uii?: unknown }
+    | null
+    | undefined;
+
+  const grant = buildQuestRewardGrant({
+    memberId: String(data.member_id),
+    questId: String(data.quest_id),
+    questTitle: typeof quest?.title === "string" ? quest.title : "（クエスト名なし）",
+    logId,
+    rewardUii: typeof quest?.reward_uii === "number" ? quest.reward_uii : null,
+  });
+
+  if (grant === null) {
+    return "⚠️ このクエストは報酬額が未設定のため、Eumo給付は起票していません。";
+  }
+  const saved = await insertGrant(grant);
+  return saved
+    ? `Eumo給付 ${grant.amount_uii} Uii を発行依頼として起票しました。`
+    : "⚠️ Eumo給付の起票に失敗しました。給付一覧から手動で起票してください。";
 }
