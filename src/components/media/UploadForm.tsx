@@ -2,12 +2,10 @@
 
 import { useRef, useState } from "react";
 
-import { readCaptureMetadataFromFile } from "@/lib/media/exif";
 import {
   overallProgressPercent,
   retryableItems,
-  toBrowserHeaders,
-  type SignedUploadTicket,
+  uploadFileToStorage,
   type UploadItem,
 } from "@/lib/media/upload-client";
 
@@ -58,9 +56,11 @@ export function UploadForm({ presets }: { presets: readonly string[] }) {
         continue;
       }
       updateItem(target.itemId, { state: "uploading", progressPercent: 0, errorMessage: undefined });
-      const result = await uploadOneFile(file, purposeTags, (percent) =>
-        updateItem(target.itemId, { progressPercent: percent }),
-      );
+      const result = await uploadFileToStorage({
+        file,
+        purposeTags,
+        onProgress: (percent) => updateItem(target.itemId, { progressPercent: percent }),
+      });
       updateItem(
         target.itemId,
         result.ok
@@ -218,93 +218,4 @@ function buildPurposeTags(selected: readonly string[], freeTag: string): string[
     .map((tag) => tag.trim())
     .filter((tag) => tag !== "");
   return [...selected, ...free];
-}
-
-type UploadOutcome = { ok: true; mediaId: string } | { ok: false; message: string };
-
-/**
- * 1件をアップロードする。
- *   ① Exif から撮影日時・位置を読む（JPEG のみ）→ ② 署名付きURLを受け取る → ③ ストレージへ PUT
- *
- * ③ が終わっても**アプリへ完了を通知しない**。記録は Object Finalize が起点である
- * （v13 §5.11.2 note）。通知に頼ると、通信断やアプリ離脱で「実体はあるのに記録が無い」状態になる。
- */
-async function uploadOneFile(
-  file: File,
-  purposeTags: readonly string[],
-  onProgress: (percent: number) => void,
-): Promise<UploadOutcome> {
-  const capture = await readCaptureMetadataFromFile(file);
-
-  let ticket: SignedUploadTicket;
-  try {
-    const response = await fetch("/api/media/signed-upload-url", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        contentType: file.type,
-        purposeTags,
-        declaredSizeBytes: file.size,
-        takenAt: capture.takenAt,
-        geoLocation: capture.geoLocation,
-      }),
-    });
-    const body: unknown = await response.json();
-    if (!response.ok) {
-      return { ok: false, message: readErrorMessage(body) };
-    }
-    ticket = body as SignedUploadTicket;
-  } catch {
-    return { ok: false, message: "通信に失敗しました。電波の良い場所で再試行してください。" };
-  }
-
-  return putToStorage(ticket, file, onProgress);
-}
-
-function readErrorMessage(body: unknown): string {
-  if (typeof body === "object" && body !== null) {
-    const error = (body as { error?: unknown }).error;
-    if (typeof error === "string" && error !== "") {
-      return error;
-    }
-  }
-  return "アップロードの受付に失敗しました。";
-}
-
-function putToStorage(
-  ticket: SignedUploadTicket,
-  file: File,
-  onProgress: (percent: number) => void,
-): Promise<UploadOutcome> {
-  return new Promise((resolve) => {
-    const request = new XMLHttpRequest();
-    request.open(ticket.method, ticket.uploadUrl);
-
-    for (const [name, value] of Object.entries(toBrowserHeaders(ticket.requiredHeaders))) {
-      request.setRequestHeader(name, value);
-    }
-
-    request.upload.addEventListener("progress", (event) => {
-      if (event.lengthComputable && event.total > 0) {
-        onProgress(Math.floor((event.loaded / event.total) * 100));
-      }
-    });
-    request.addEventListener("load", () => {
-      resolve(
-        request.status >= 200 && request.status < 300
-          ? { ok: true, mediaId: ticket.mediaId }
-          : // ⚠️ ストレージの応答本文を画面へ出さない。署名付きURLの一部が混ざりうるため
-            //    （v13 §5.11.2 トレードオフ：URL を知る者は誰でも開ける）。
-            { ok: false, message: `保存に失敗しました（${request.status}）。再試行してください。` },
-      );
-    });
-    request.addEventListener("error", () =>
-      resolve({ ok: false, message: "通信に失敗しました。再試行してください。" }),
-    );
-    request.addEventListener("abort", () =>
-      resolve({ ok: false, message: "アップロードが中断されました。" }),
-    );
-
-    request.send(file);
-  });
 }
