@@ -25,6 +25,7 @@ export type Visibility = "visible" | "limited" | "hidden";
 export type AreaKey =
   | "home"
   | "quests"
+  | "shoppingList"
   | "cafeOrder"
   | "myPage"
   | "upload"
@@ -86,6 +87,14 @@ export const AREAS: readonly Area[] = [
     label: "クエスト",
     path: "/quests",
     // ゲストは △（限定クエストのみ）。§6 権限マトリクスの「〇（限定あり）」と同義。
+    visibility: { ...ALL, guest: "limited" },
+  },
+  {
+    key: "shoppingList",
+    label: "買い物リスト",
+    path: "/shopping",
+    // ゲストは △（閲覧のみ・登録不可／v13 §5.12.1・§6 ／ 2026-09-22 オーナー確定）。
+    // 経路自体は開ける。登録フォームと操作ボタンを描画しないのはページ側の責務。
     visibility: { ...ALL, guest: "limited" },
   },
   { key: "cafeOrder", label: "カフェ注文", path: "/orders", visibility: ALL },
