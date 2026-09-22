@@ -9,6 +9,7 @@ import { AccessDeniedError, requireAdmin } from "@/lib/auth/guard";
 import { sumUnsettled } from "@/lib/billing/unsettled";
 import { fetchCustomerDetail } from "@/lib/customers/fetch-customers";
 import { fetchStayHistory } from "@/lib/customers/fetch-stay-history";
+import { fetchStayTicketBalance } from "@/lib/lodging/stay-tickets";
 import { judgeFirstVisitCashback } from "@/lib/eumo/grants";
 import {
   countVisits,
@@ -68,6 +69,7 @@ export default async function CustomerDetailPage({
     cashbackStatus,
     planCashbackUii,
     stayHistory,
+    stayTicketBalance,
   ] = await Promise.all([
       fetchCustomerDetail(memberId),
       fetchStayingCheckIns(),
@@ -78,6 +80,8 @@ export default async function CustomerDetailPage({
       fetchCurrentSignupCashbackUii(),
       // 宿泊履歴（泊まった部屋 ／ v13 §5.6.8）
       fetchStayHistory(memberId),
+      // 保持宿泊券（v13 §5.6.1① ／ 残高は取引明細の積み上げ）
+      fetchStayTicketBalance(memberId),
     ]);
   if (customer === null) {
     notFound();
@@ -123,6 +127,7 @@ export default async function CustomerDetailPage({
           {customer.roomType === null ? null : (
             <span className="text-xs text-neutral-600">{customer.roomType}</span>
           )}
+          <span className="text-xs text-neutral-600">宿泊券 残り {stayTicketBalance} 泊</span>
         </div>
 
         {/*
