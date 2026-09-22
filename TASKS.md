@@ -17,6 +17,58 @@
 ## バックログ
 
 ## [2026-09-22 10:40] `media_assets.ai_tags[]` カラムの先行用意（Issue #120 ／ WBS `14-6` ★ `media_assets.ai_tags[]` カラムの先行用意） — DONE（2026-09-22 ／ 新規 DDL 無し・回帰テストで固定）
+## [2026-09-22 18:30] dev Supabase が main より11本分古い（`0021`〜`0031` が未適用） — TODO
+
+2026-09-22、WBS `7-2`（伝票管理）の DB 受入テストをローカルで流そうとして判明した。
+`supabase_migrations.schema_migrations` の最新は **`0020`**（＋`0100`・`0101`）であり、
+**main にある `0021`〜`0030` が dev へ当たっていない**（本コミットの `0031` を含めると11本）。
+
+| 影響 | 内容 |
+| --- | --- |
+| 実機の動作確認 | `accommodation_rates`・`reservation_otps`・`eumo_grants`・`import_jobs`・`member_identifiers`・`media_assets`・`shopping_list_items` が **PostgREST から見えない**（`PGRST205`）。宿泊料金・公開予約OTP・Eumo給付・メディア・買い物リストの画面は dev では動かない |
+| ローカルの DB テスト | 手元で `npx jest tests/db` を流すと dev を指すため、未適用の表に触れる試験が落ちる。**CI は影響を受けない**（`supabase start` の新しいローカルスタックへ全migrationを当てるため） |
+
+やること: `supabase link` のうえ `supabase db push --include-all` を流す（`1-1c` と同じ手順）。
+⚠️ **`--include-all` が要る**理由は WBS `1-1` の注記と同じ（既定の `db push` はリモート最新より前の連番を拒否する）。
+⚠️ 適用前に `0029`（ニックネーム必須化・親方会員番号の採番）が dev の既存データで通るかを確認すること。
+
+
+## [2026-09-22 10:50] 招待（経路B）のコード方式化（WBS `2-1d`） — DONE
+
+オーナー指示（Claudian セッション）で実装。v13 §9 #67 ／ 決定ログ §22-1 のとおり
+`admin.auth.admin.inviteUserByEmail()` を廃止し、「①台帳へ記録 → ②**ログイン画面の案内メール**」の2段にした。
+手順3〜5はログイン側で成立させる：**招待台帳に未消費・期限内の行があるアドレスにだけ `auth.users` の新規作成を許す**
+（`requestLoginCode` の `shouldCreateUser`）→ `bindAuthUserToMember()` が台帳の宛先と突合して結合。
+照会は `findUsableInvitation()` へ集約した（同じ条件を2箇所に書くと片方だけ緩む）。
+
+成果物: `src/lib/mail/resend.ts`（新規）・`src/lib/app-url.ts`（新規）・`src/lib/auth/invitations.ts`・
+`src/lib/auth/binding.ts`・`src/app/login/actions.ts`・`src/app/admin/invitations/*`・
+`tests/invitation-route-b.test.ts`（11件）・`tests/login-invitation-gate.test.ts`（5件）。
+⚠️ **残**: `RESEND_API_KEY` の登録（オーナー作業。`1-1e` と同じ）。未設定時は `mail_not_configured` を返し台帳の行は残す。
+
+## [2026-09-22 10:50] ニックネームの必須化と親方会員番号の採番（WBS `2-7`） — DONE
+
+オーナー指示で実装。v13 §9 #62 ／ 決定ログ §22-4。`0029_oyakata_member_no_and_nickname.sql` で
+`members.oyakata_member_no`（`OYA-`＋3桁・採番の起点45）を新設し、`v_member_public.display_name` を
+**nickname → 街人番号 → 親方会員番号 → `member_id` 先頭8文字**の4段へ差し替えた。
+ニックネームの必須化は `src/lib/members/nickname.ts`（入力検査の唯一の出所）に置き、DB 側は空白禁止の CHECK 1本までとし（`imported_from` を代理にした初版の CHECK は無関係な経路を落とすため CI で判明後に撤去）、
+既存370名向けに `/nickname`（ログイン直後・強制しない）を置いた。
+
+★ 採番を**専用列**にしたのは、2026-09-10 決定「両方の番号を持つ会員は街人番号で表示」＋ §9 #26（親方兼街人は1レコード）より
+**1行が2つの番号を同時に持てないと決定が実装不能**になるため（オーナー決定⑤は方式を問わない）。
+★ 仕様に明文が無かった1点として `街人#`/`親方#`/`ゲスト#` で始まるニックネームを拒否した。
+⚠️ **残**: `0029` は dev/prod へ**未適用**（CLAUDE.md §6.3 により自動適用しない）。DB テスト12件は CI で初回実行になる。
+
+## [2026-09-22 10:50] Vercel WAF の投入（WBS `1-7`） — DONE（実装90%）
+
+`非機能要件詳細.md` §2-6a ④ の確定値で `vercel firewall` へ投入し、本番へ publish 済み（Enabled・3 rules）。
+**R1 `/api/public/*` 60req/60s/IP（超過で5分 deny）**と **R3 `/admin/*` の国外 deny** は確定値どおり。
+⚠️ **R2（`/admin/*` 120req/分/IP）は投入できなかった** — **Hobby ではレート制限ルールが1本だけ**
+（2本目は `Rate limiting is not available for this plan (401)`。実測）。`/admin/*` は log ルールで代替した。
+⚠️ **残 10%**: 日次送信数の監視（§2-6a①）と、超過リクエストが実際に弾かれることの実測。
+
+## [2026-09-22 10:40] `media_assets.ai_tags[]` カラムの先行用意（Issue #120 ／ WBS `14-6` ★ `media_assets.ai_tags[]` カラムの先行用意） — TODO
+## [2026-09-22 10:40] `media_assets.ai_tags[]` カラムの先行用意（Issue #120 ／ WBS `14-6` ★ `media_assets.ai_tags[]` カラムの先行用意） — IN PROGRESS
 
 **リスク区分: 高**（ゲート1・2・3 ／ 承認3回）。成果物が `media_assets`（PII-B の `geo_location` を持つ表）の
 スキーマに掛かるため、`docs/自律開発ループ設計.md` §4.1 の「DBマイグレーション」に該当する。

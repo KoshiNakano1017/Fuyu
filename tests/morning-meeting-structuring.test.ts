@@ -5,6 +5,7 @@
 
 import {
   buildStructuringRequest,
+  formatKnowledgeCandidatesText,
   formatMinutesText,
   structureMorningMeeting,
   type MorningMeetingStructuring,
@@ -12,6 +13,8 @@ import {
 import {
   applyCorrection,
   markCandidate,
+  parseCandidateCorrection,
+  parseStoredCandidates,
   pendingCandidates,
   toQuestInsertRow,
   toStoredCandidates,
@@ -199,5 +202,83 @@ describe("候補からクエスト行への写し（WBS 4-3）", () => {
   test("指示内容に発言根拠を残す（朝会に出ていない受注者が背景を追えるようにするため）", () => {
     const row = toQuestInsertRow({ candidate, createdByMemberId });
     expect(row.description).toContain("東側の畑、草が伸びてるから午前中に2人くらいで刈っておきたいね");
+  });
+});
+
+// ── ここから下は 2026-09-22 追加分（保存経路・補正フォーム・ナレッジ候補）─────────────
+
+describe("保存された候補の読み戻し（jsonb → 型のある候補）", () => {
+  test("配列でない値からは候補を1件も作らない", () => {
+    expect(parseStoredCandidates(null)).toEqual([]);
+    expect(parseStoredCandidates({ title: "草刈り" })).toEqual([]);
+  });
+
+  test("タイトルの無い要素は落とし、読める要素だけを返す", () => {
+    const parsed = parseStoredCandidates([
+      { title: "", headcount: 2 },
+      { candidateId: "c2", title: "薪割り", headcount: 1, estimatedMinutes: 30 },
+    ]);
+    expect(parsed.map((candidate) => candidate.title)).toEqual(["薪割り"]);
+  });
+
+  test("状態が欠けている候補は未処理（pending）として扱う", () => {
+    const [candidate] = parseStoredCandidates([{ title: "薪割り" }]);
+    expect(candidate.status).toBe("pending");
+  });
+
+  test("知らない状態の値を公開済みとして読まない", () => {
+    const [candidate] = parseStoredCandidates([{ title: "薪割り", status: "approved" }]);
+    expect(candidate.status).toBe("pending");
+  });
+
+  test("公開済み候補は紐づくクエストIDを保つ", () => {
+    const [candidate] = parseStoredCandidates([
+      { title: "薪割り", status: "published", publishedQuestId: "q-1" },
+    ]);
+    expect(candidate.publishedQuestId).toBe("q-1");
+  });
+});
+
+describe("補正フォームの入力検証（WBS 4-3）", () => {
+  test("空欄の項目は補正せず、AI の抽出値を残す", () => {
+    const result = parseCandidateCorrection({ headcount: "", estimatedMinutes: "" });
+    expect(result).toEqual({ ok: true, correction: { title: undefined, headcount: undefined, estimatedMinutes: undefined, rewardUii: undefined } });
+  });
+
+  test("報酬 0 Uii は「未設定」ではなく 0 として扱う", () => {
+    const result = parseCandidateCorrection({ rewardUii: "0" });
+    expect(result.ok && result.correction.rewardUii).toBe(0);
+  });
+
+  test("桁区切りの入った報酬額を読み替えず弾く", () => {
+    expect(parseCandidateCorrection({ rewardUii: "1,000" })).toEqual({
+      ok: false,
+      reason: "invalid_reward",
+    });
+  });
+
+  test("募集人数 0 を受け付けない", () => {
+    expect(parseCandidateCorrection({ headcount: "0" })).toEqual({
+      ok: false,
+      reason: "invalid_headcount",
+    });
+  });
+
+  test("クエスト名を空にして公開できない", () => {
+    expect(parseCandidateCorrection({ title: "   " })).toEqual({
+      ok: false,
+      reason: "blank_title",
+    });
+  });
+});
+
+describe("ナレッジ候補の保存形（v13 §5.7.4 ②）", () => {
+  test("候補が無ければ議事録へ節を足さない", () => {
+    expect(formatKnowledgeCandidatesText([])).toBe("");
+  });
+
+  test("未登録であることが読み手に分かる見出しを付ける", () => {
+    const text = formatKnowledgeCandidatesText([{ title: "水やり当番", body: "週替わりで2名" }]);
+    expect(text).toContain("■ナレッジ候補（未登録）");
   });
 });

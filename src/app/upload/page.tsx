@@ -1,29 +1,34 @@
-import { NotYetAvailable } from "@/components/ui/NotYetAvailable";
+import { UploadForm } from "@/components/media/UploadForm";
 import { requireSignedIn } from "@/lib/auth/guard";
+import { MEDIA_PURPOSE_PRESETS } from "@/lib/media/upload-policy";
 
 /**
- * アップロード（画面ID A10 ／ WBS 14-2 アップロード画面（A10））。
+ * アップロード（画面ID A10 ／ WBS 14-2 アップロード画面）。
  *
- * ⚠️ **まだ作れない。** 保存先（署名付きURL発行）と台帳（`media_assets`）は
- * 2026-09-22（PR #119）で実装済み——`POST /api/media/signed-upload-url` と
- * `supabase/migrations/0027_media_assets.sql`。**残っているのはこの画面自体**
- * （ファイル選択／撮影・用途タグ入力・進捗表示・失敗分のみ再試行）の実装のみ（WBS 14-2）。
+ * 保存先（署名付きURL＝`POST /api/media/signed-upload-url`）と台帳（`media_assets` ／
+ * `0027`）は PR #119 で入っており、本画面はその上の操作面である。
  *
- * 入力欄だけ先に置かない。バックエンドは動くが、進捗表示・失敗時の再試行・
- * Exifからの撮影日時／位置の自動取得（v13 §5.11.7）を実装しないまま入力欄だけ
- * 出すと、利用者は「アップロードした」と思っても実際の挙動を保証できない。
+ * ## 対象はゲストを含む全員（v13 §5.11.7 ①）
  *
- * 対象ロールはゲストを含む全員（v13 §5.9.1）。ログインだけは要求する。
+ * ロールで分岐しない。ログインだけを要求するのは、投稿が必ず誰かの名義になるためで、
+ * 名義の固定は RLS（`media_assets_insert_self`）が行う。
+ *
+ * ## 用途タグのプリセットはサーバから渡す
+ *
+ * `MEDIA_PURPOSE_PRESETS` は許可リストではない（タグ語彙はフォークソノミー／v13 §5.11.3）。
+ * 画面の既定の選択肢としてだけ使い、自由入力も同じ列へ入る。
  */
 export default async function UploadPage() {
   await requireSignedIn();
 
   return (
-    <NotYetAvailable
-      title="アップロード"
-      blockedBy={[
-        "WBS 14-2（アップロード画面） — 保存先（署名付きURL・PR #119）と台帳（media_assets）は用意済みですが、画面自体（ファイル選択／撮影・用途タグ入力・進捗表示）が未着手です",
-      ]}
-    />
+    <main className="mx-auto flex max-w-3xl flex-col gap-6 p-6">
+      <h1 className="text-2xl font-bold">アップロード</h1>
+      <p className="text-sm text-neutral-600">
+        写真・動画は<strong>端末からストレージへ直接</strong>送られます（アプリのサーバを経由しません）。
+        位置情報つきの写真は、Exif から撮影日時と撮影地が自動で読み取られます。
+      </p>
+      <UploadForm presets={MEDIA_PURPOSE_PRESETS} />
+    </main>
   );
 }

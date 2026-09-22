@@ -1,3 +1,4 @@
+import { findUsableInvitation } from "@/lib/auth/invitations";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 
 /**
@@ -63,18 +64,15 @@ export async function bindAuthUserToMember(
   // ── 2. メールアドレスから会員を引く ─────────────────────────
   //   `member_identifiers`（メール・電話の分離テーブル）は WBS 2-1 の範囲外で
   //   まだ存在しない。現時点で辿れるのは `auth.users.email` → 招待台帳のみ。
-  //   招待（経路B）で送った宛先と突き合わせる。
-  const invitation = await admin
-    .from("member_invitations")
-    .select("invitation_id, member_id, expires_at, consumed_at")
-    .eq("sent_to_email", email)
-    .is("consumed_at", null)
-    .gt("expires_at", new Date().toISOString())
-    .order("sent_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  //   招待（経路B）で送った宛先と突き合わせる（v13 §5.2.6 経路B 手順4
+  //   「**招待台帳の宛先と一致することを確認したうえで**結合する」）。
+  //
+  //   照会は `findUsableInvitation()` に集約してある。コード方式化（WBS `2-1d`）で
+  //   **ログインのコード送信側も同じ判定を要する**ようになり、条件（未消費・期限内・最新）を
+  //   2箇所へ書くと片方だけ緩む事故が起きるため。
+  const invitation = await findUsableInvitation(admin, email);
 
-  const memberId = invitation.data?.member_id as string | undefined;
+  const memberId = invitation?.memberId;
   if (!memberId) {
     // 招待が無い／期限切れ／消費済み。**ここで会員を新規作成してはならない。**
     // 作ると、誰でもメールアドレスさえあれば会員になれてしまう。
@@ -109,11 +107,11 @@ export async function bindAuthUserToMember(
   }
 
   // ── 5. 招待を消費済みにする（監査のため。誤送信の追跡に使う）──
-  if (invitation.data?.invitation_id) {
+  if (invitation?.invitationId) {
     await admin
       .from("member_invitations")
       .update({ consumed_at: new Date().toISOString() })
-      .eq("invitation_id", invitation.data.invitation_id);
+      .eq("invitation_id", invitation.invitationId);
   }
 
   return { ok: true, memberId, alreadyBound: false };

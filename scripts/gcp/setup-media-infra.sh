@@ -27,6 +27,22 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "== プロジェクト: ${PROJECT_ID} ／ バケット: ${BUCKET} ／ ロケーション: ${LOCATION}"
 
+# -----------------------------------------------------------------------------
+# 0. 必要な API を有効化する
+#
+#    ⚠️ 新しいプロジェクトでは既定で無効なものがある。有効化を先にやらないと、
+#       後続の gcloud が「API が無効」で落ち、どこまで作られたのか分からなくなる。
+#       有効化済みなら何も起きない（冪等）。
+# -----------------------------------------------------------------------------
+
+gcloud services enable \
+  storage.googleapis.com \
+  iam.googleapis.com \
+  cloudtasks.googleapis.com \
+  cloudbilling.googleapis.com \
+  billingbudgets.googleapis.com \
+  --project "${PROJECT_ID}"
+
 # ⚠️ メディア用バケットを line-rag-bot と同じプロジェクトに置くかは未決である
 #    （`QUESTIONS.md`「[2026-09-19] メディア用 GCS バケットを `line-rag-bot` と同一 GCP
 #    プロジェクトに置くか」／推奨 B＝専用プロジェクト）。本スクリプトは
@@ -55,9 +71,38 @@ gcloud storage buckets update "gs://${BUCKET}" \
   --public-access-prevention
 
 # ライフサイクル（v13 §5.11.4）
+#
+#   media-bucket-lifecycle.json の5つの規則:
+#     ① media/ を 30日 → Nearline（撮りたては頻繁に見るが1か月で参照が落ちる）
+#     ② media/ を 90日 → Coldline
+#     ③ media/ を 365日 → Archive（Phase 2 の検索対象からは外れないが取り出しコストは上がる）
+#     ④ tmp/ を 7日で削除（サムネイル生成前の一時ファイル・失敗したアップロード）
+#     ⑤ 未完了の再開可能アップロードを 1日で破棄
+#
+#   ⚠️ JSON にコメントキー（"_comment" 等）を入れてはならない。gcloud が
+#      「Found invalid JSON/YAML for the lifecycle rule」で落ちる（2026-09-22 に実際に踏んだ）。
+#      規則の意図は上のとおりここへ書く。
 gcloud storage buckets update "gs://${BUCKET}" \
   --project "${PROJECT_ID}" \
   --lifecycle-file "${SCRIPT_DIR}/media-bucket-lifecycle.json"
+
+# CORS（WBS 14-2 アップロード画面）
+#
+# ⚠️ **これが無いとブラウザからのアップロードは1件も成功しない。**
+#    実体は端末 → ストレージへ直接送られる（v13 §5.11.2 不可侵ルール1）ため、ブラウザは
+#    別オリジンへの PUT として preflight を投げる。バケットに CORS が無いと preflight が
+#    拒否され、**署名も IAM も正しいのにアップロードだけが失敗する**（画面には
+#    「通信に失敗しました」としか出ず、原因が読めない失敗様式になる）。
+#
+# 許可するオリジンは環境ごとに違う。既定は開発用のローカルだけで、Vercel の URL は
+# MEDIA_CORS_ORIGINS へカンマ区切りで渡す。
+#   例: export MEDIA_CORS_ORIGINS="http://localhost:3000,https://fuyu.vercel.app"
+CORS_ORIGINS="${MEDIA_CORS_ORIGINS:-http://localhost:3000}"
+CORS_FILE="$(mktemp)"
+sed "s|__ORIGINS__|$(printf '%s' "${CORS_ORIGINS}" | sed 's/,/","/g')|" "${SCRIPT_DIR}/media-bucket-cors.json" > "${CORS_FILE}"
+gcloud storage buckets update "gs://${BUCKET}" --project "${PROJECT_ID}" --cors-file "${CORS_FILE}"
+rm -f "${CORS_FILE}"
+echo "-- CORS 許可オリジン: ${CORS_ORIGINS}"
 
 # -----------------------------------------------------------------------------
 # 2. サービスアカウント — 用途ごとに分ける

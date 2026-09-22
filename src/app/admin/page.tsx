@@ -2,9 +2,11 @@ import Link from "next/link";
 
 import { AccessDenied } from "@/components/auth/AccessDenied";
 import { ConciergeAdminLink } from "@/components/concierge/ConciergeAdminLink";
+import { RevisitAlerts } from "@/components/customers/RevisitAlerts";
 import { Money } from "@/components/ui/Money";
 import { AccessDeniedError, requireAdmin } from "@/lib/auth/guard";
 import { sumUnsettled } from "@/lib/billing/unsettled";
+import { fetchRevisitAlerts } from "@/lib/customers/fetch-revisit";
 import { fetchAvailability, fetchStaysOverlapping } from "@/lib/lodging/fetch-lodging";
 import { fetchOpenOrders } from "@/lib/orders/fetch-orders";
 import { fetchPendingApplications, fetchPendingWorkLogs } from "@/lib/quests/applications";
@@ -40,12 +42,14 @@ export default async function AdminDashboardPage() {
   }
 
   const today = new Date().toISOString().slice(0, 10);
-  const [orders, stays, availability, applications, workLogs] = await Promise.all([
+  const [orders, stays, availability, applications, workLogs, revisitAlerts] = await Promise.all([
     fetchOpenOrders(),
     fetchStaysOverlapping({ fromDate: today, toDate: today }),
     fetchAvailability({ fromDate: today, toDate: today }),
     fetchPendingApplications(),
     fetchPendingWorkLogs(),
+    // 未処理の差額を持つ方が滞在中なら、サマリーより先に出す（v13 §5.6.6 ／ WBS 10-3）
+    fetchRevisitAlerts(),
   ]);
 
   const unsettled = sumUnsettled(orders);
@@ -60,12 +64,14 @@ export default async function AdminDashboardPage() {
       <h1 className="text-2xl font-bold">今日の浮遊街サマリー</h1>
       <p className="text-sm text-neutral-600">{today}</p>
 
+      <RevisitAlerts alerts={revisitAlerts} />
+
       <div className="grid gap-3 sm:grid-cols-2">
         <SummaryCard
           title="本日の滞在"
           value={`${headcount}名 / ${stays.length}件`}
-          href="/staff/calendar"
-          linkLabel="宿泊予定カレンダーへ"
+          href="/staff/checkins"
+          linkLabel="チェックイン／チェックアウトへ"
         />
         <SummaryCard
           title="未提供の注文"
@@ -85,8 +91,8 @@ export default async function AdminDashboardPage() {
               </>
             )
           }
-          href="/staff/orders"
-          linkLabel="注文一覧へ"
+          href="/admin/customers"
+          linkLabel="顧客管理へ（伝票編集・精算QR）"
         />
         <SummaryCard
           title="審査待ち"

@@ -11,8 +11,11 @@
 //    氏名は架空、メールは `@example.invalid`。
 // ⚠️ 実装より先に書いている（設計 §11.6 commit-first）。`v_member_public` は未作成。
 //
-// 未決の論点⑤（純粋な親方衆の会員番号の採番方式／QUESTIONS.md）には踏み込まない。
-// ここで固定するのは「**街人番号を持つ会員は、立場が親方でもその番号で表示される**」までである。
+// ⚠️ **2026-09-22 追記（WBS `2-7` ／ `0029`）**: 未決だった論点⑤（親方会員番号の採番方式）が
+//    オーナー決定（v13 §9 #62：一意であれば何でもよい）で決着したため、
+//    「**純粋な親方衆は親方会員番号で表示される**」段を追加した。
+//    フォールバックの順序（街人番号 → 親方会員番号）が 2026-09-10 決定そのものであり、
+//    入れ替わると「親方優先」＝**不採用と決まった挙動**へ戻る。
 
 import { describeDb, query } from "./helpers/psql";
 
@@ -20,7 +23,10 @@ type DisplayNameFixture = {
   memberId: string;
   /** null = ニックネーム未設定 */
   nickname: string | null;
-  legacyMemberNo: string;
+  /** null = 街人番号を持たない（純粋な親方衆・ゲスト） */
+  legacyMemberNo: string | null;
+  /** null = 親方会員番号を持たない（街人・ゲスト） */
+  oyakataMemberNo: string | null;
   memberType: string;
 };
 
@@ -28,6 +34,7 @@ const WITH_NICKNAME: DisplayNameFixture = {
   memberId: "00000000-0000-0000-0000-0000000000c1",
   nickname: "テストきこり",
   legacyMemberNo: "T-0001",
+  oyakataMemberNo: null,
   memberType: "街人（一般）",
 };
 
@@ -35,34 +42,56 @@ const WITHOUT_NICKNAME: DisplayNameFixture = {
   memberId: "00000000-0000-0000-0000-0000000000c2",
   nickname: null,
   legacyMemberNo: "T-0327",
+  oyakataMemberNo: null,
   memberType: "街人（一般）",
 };
 
-/** 空白だけのニックネーム。「設定済み」と誤認すると画面に空の名前が並ぶ（§6-4 の `NULLIF(btrim(...))`）。 */
-const BLANK_NICKNAME: DisplayNameFixture = {
-  memberId: "00000000-0000-0000-0000-0000000000c3",
-  nickname: "   ",
-  legacyMemberNo: "T-0412",
-  memberType: "街人（一般）",
-};
+// ⚠️ 空白だけのニックネームのフィクスチャは `0029` で**投入できなくなった**
+//    （`chk_members_nickname_not_blank`）。「空白は未設定として扱う」の検証は
+//    `tests/db/oyakata-member-no-and-nickname.test.ts`（保存を拒否する側）へ移した。
+//    ビュー側の `NULLIF(btrim(...))` は 0029 より前の行に対する二段目の防御として残っている。
 
 /** 立場は親方だが街人番号を持つ会員。表示は街人番号（2026-09-10 決定）。 */
 const OYAKATA_WITH_MACHIBITO_NO: DisplayNameFixture = {
   memberId: "00000000-0000-0000-0000-0000000000c4",
   nickname: null,
   legacyMemberNo: "T-0500",
+  oyakataMemberNo: "OYA-901",
   memberType: "親方",
+};
+
+/** 純粋な親方衆（街人番号を持たない44名側）。表示は親方会員番号（2026-09-05 決定）。 */
+const OYAKATA_ONLY: DisplayNameFixture = {
+  memberId: "00000000-0000-0000-0000-0000000000c5",
+  nickname: null,
+  legacyMemberNo: null,
+  oyakataMemberNo: "OYA-902",
+  memberType: "親方",
+};
+
+/** どちらの番号も持たない会員。UUID 断片へ落ちる（最後の砦）。 */
+const NO_NUMBER_AT_ALL: DisplayNameFixture = {
+  memberId: "00000000-0000-0000-0000-0000000000c6",
+  nickname: null,
+  legacyMemberNo: null,
+  oyakataMemberNo: null,
+  memberType: "ゲスト",
 };
 
 /** 架空の実名。表示名へ漏れてはいけない（§5.2c の不可侵ルール）。 */
 const FICTIONAL_FULL_NAME = "架空 太郎";
 
+function sqlText(value: string | null): string {
+  return value === null ? "NULL" : `'${value}'`;
+}
+
 function memberSql(fixture: DisplayNameFixture): string {
-  const nickname = fixture.nickname === null ? "NULL" : `'${fixture.nickname}'`;
   return [
     "INSERT INTO public.members",
-    "  (member_id, nickname, legacy_member_no, member_type, role, account_status)",
-    `VALUES ('${fixture.memberId}', ${nickname}, '${fixture.legacyMemberNo}',`,
+    "  (member_id, nickname, legacy_member_no, oyakata_member_no, member_type, role,",
+    "   account_status)",
+    `VALUES ('${fixture.memberId}', ${sqlText(fixture.nickname)},`,
+    `        ${sqlText(fixture.legacyMemberNo)}, ${sqlText(fixture.oyakataMemberNo)},`,
     `        '${fixture.memberType}', 'member', 'active');`,
   ].join("\n");
 }
@@ -70,8 +99,9 @@ function memberSql(fixture: DisplayNameFixture): string {
 const FIXTURES_SQL = [
   WITH_NICKNAME,
   WITHOUT_NICKNAME,
-  BLANK_NICKNAME,
   OYAKATA_WITH_MACHIBITO_NO,
+  OYAKATA_ONLY,
+  NO_NUMBER_AT_ALL,
 ]
   .map(memberSql)
   .join("\n");
@@ -93,13 +123,21 @@ describeDb("完了条件8: 他者向け表示名（2026-09-10 決定 ／ DB物�
     expect(displayNameOf(WITHOUT_NICKNAME.memberId)).toBe("街人#T-0327");
   });
 
-  test("空白だけのニックネームは未設定として扱われる", () => {
-    expect(displayNameOf(BLANK_NICKNAME.memberId)).toBe("街人#T-0412");
+  test("親方兼街人は街人番号で表示される（`member_type` は表示番号を変えない）", () => {
+    // 「親方優先」は 2026-09-10 に不採用。ここが `親方#OYA-901` になったら決定と食い違う。
+    // このフィクスチャは**両方の番号を持つ**ため、フォールバックの順序がそのまま試される。
+    expect(displayNameOf(OYAKATA_WITH_MACHIBITO_NO.memberId)).toBe("街人#T-0500");
   });
 
-  test("親方兼街人は街人番号で表示される（`member_type` は表示番号を変えない）", () => {
-    // 「親方優先」は 2026-09-10 に不採用。ここが `親方#` になったら決定と食い違う。
-    expect(displayNameOf(OYAKATA_WITH_MACHIBITO_NO.memberId)).toBe("街人#T-0500");
+  test("純粋な親方衆は親方会員番号で表示される（0029 で第3段が埋まった）", () => {
+    // 0029 より前は `legacy_member_no` が NULL のため UUID 断片へ落ちていた。
+    expect(displayNameOf(OYAKATA_ONLY.memberId)).toBe("親方#OYA-902");
+  });
+
+  test("どちらの番号も無い会員は UUID 断片へ落ちる（実名へは落ちない）", () => {
+    expect(displayNameOf(NO_NUMBER_AT_ALL.memberId)).toBe(
+      `ゲスト#${NO_NUMBER_AT_ALL.memberId.slice(0, 8)}`,
+    );
   });
 
   test("★ ニックネーム未設定でも表示名に実名が現れない（§5.2c の不可侵ルール）", () => {

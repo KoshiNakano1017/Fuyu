@@ -1,8 +1,12 @@
+import Link from "next/link";
+
 import { AccessDenied } from "@/components/auth/AccessDenied";
+import { RevisitAlerts } from "@/components/customers/RevisitAlerts";
 import { MenuBoard } from "@/components/orders/MenuBoard";
 import { OrderKanban } from "@/components/orders/OrderKanban";
 import { SoldOutPanel } from "@/components/orders/SoldOutPanel";
 import { AccessDeniedError, requireStaff } from "@/lib/auth/guard";
+import { fetchRevisitAlerts } from "@/lib/customers/fetch-revisit";
 import {
   fetchMenuItems,
   fetchOpenOrders,
@@ -37,10 +41,12 @@ export default async function StaffOrdersPage() {
     throw error;
   }
 
-  const [orders, menuItems, stayingCheckIns] = await Promise.all([
+  const [orders, menuItems, stayingCheckIns, revisitAlerts] = await Promise.all([
     fetchOpenOrders(),
     fetchMenuItems(),
     fetchStayingCheckIns(),
+    // 未処理の差額を持つ方が滞在中なら、注文の板より先に出す（v13 §5.6.6 ／ WBS 10-3）
+    fetchRevisitAlerts(),
   ]);
 
   const today = new Date().toISOString().slice(0, 10);
@@ -49,6 +55,13 @@ export default async function StaffOrdersPage() {
   return (
     <main className="mx-auto flex max-w-5xl flex-col gap-8 p-6">
       <h1 className="text-2xl font-bold">店員用タブレット</h1>
+
+      {/* 入館の操作は別画面（画面ID A1 ／ WBS 3-2）。同じ端末から辿れるようにする */}
+      <Link href="/staff/checkins" className="text-sm underline underline-offset-4">
+        チェックイン／チェックアウトへ
+      </Link>
+
+      <RevisitAlerts alerts={revisitAlerts} />
 
       <section className="flex flex-col gap-3">
         <h2 className="text-xl font-bold">注文</h2>

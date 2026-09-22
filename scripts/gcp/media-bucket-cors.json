@@ -1,0 +1,11 @@
+{
+  "_comment": "メディア用バケットの CORS（WBS 14-2 アップロード画面 ／ v13 §5.11.2 不可侵ルール1）。setup-media-infra.sh が origin の placeholder を MEDIA_CORS_ORIGINS の値へ置き換えて適用する。許可するのは本体の PUT と preflight の OPTIONS だけで、閲覧（GET）は署名付きURLで別に配る。responseHeader の2つは署名へ焼き込んだヘッダであり、ブラウザが送れないとストレージ側が署名不一致で拒否する。",
+  "cors": [
+    {
+      "origin": ["__ORIGINS__"],
+      "method": ["PUT", "OPTIONS"],
+      "responseHeader": ["Content-Type", "x-goog-content-length-range"],
+      "maxAgeSeconds": 3600
+    }
+  ]
+}

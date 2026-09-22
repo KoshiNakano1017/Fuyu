@@ -26,7 +26,8 @@ describe("isStaff（運営の定義 ／ DB物理設計 §6-2① の is_staff() �
     expect(isStaff("guest")).toBe(false);
   });
 
-  test("custom は運営として扱わない（権限内容が未定義のため ／ DB物理設計 §6-9⑥）", () => {
+  // `member` 相当（staff ではない）は**正式仕様**である（2026-09-22 オーナー決定 ／ v13 §9 #66）。
+  test("custom は運営として扱わない（`member` と同等 ／ v13 §9 #66・決定ログ §22-3）", () => {
     expect(isStaff("custom")).toBe(false);
   });
 });

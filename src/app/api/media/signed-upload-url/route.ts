@@ -9,7 +9,11 @@ import {
   readUploadUrlTtlMinutes,
 } from "@/lib/media/env";
 import { createSignedUploadUrl } from "@/lib/media/signed-url";
-import { buildMediaObjectName, decideUploadPolicy } from "@/lib/media/upload-policy";
+import {
+  buildMediaObjectName,
+  decideUploadPolicy,
+  normalizeCaptureMetadata,
+} from "@/lib/media/upload-policy";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 /**
@@ -58,6 +62,14 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: decision.rejectionReason }, { status: 400 });
   }
 
+  // 撮影日時・位置は画面が Exif から読んで送ってくる（v13 §5.11.7 ③）。
+  // ⚠️ クライアント由来の値であり、形だけを検証して受ける。読めない値は黙って捨てる
+  //    （補助情報のためにアップロードそのものを失敗させない）。
+  const capture = normalizeCaptureMetadata({
+    takenAt: body.takenAt,
+    geoLocation: body.geoLocation,
+  });
+
   const mediaId = randomUUID();
   const signedAt = new Date();
   const objectName = buildMediaObjectName({
@@ -75,6 +87,9 @@ export async function POST(request: Request): Promise<NextResponse> {
     content_type: contentType,
     storage_path: objectName,
     purpose_tags: decision.normalizedPurposeTags,
+    // ⚠️ `geo_location` は PII-B（DB物理設計 §6-1 #22）。ログへ出さない。
+    taken_at: capture.takenAt,
+    geo_location: capture.geoLocation,
     // `upload_state` と `visibility` は DB の既定値（pending ／ 公開）に委ねる。
     // 既定を2箇所に書くと、片方を直したときにもう片方が取り残される。
   });

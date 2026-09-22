@@ -1,18 +1,9 @@
 import { AccessDenied } from "@/components/auth/AccessDenied";
 import { AccessDeniedError, requireAdmin } from "@/lib/auth/guard";
 import { AREAS, visibilityFor } from "@/lib/auth/navigation";
-import type { Role } from "@/lib/auth/session";
+import { ROLE_DISPLAY_NAMES, ROLES_IN_DISPLAY_ORDER } from "@/lib/auth/role-labels";
 
-/** 利用者向けのロール表示名。内部識別子（`core_member` 等）をそのまま見せない（v13 §5.9.4）。 */
-const ROLE_LABEL: Record<Role, string> = {
-  admin: "管理者",
-  core_member: "コアメンバー",
-  member: "街人",
-  guest: "ゲスト",
-  custom: "カスタム権限",
-};
-
-const ROLES: readonly Role[] = ["admin", "core_member", "member", "guest", "custom"];
+// 表示名と並びの出所は `role-labels.ts` ただ1つ（WBS 2-5）。ここに2つ目の表を作らない
 
 const VISIBILITY_MARK = { visible: "◯", limited: "△", hidden: "—" } as const;
 
@@ -65,9 +56,9 @@ export default async function AdminPreviewPage() {
             <tr>
               <th className="border-b p-2 text-left">領域</th>
               <th className="border-b p-2 text-left">経路</th>
-              {ROLES.map((role) => (
+              {ROLES_IN_DISPLAY_ORDER.map((role) => (
                 <th key={role} className="border-b p-2 text-center">
-                  {ROLE_LABEL[role]}
+                  {ROLE_DISPLAY_NAMES[role]}
                 </th>
               ))}
             </tr>
@@ -77,7 +68,7 @@ export default async function AdminPreviewPage() {
               <tr key={area.key}>
                 <td className="border-b p-2">{area.label}</td>
                 <td className="border-b p-2 font-mono text-xs text-neutral-600">{area.path}</td>
-                {ROLES.map((role) => (
+                {ROLES_IN_DISPLAY_ORDER.map((role) => (
                   <td key={`${area.key}-${role}`} className="border-b p-2 text-center">
                     {VISIBILITY_MARK[visibilityFor(area, role)]}
                   </td>

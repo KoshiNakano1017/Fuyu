@@ -9,8 +9,13 @@
 
 import type { Role } from "@/lib/auth/session";
 
-/** 起案元区分（v13 §7「クエスト情報」）。手動起案と朝会自動抽出を1つの一覧に混ぜる（§5.3-1）。 */
-export type QuestOriginType = "manual" | "morning_meeting_auto";
+/**
+ * 起案元区分（v13 §7「クエスト情報」）。手動起案・朝会自動抽出・買い物リスト起点を
+ * 1つの一覧に混ぜたうえで、出どころだけを示す（§5.3-1・§5.12.3）。
+ *
+ * DB 側の列名は `quests.origin_type`（`source_type` ではない）。
+ */
+export type QuestOriginType = "manual" | "morning_meeting_auto" | "shopping_list";
 
 /** 募集状態。受注申請を受け付けるのは `open` だけ。 */
 export type QuestStatus = "open" | "closed" | "archived";

@@ -1,9 +1,13 @@
+import { MyGrantList } from "@/components/eumo/MyGrantList";
 import { Money } from "@/components/ui/Money";
 import { requireSignedIn } from "@/lib/auth/guard";
 import { fetchMyPendingAdjustments } from "@/lib/billing/fetch-my-ledger";
+import { fetchMyPendingGrants } from "@/lib/eumo/store";
 import { sumUnsettled } from "@/lib/billing/unsettled";
 import { fetchMyOrders } from "@/lib/orders/fetch-orders";
 import { toServingStatusDisplayLabel } from "@/lib/serving-status";
+
+import { reportGrantReceiptAction } from "./actions";
 
 /**
  * マイログ（画面ID A6／A2 ／ WBS 8-4・8-2・8-3）。
@@ -27,9 +31,11 @@ import { toServingStatusDisplayLabel } from "@/lib/serving-status";
 export default async function MyPage() {
   const viewer = await requireSignedIn();
 
-  const [orders, adjustments] = await Promise.all([
+  const [orders, adjustments, pendingGrants] = await Promise.all([
     fetchMyOrders(viewer.memberId),
     fetchMyPendingAdjustments(viewer.memberId),
+    // 未受領のUii給付も本画面に出す（v13 §5.3.1 ／ WBS 8-4 は 5-7 と連動する）
+    fetchMyPendingGrants(viewer.memberId),
   ]);
 
   const unsettled = sumUnsettled(orders);
@@ -72,6 +78,8 @@ export default async function MyPage() {
           </p>
         </section>
       )}
+
+      <MyGrantList grants={pendingGrants} reportReceipt={reportGrantReceiptAction} />
 
       <section className="flex flex-col gap-2">
         <h2 className="text-lg font-bold">注文履歴</h2>
