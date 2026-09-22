@@ -661,9 +661,9 @@ COMMENT ON COLUMN menu_items.category IS
 ```sql
 CREATE TABLE accommodation_rates (
   rate_id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  room_type          text NOT NULL
-                        CHECK (room_type IN ('コテージA','コテージB','アースバッグ',
-                                             'テント','車中泊','ゲストハウス','サロン')),
+  room_type          text NOT NULL REFERENCES accommodation_types(room_type),
+                        -- ▲ 旧: CHECK による直書き列挙（コテージA/B・テント・ゲストハウス等の日本語旧名称）だった。
+                        -- 0014 で実装済みの accommodation_types（英字6値）への FK に差し替えた（v13 §5.4.2・#55）。
   member_category    text NOT NULL DEFAULT 'member'
                         CHECK (member_category IN ('member','non_member')),
   price_per_night_yen integer NOT NULL CHECK (price_per_night_yen >= 0),
@@ -688,17 +688,15 @@ CREATE INDEX ix_rate_current ON accommodation_rates (room_type, member_category)
   WHERE effective_until IS NULL;
 ```
 
-> [!danger] ⚠️ 上記 `room_type` の CHECK は**旧名称のまま**であり、このまま実装してはならない（#55）
-> 列挙されている7値（`コテージA`/`コテージB`/`アースバッグ`/`テント`/`車中泊`/`ゲストハウス`/`サロン`）は
-> **v1.16.0（2026-08-22）の改称前の名前**である。実装済みの `rooms.room_type`（`0006`）と
-> `accommodation_types.room_type`（`0014`）は、いずれも英字6値
-> **`dormitory` / `cottage` / `campsite` / `car` / `earthbag` / `salon`** で入っている。
-> この CHECK のまま `accommodation_rates` を作ると**どの部屋とも結合できない**。
->
-> `accommodation_rates` は `accommodation_types (room_type)` への外部キーとして定義し直すこと
-> （CHECK を手で並べ直すと、また改称のたびに食い違う）。
-> WBS `3-9`（宿泊料金マスタ）が 🔴 ブロック中なのはこの論点（`QUESTIONS.md`
-> 「[2026-08-26] 宿泊形態の旧名称が正本に残存している」）が未回答のためである。
+> [!success] ~~上記 `room_type` の CHECK は旧名称のまま～このまま実装してはならない（#55）~~ → ✅ **解消（2026-09-21）**
+> 旧文言が列挙していた7値（`コテージA`/`コテージB`/`アースバッグ`/`テント`/`車中泊`/`ゲストハウス`/`サロン`）は
+> **v1.16.0（2026-08-22）の改称前の名前**であり、実装済みの `rooms.room_type`（`0006`）・
+> `accommodation_types.room_type`（`0014`）の英字6値
+> **`dormitory` / `cottage` / `campsite` / `car` / `earthbag` / `salon`** と結合できなかった。
+> **`accommodation_rates.room_type` を `accommodation_types (room_type)` への外部キーへ差し替えて解消した**
+> （CHECK の手書き列挙をやめたため、次に改称があっても値の食い違いが起きない）。
+> WBS `3-9`（宿泊料金マスタ）のブロック要因だった `QUESTIONS.md`「[2026-08-26] 宿泊形態の旧名称が正本に残存している」は
+> 本改訂の反映により**表記面は解消**。3-9 の残ブロックが他にないかは WBS 側で別途確認すること。
 
 > [!warning] マスタは「これから作る伝票の既定値」であり、過去伝票の参照先ではない
 > `menu_items.unit_price_yen` を変更しても、**既存の `order_items.unit_price_yen` は変わりません**
