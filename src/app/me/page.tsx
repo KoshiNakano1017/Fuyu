@@ -3,6 +3,11 @@ import { Money } from "@/components/ui/Money";
 import { requireSignedIn } from "@/lib/auth/guard";
 import { fetchMyPendingAdjustments } from "@/lib/billing/fetch-my-ledger";
 import { fetchMyPendingGrants } from "@/lib/eumo/store";
+import {
+  fetchStayTicketBalance,
+  fetchStayTicketHistory,
+  STAY_TICKET_TX_LABELS,
+} from "@/lib/lodging/stay-tickets";
 import { sumUnsettled } from "@/lib/billing/unsettled";
 import { fetchMyOrders } from "@/lib/orders/fetch-orders";
 import { toServingStatusDisplayLabel } from "@/lib/serving-status";
@@ -31,11 +36,15 @@ import { reportGrantReceiptAction } from "./actions";
 export default async function MyPage() {
   const viewer = await requireSignedIn();
 
-  const [orders, adjustments, pendingGrants] = await Promise.all([
+  const [orders, adjustments, pendingGrants, stayTicketBalance, stayTicketHistory] =
+    await Promise.all([
     fetchMyOrders(viewer.memberId),
     fetchMyPendingAdjustments(viewer.memberId),
     // 未受領のUii給付も本画面に出す（v13 §5.3.1 ／ WBS 8-4 は 5-7 と連動する）
     fetchMyPendingGrants(viewer.memberId),
+    // 宿泊券の残高と明細（v13 §5.8.5「本人への反映」／ WBS 3-4）
+    fetchStayTicketBalance(viewer.memberId),
+    fetchStayTicketHistory(viewer.memberId),
   ]);
 
   const unsettled = sumUnsettled(orders);
@@ -80,6 +89,33 @@ export default async function MyPage() {
       )}
 
       <MyGrantList grants={pendingGrants} reportReceipt={reportGrantReceiptAction} />
+
+      <section className="rounded border border-neutral-200 bg-white p-4">
+        <h2 className="text-lg font-bold">宿泊券</h2>
+        {/*
+          残高は取引明細の積み上げで出す（v13 §5.8.5 ／ `stay_ticket_balance()`）。
+          `members.stay_tickets` は取込が埋める集計キャッシュで再計算トリガーが未実装のため読まない。
+        */}
+        <p className="mt-1 text-xl font-bold">残り {stayTicketBalance} 泊</p>
+        {stayTicketHistory.length === 0 ? (
+          <p className="mt-1 text-sm text-neutral-600">宿泊券の増減はまだありません。</p>
+        ) : (
+          <ul className="mt-2 flex flex-col gap-1 text-xs text-neutral-700">
+            {stayTicketHistory.map((entry) => (
+              <li key={entry.txId} className="flex justify-between gap-3">
+                <span>
+                  {new Date(entry.createdAt).toLocaleDateString("ja-JP")}{" "}
+                  {STAY_TICKET_TX_LABELS[entry.txType]}
+                  {entry.note === null ? "" : `（${entry.note}）`}
+                </span>
+                <span className="font-medium">
+                  {entry.nights > 0 ? `+${entry.nights}` : entry.nights} 泊
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
       <section className="flex flex-col gap-2">
         <h2 className="text-lg font-bold">注文履歴</h2>
