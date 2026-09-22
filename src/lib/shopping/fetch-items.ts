@@ -18,7 +18,8 @@ export type ShoppingItem = {
   unit: string | null;
   wantedBy: string | null;
   purpose: string | null;
-  sourceHint: string | null;
+  shopName: string | null;
+  shopUrl: string | null;
   referencePriceJpy: number | null;
   priority: "至急" | "通常" | "いつでも";
   status: ShoppingItemStatus;
@@ -38,7 +39,7 @@ export type ShoppingItem = {
  *   名前を載せると、ニックネーム未設定の会員で実名が露出する（v13 §9 #62）。
  */
 const ITEM_COLUMNS =
-  "item_id, item_name, quantity, unit, wanted_by, purpose, source_hint, reference_price_jpy, priority, status, registered_by, requesters, skip_reason, quest_id, withdrawn_at, created_at";
+  "item_id, item_name, quantity, unit, wanted_by, purpose, shop_name, shop_url, reference_price_jpy, priority, status, registered_by, requesters, skip_reason, quest_id, withdrawn_at, created_at";
 
 type ShoppingItemRow = {
   item_id: string;
@@ -47,7 +48,8 @@ type ShoppingItemRow = {
   unit: string | null;
   wanted_by: string | null;
   purpose: string | null;
-  source_hint: string | null;
+  shop_name: string | null;
+  shop_url: string | null;
   reference_price_jpy: number | null;
   priority: ShoppingItem["priority"];
   status: ShoppingItemStatus;
@@ -67,7 +69,8 @@ function toItem(row: ShoppingItemRow): ShoppingItem {
     unit: row.unit,
     wantedBy: row.wanted_by,
     purpose: row.purpose,
-    sourceHint: row.source_hint,
+    shopName: row.shop_name,
+    shopUrl: row.shop_url,
     referencePriceJpy: row.reference_price_jpy,
     priority: row.priority,
     status: row.status,
@@ -108,7 +111,8 @@ export type NewShoppingItem = {
   unit: string | null;
   wantedBy: string | null;
   purpose: string | null;
-  sourceHint: string | null;
+  shopName: string | null;
+  shopUrl: string | null;
   referencePriceJpy: number | null;
   priority: ShoppingItem["priority"];
   registeredBy: string;
@@ -124,7 +128,8 @@ export async function insertShoppingItem(input: NewShoppingItem): Promise<boolea
     unit: input.unit,
     wanted_by: input.wantedBy,
     purpose: input.purpose,
-    source_hint: input.sourceHint,
+    shop_name: input.shopName,
+    shop_url: input.shopUrl,
     reference_price_jpy: input.referencePriceJpy,
     priority: input.priority,
     registered_by: input.registeredBy,

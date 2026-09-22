@@ -22,7 +22,8 @@ import { canRegister, decideStatusChange, type ShoppingAction } from "@/lib/shop
  * ⚠️ **画面を経由せず直接呼ばれても拒否する**（v13 §5.9.3 の二重防御）。
  * Server Action は URL を持つエンドポイントとして公開されるため、
  * 「ゲストに登録ボタンを描かない」だけでは防御にならない。
- * 判定の根拠は `members.role` のみで、`member_type`（立場）は見ない（CLAUDE.md §4.1）。
+ * 判定の根拠は `members.role`（権限ロール）だけである。会員種別（立場）は認可に使わない
+ * （CLAUDE.md §4.1）。立場で分岐すると、親方の肩書きを持つ街人が運営の操作まで通ってしまう。
  */
 
 export type RegisterFormState = {
@@ -109,7 +110,8 @@ export async function registerShoppingItemAction(
     unit: toTextOrNull(formData.get("unit")),
     wantedBy: toTextOrNull(formData.get("wantedBy")),
     purpose: toTextOrNull(formData.get("purpose")),
-    sourceHint: toTextOrNull(formData.get("sourceHint")),
+    shopName: toTextOrNull(formData.get("shopName")),
+    shopUrl: toTextOrNull(formData.get("shopUrl")),
     referencePriceJpy: toNumberOrNull(formData.get("referencePriceJpy")),
     priority: priority === "至急" || priority === "いつでも" ? priority : "通常",
     registeredBy: viewer.memberId,

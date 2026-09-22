@@ -111,7 +111,11 @@ export default async function ShoppingPage() {
                   {item.itemName}
                   {amountLabel(item) && <span className="ml-1 text-sm text-neutral-500">{amountLabel(item)}</span>}
                 </p>
-                <span className={`rounded px-2 py-0.5 text-xs ${STATUS_STYLE[item.status]}`}>
+                <span
+                  // バッジの色だけでは何を表しているか読めない。読み上げにも「ステータス」を乗せる。
+                  aria-label={`ステータス：${withdrawn ? "取り下げ" : item.status}`}
+                  className={`rounded px-2 py-0.5 text-xs ${STATUS_STYLE[item.status]}`}
+                >
                   {withdrawn ? "取り下げ" : item.status}
                 </span>
               </div>
@@ -125,7 +129,16 @@ export default async function ShoppingPage() {
               </p>
 
               {item.purpose && <p className="text-sm text-neutral-700">{item.purpose}</p>}
-              {item.sourceHint && <p className="text-xs text-neutral-500">入手先：{item.sourceHint}</p>}
+              {(item.shopName || item.shopUrl) && (
+                <p className="text-xs text-neutral-500">
+                  入手先：{item.shopName}
+                  {item.shopUrl && (
+                    <a href={item.shopUrl} className="ml-1 underline" rel="noreferrer noopener" target="_blank">
+                      商品ページ
+                    </a>
+                  )}
+                </p>
+              )}
               {item.status === "見送り" && item.skipReason && (
                 <p className="text-xs text-neutral-600">見送り理由：{item.skipReason}</p>
               )}

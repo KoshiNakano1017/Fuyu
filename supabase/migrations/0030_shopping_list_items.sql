@@ -51,7 +51,11 @@ CREATE TABLE public.shopping_list_items (
   unit                 text,
   wanted_by            date,
   purpose              text,
-  source_hint          text,
+
+  -- 入手先候補（v13 §7「入手先候補（店名・URL）」）。店名と URL を別列で持つ。
+  -- 1列の自由記述にすると、後から「買える店の一覧」を引けない（買い出しの経路を組めない）。
+  shop_name            text,
+  shop_url             text,
 
   -- 参考価格。**精算には使わない**（§5.12.4）。COMMENT も参照。
   reference_price_jpy  integer
@@ -70,7 +74,10 @@ CREATE TABLE public.shopping_list_items (
                          CONSTRAINT chk_shopping_item_status
                          CHECK (status IN ('希望', '買う', 'クエスト化済', '購入済', '見送り')),
 
-  registered_by        uuid NOT NULL REFERENCES public.members (member_id),
+  -- 登録者はセッションから決まる値であり、利用者が入力する項目ではない（§5.12.1 の入力項目表）。
+  -- 既定値を持たせて「INSERT に書かないと通らない列」を品名だけに保つ。
+  registered_by        uuid NOT NULL DEFAULT public.current_member_id()
+                         REFERENCES public.members (member_id),
 
   -- 相乗り（「自分も欲しい」）。members への FK は配列のため張れない
   -- （quests.required_certification と同じ割り切り）。更新は ③ の RPC 経由のみ。

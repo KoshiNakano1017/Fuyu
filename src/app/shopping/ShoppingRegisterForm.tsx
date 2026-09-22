@@ -22,6 +22,8 @@ const INITIAL: RegisterFormState = { status: "idle" };
 export function ShoppingRegisterForm() {
   const [state, submit] = useActionState(registerShoppingItemAction, INITIAL);
   const duplicated = state.status === "duplicate";
+  /** 重複「候補」。自動でまとめず、相乗りか「それでも登録する」かを利用者に選ばせる。 */
+  const duplicateCandidates = state.duplicates ?? [];
 
   return (
     <form action={submit} className="flex flex-col gap-3 rounded border border-neutral-300 p-4">
@@ -68,8 +70,12 @@ export function ShoppingRegisterForm() {
           />
         </label>
         <label className="flex flex-col gap-1 text-sm">
-          どこで買えるか（任意）
-          <input type="text" name="sourceHint" placeholder="店名・URL" className="rounded border border-neutral-300 px-3 py-2" />
+          どこで買えるか・店名（任意）
+          <input type="text" name="shopName" placeholder="例：カインズ" className="rounded border border-neutral-300 px-3 py-2" />
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          商品ページのURL（任意）
+          <input type="url" name="shopUrl" placeholder="https://" className="rounded border border-neutral-300 px-3 py-2" />
         </label>
       </div>
 
@@ -82,7 +88,7 @@ export function ShoppingRegisterForm() {
         <div className="rounded border border-amber-400 bg-amber-50 p-3 text-sm">
           <p className="font-medium">同じものが既に登録されています</p>
           <ul className="mt-1 list-disc pl-5">
-            {state.duplicates?.map((item) => (
+            {duplicateCandidates.map((item) => (
               <li key={item.itemId}>{item.itemName}</li>
             ))}
           </ul>
