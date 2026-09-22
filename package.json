@@ -14,7 +14,9 @@
     "typecheck": "tsc --noEmit",
     "test": "jest",
     "test:e2e": "playwright test",
-    "verify": "bash automation/scripts/verify.sh"
+    "verify": "bash automation/scripts/verify.sh",
+    "seed:dev": "node scripts/dev/seed-dev.mjs",
+    "dev:login-code": "node scripts/dev/login-code.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.127.0",
