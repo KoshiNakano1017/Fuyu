@@ -18,14 +18,11 @@
 
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
-/** キャンセル理由の種別（v13 §7 ／ DB の CHECK 制約と同じ3値）。 */
-export type CancelReasonType = "会員都合" | "ノーショー" | "運営都合";
-
-export const CANCEL_REASON_TYPES: readonly CancelReasonType[] = [
-  "会員都合",
-  "ノーショー",
-  "運営都合",
-];
+// 値域は `checkin-ops.ts`（純関数モジュール）が持つ。ここから再輸出するのは、
+// 既存の呼び出し側を壊さないためだけである。**クライアント部品はここから取らないこと**
+// （このモジュールはサーバ専用であり、ブラウザ側のバンドルへ入るとビルドが落ちる）。
+export { CANCEL_REASON_TYPES, type CancelReasonType } from "./checkin-ops";
+import { CANCEL_REASON_TYPES, type CancelReasonType } from "./checkin-ops";
 
 export type CancelStayResult =
   | { ok: true; releasedRoomAssignmentCount: number }
