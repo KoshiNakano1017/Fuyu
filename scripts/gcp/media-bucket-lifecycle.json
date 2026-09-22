@@ -1,29 +1,23 @@
 {
-  "_comment": "メディア用バケットのライフサイクル（v13 §5.11.4 ／ Issue #18 完了条件 D）。scripts/gcp/setup-media-infra.sh が適用する。",
   "lifecycle": {
     "rule": [
       {
-        "_comment": "30日で Nearline へ。撮ったばかりの素材は頻繁に見るが、1か月を過ぎると参照が落ちる",
         "action": { "type": "SetStorageClass", "storageClass": "NEARLINE" },
         "condition": { "age": 30, "matchesPrefix": ["media/"] }
       },
       {
-        "_comment": "90日で Coldline へ",
         "action": { "type": "SetStorageClass", "storageClass": "COLDLINE" },
         "condition": { "age": 90, "matchesPrefix": ["media/"] }
       },
       {
-        "_comment": "365日で Archive へ。Phase 2 の検索対象からは外れないが、取り出しコストは上がる",
         "action": { "type": "SetStorageClass", "storageClass": "ARCHIVE" },
         "condition": { "age": 365, "matchesPrefix": ["media/"] }
       },
       {
-        "_comment": "一時ファイル（サムネイル生成前・失敗したアップロード）は7日で削除する（v13 §5.11.4）。実体だけが残って課金され続けるのを防ぐ",
         "action": { "type": "Delete" },
         "condition": { "age": 7, "matchesPrefix": ["tmp/"] }
       },
       {
-        "_comment": "完了しなかった再開可能アップロードの残骸を1日で捨てる",
         "action": { "type": "AbortIncompleteMultipartUpload" },
         "condition": { "age": 1 }
       }

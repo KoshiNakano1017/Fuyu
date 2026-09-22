@@ -49,6 +49,11 @@ venv/
 .supabase/
 supabase/.temp/
 
+# === Vercel ===
+# プロジェクトIDと組織IDのローカル連携情報（WBS 1-2a）。
+# 秘匿値ではないが、環境ごとに異なるためコミットしない。
+.vercel/
+
 # === エディタ・OS ===
 .DS_Store
 Thumbs.db
