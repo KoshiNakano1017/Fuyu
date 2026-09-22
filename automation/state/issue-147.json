@@ -1,0 +1,223 @@
+{
+  "version": 1,
+  "issue": 147,
+  "pr": null,
+  "branch": null,
+  "phase": "plan",
+  "risk": "high",
+  "attempts": {
+    "infra": 0,
+    "verify": 0,
+    "review": 0
+  },
+  "lastFingerprint": {
+    "infra": null,
+    "verify": null,
+    "review": null
+  },
+  "repeatedFingerprint": {
+    "infra": 0,
+    "verify": 0,
+    "review": 0
+  },
+  "tokens": {
+    "input": 146,
+    "output": 90792,
+    "costUsd": 8.2827515
+  },
+  "testHashes": {},
+  "specRefs": [
+    {
+      "ref": "v13 §5.12.1",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "L2197-L2213"
+    },
+    {
+      "ref": "v13 §5.12.2",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "L2215-L2233"
+    },
+    {
+      "ref": "v13 §5.12.4",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "L2248-L2271"
+    },
+    {
+      "ref": "v13 §6（買い物リストの行は L2357-L2362 の6行）",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "L2300-L2367"
+    },
+    {
+      "ref": "v13 §7「★ 買い物リスト（新規／§5.12）」",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "L2601-L2609"
+    },
+    {
+      "ref": "v13 §5.9.1",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "L1679-L1703"
+    },
+    {
+      "ref": "v13 §5.9.3",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "L1711-L1718"
+    },
+    {
+      "ref": "v13 §5.9.5",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "L1747-L1765"
+    },
+    {
+      "ref": "v13 §9 #65（スコープ・ゲストの登録可否・立替実費）",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "L2754"
+    },
+    {
+      "ref": "detailed-design/画面設計.md A13・C14",
+      "path": "docs/spec/detailed-design/画面設計.md",
+      "lines": "L85, L124, L165, L175, L210"
+    }
+  ],
+  "acceptance": [
+    {
+      "criterion": "`public.shopping_list_items` が存在し、v13 §7「★ 買い物リスト」が列挙する項目を列として持つ",
+      "origin": "issue",
+      "test": "`shopping_list_items` は v13 §7 が列挙する項目をすべて列として持つ"
+    },
+    {
+      "criterion": "品名だけを与えた INSERT が成功する（品名以外に NOT NULL 制約が無い）",
+      "origin": "issue",
+      "test": "品名だけを与えた INSERT が成功する"
+    },
+    {
+      "criterion": "品名が空文字・空白のみの INSERT は拒否される",
+      "origin": "issue",
+      "test": "品名が空白のみの INSERT は CHECK 制約で落ちる（23514）"
+    },
+    {
+      "criterion": "ステータスは `希望`/`買う`/`クエスト化済`/`購入済`/`見送り` の5値のみを受け付け、未指定時の既定が `希望` である",
+      "origin": "issue",
+      "test": "5値以外のステータスを入れると CHECK 制約で落ちる（23514） ／ ステータスを指定しない INSERT は `希望` になる"
+    },
+    {
+      "criterion": "優先度は `至急`/`通常`/`いつでも` の3値のみを受け付ける",
+      "origin": "issue",
+      "test": "3値以外の優先度を入れると CHECK 制約で落ちる（23514）"
+    },
+    {
+      "criterion": "立替実費に相当する列（`advance_payer_id` / `advance_amount_jpy` / `receipt_media_id` / `advance_settled*`）が存在しない",
+      "origin": "issue",
+      "test": "`shopping_list_items` に `advance_` で始まる列も `receipt_media_id` も存在しない"
+    },
+    {
+      "criterion": "クエストとの紐付けは品目側の `quest_id` 1列で表され、品目とクエストの中間テーブルが存在しない",
+      "origin": "issue",
+      "test": "品目とクエストを結ぶ中間テーブルが存在しない"
+    },
+    {
+      "criterion": "ステータスが `見送り` かつ見送り理由が空の行は、INSERT・UPDATE のいずれでも拒否される",
+      "origin": "issue",
+      "test": "`見送り` を理由なしで INSERT すると CHECK 制約で落ちる（23514） ／ 理由が NULL なら見送りへの UPDATE が落ちる（既存） ／ 理由が空白文字だけでも見送れない（既存）"
+    },
+    {
+      "criterion": "街人（`member`）が品目のステータスを `希望` から `買う` へ変更しようとすると拒否される",
+      "origin": "issue",
+      "test": "立場が親方でも `role` が `member` なら承認できない（42501） ／ 登録者本人が自分の希望を承認しようとするとトリガーが拒否する（42501） ／ 街人は他人の品目を直接 UPDATE できない（0 行）"
+    },
+    {
+      "criterion": "管理者・コアメンバーは品目のステータスを `希望` → `買う`、および `見送り`（理由つき）へ変更できる",
+      "origin": "issue",
+      "test": "管理者は購入対象として承認できる ／ コアメンバーも承認できる ／ 理由があれば見送れる"
+    },
+    {
+      "criterion": "取下げは論理削除であり、取下げ理由を伴わない取下げは拒否される",
+      "origin": "issue",
+      "test": "登録者本人は理由を添えて取り下げられる（既存） ／ 取下げ理由が空のまま取下げると CHECK 制約で落ちる（23514）"
+    },
+    {
+      "criterion": "品目の行を物理削除（DELETE）できるロールが存在しない",
+      "origin": "issue",
+      "test": "運営でも DELETE できない（42501・GRANT 自体が無い）"
+    },
+    {
+      "criterion": "ゲスト（`guest`）の登録がサーバサイドで拒否される — 画面を経由しない直接リクエストでも通らない",
+      "origin": "issue",
+      "test": "ゲストの登録はトリガーが拒否する（42501） ／ `canRegister()` はゲストに false を返す ／ 他人名義では登録できない（RLS の WITH CHECK）"
+    },
+    {
+      "criterion": "ゲストは買い物リストを閲覧できる",
+      "origin": "issue",
+      "test": "ゲストでも取下げ前の品目を SELECT できる"
+    },
+    {
+      "criterion": "管理者・コアメンバー・街人は他人が登録した品目に「自分も欲しい」を付けられ、`requesters[]` に自分の会員IDが加わる",
+      "origin": "issue",
+      "test": "他人の品目にも相乗りできる"
+    },
+    {
+      "criterion": "同じ会員が同じ品目へ2回「自分も欲しい」を実行しても `requesters[]` の要素は増えない",
+      "origin": "issue",
+      "test": "同じ会員が2回相乗りしても `requesters` の要素数は増えない"
+    },
+    {
+      "criterion": "ゲストは「自分も欲しい」を実行できない",
+      "origin": "issue",
+      "test": "ゲストは相乗りできない（42501）"
+    },
+    {
+      "criterion": "相乗りの操作で `requesters[]` 以外の列（品名・参考価格等）が書き換わらない",
+      "origin": "issue",
+      "test": "相乗りのあとも品名と参考価格は変わらない"
+    },
+    {
+      "criterion": "登録者本人が、自分が登録した品目を編集・取下げできる",
+      "origin": "issue",
+      "test": "登録者本人は自分の品目の品名を編集できる ／ 登録者本人は理由を添えて取り下げられる（既存）"
+    },
+    {
+      "criterion": "登録時に、未購入の既存品目を品名で部分一致検索した候補が提示される",
+      "origin": "issue",
+      "test": "部分一致で重複候補を拾う（既存） ／ 重複候補が返ると登録フォームが候補一覧を描画する"
+    },
+    {
+      "criterion": "重複候補が提示されても自動でマージされず、そのまま登録すれば別の品目として登録できる",
+      "origin": "issue",
+      "test": "重複を確認したうえで送信すると別の品目として登録される（マージしない）"
+    },
+    {
+      "criterion": "買い物リストの一覧で、各品目のステータス・優先度・希望者数（相乗りを含む）が読める",
+      "origin": "issue",
+      "test": "一覧はステータス・優先度・希望者数を描画する"
+    },
+    {
+      "criterion": "登録が専用画面へ遷移せずモーダル1枚で完結する",
+      "origin": "issue",
+      "test": "登録フォームは `<dialog>` の中にあり、別ページへの遷移リンクを持たない"
+    },
+    {
+      "criterion": "ゲストの画面に登録導線が描画されない",
+      "origin": "issue",
+      "test": "ゲストのページには登録導線が描画されない"
+    },
+    {
+      "criterion": "買い物リストのためにタブを新設していない",
+      "origin": "issue",
+      "test": "街人・ゲストの平置きナビ項目は7件を超えない（v13 §5.9.5）"
+    }
+  ],
+  "acceptanceDerived": false,
+  "updatedAt": "2026-09-22T12:53:19.235Z",
+  "provisional": [
+    {
+      "question": "調査メモが報告した種類A（正本 v13 §5.12.4 vs 派生文書の「立替実費は記録のみ」）を、リスク区分が高であることを理由に完全停止すべきか",
+      "options": [
+        "A. 正本 v13 §5.12.4 を採用し、非ブロックで記録して段取りを作る",
+        "B. `pm-plan`「種類A でも高リスクなら完全に停止する」を字義どおり適用し、blocked=true で止める"
+      ],
+      "chosen": "A（正本優先で進行。`QUESTIONS.md` へ ⚡ で非ブロック記録済み）",
+      "rationale": "この矛盾は未決の論点ではなく、既にオーナーが決着させた論点である（v13 §9 #65③ ／ CONSOLIDATED_DECISIONS.md §21-2 ③、いずれも 2026-09-22 確定。QUESTIONS.md の該当項目も ✅ クローズ）。正本 L23・L2853 の v1.31.0 が「§5.12.4 を『記録のみ』から『精算も記録もしない』へ全面改訂した」と明記しており、食い違っているのは派生文書に残った旧記述の文面のみ。Issue の完了条件も `0030_shopping_list_items.sql` も既に正本側の形になっているため、実装対象は一意に決まる。停止すれば `pm-plan`「既に決まっていることは聞かない」に反し、回答済みの問いを再送することになる。高リスクの根拠（認可・DDL）はこの矛盾とは別の箇所にある。",
+      "specRef": "v13 §5.12.4（L2248-L2271）／ v13 §9 #65③ ／ CONSOLIDATED_DECISIONS.md §21-2 ③",
+      "reversibility": "高い。この判断で実装に加わる差分はゼロ（`advance_*` 列は元から存在しない）。ゲート2 で差し戻せば、段取りをそのまま停止様式へ切り替えられ、失うのは本コメント1件分の作業のみ。ゲート3（マージ前の承認）も従来どおり通る。"
+    }
+  ]
+}
