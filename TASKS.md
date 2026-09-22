@@ -16,6 +16,22 @@
 
 ## バックログ
 
+## [2026-09-22 18:30] dev Supabase が main より11本分古い（`0021`〜`0031` が未適用） — TODO
+
+2026-09-22、WBS `7-2`（伝票管理）の DB 受入テストをローカルで流そうとして判明した。
+`supabase_migrations.schema_migrations` の最新は **`0020`**（＋`0100`・`0101`）であり、
+**main にある `0021`〜`0030` が dev へ当たっていない**（本コミットの `0031` を含めると11本）。
+
+| 影響 | 内容 |
+| --- | --- |
+| 実機の動作確認 | `accommodation_rates`・`reservation_otps`・`eumo_grants`・`import_jobs`・`member_identifiers`・`media_assets`・`shopping_list_items` が **PostgREST から見えない**（`PGRST205`）。宿泊料金・公開予約OTP・Eumo給付・メディア・買い物リストの画面は dev では動かない |
+| ローカルの DB テスト | 手元で `npx jest tests/db` を流すと dev を指すため、未適用の表に触れる試験が落ちる。**CI は影響を受けない**（`supabase start` の新しいローカルスタックへ全migrationを当てるため） |
+
+やること: `supabase link` のうえ `supabase db push --include-all` を流す（`1-1c` と同じ手順）。
+⚠️ **`--include-all` が要る**理由は WBS `1-1` の注記と同じ（既定の `db push` はリモート最新より前の連番を拒否する）。
+⚠️ 適用前に `0029`（ニックネーム必須化・親方会員番号の採番）が dev の既存データで通るかを確認すること。
+
+
 ## [2026-09-22 10:50] 招待（経路B）のコード方式化（WBS `2-1d`） — DONE
 
 オーナー指示（Claudian セッション）で実装。v13 §9 #67 ／ 決定ログ §22-1 のとおり

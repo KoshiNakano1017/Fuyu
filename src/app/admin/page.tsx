@@ -85,8 +85,8 @@ export default async function AdminDashboardPage() {
               </>
             )
           }
-          href="/staff/orders"
-          linkLabel="注文一覧へ"
+          href="/admin/customers"
+          linkLabel="顧客管理へ（伝票編集・精算QR）"
         />
         <SummaryCard
           title="審査待ち"
