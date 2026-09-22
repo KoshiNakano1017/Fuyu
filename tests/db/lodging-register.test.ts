@@ -16,9 +16,9 @@ import { join } from "node:path";
 
 import { describeDb, query, queryRows, runSql, sqlstateOf } from "./helpers/psql";
 import {
+  checkInInsertSql,
   FIXTURE_SQL,
   loginAsSql,
-  STAY_FIXTURE_SQL,
   TEST_AUTH_USERS,
   TEST_CHECK_INS,
   TEST_MEMBERS,
@@ -32,16 +32,28 @@ const CORE = TEST_MEMBERS.core;
 const OYAKATA = TEST_MEMBERS.oyakata;
 
 /**
- * 会員フィクスチャ ＋ 滞在フィクスチャ。
+ * `oyakata` の滞在（`TEST_CHECK_INS.otherStay`）を指す。FK 制約を満たす実在の checkin_id。
  *
- * ⚠️ `0028_lodging_register_check_in_fk.sql` で `checkin_id` に `check_ins` への
- * FK が付いたため、`FIXTURE_SQL` 単体（会員のみ）ではもう INSERT できない。
- * `check_ins` に実在する行を指す必要がある（WBS 3-2 ／ Issue #54 の完了に伴う追随）。
+ * ⚠️ **`selfStay`（`self` の滞在）を指してはならない。** 本ファイルは「`self` 会員を物理削除しても
+ * 名簿行は残る」ことを検証するために `DELETE FROM members WHERE member_id = SELF.memberId` を
+ * 複数回実行する。`checkin_id` が `self` の滞在を指していると、`check_ins.member_id` の FK
+ * （`members` への参照。`ON DELETE` 句なし＝デフォルト RESTRICT）が先に違反し、
+ * 名簿とは無関係な理由（23503）で会員削除そのものが失敗する。`oyakata` はこのファイルで
+ * 一度も物理削除されないため、`otherStay` を指せば名簿の FK 検証と会員削除の両方が両立する。
  */
-const SETUP_SQL = FIXTURE_SQL + "\n" + STAY_FIXTURE_SQL;
+const ANY_CHECK_IN = TEST_CHECK_INS.otherStay.checkinId;
 
-/** `self` の滞在（`TEST_CHECK_INS.selfStay`）を指す。FK 制約を満たす実在の checkin_id。 */
-const ANY_CHECK_IN = TEST_CHECK_INS.selfStay.checkinId;
+/**
+ * 会員フィクスチャ ＋ `otherStay`（`oyakata` の滞在）**だけ**。
+ *
+ * ⚠️ **`STAY_FIXTURE_SQL`（`fixtures.ts` の既定セット）を使ってはならない。** それは
+ * `selfStay`（`self` の滞在）も無条件に投入するため、`checkin_id` の参照先を `otherStay` へ
+ * 変えても `self` は依然として `check_ins` から参照された状態になり、`self` の物理削除が
+ * `check_ins_member_id_fkey` で失敗し続ける（`ANY_CHECK_IN` の参照先とは独立に発生する）。
+ * 本ファイルが必要とするのは FK を満たす実在の `checkin_id` 1件のみであり、
+ * `self` を参照する滞在行を1つも作らないことが要件である。
+ */
+const SETUP_SQL = FIXTURE_SQL + "\n" + checkInInsertSql(TEST_CHECK_INS.otherStay);
 
 const ENTRY_ID = "dddddddd-0000-4000-8000-00000000e001";
 
