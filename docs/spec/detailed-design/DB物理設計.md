@@ -1588,6 +1588,7 @@ SELECT
   COALESCE(
     NULLIF(btrim(m.nickname), ''),
     (CASE WHEN m.member_type = 'ゲスト' THEN 'ゲスト#' ELSE '街人#' END) || m.legacy_member_no,
+    '親方#' || m.oyakata_member_no,   -- ★ 2026-09-22 追加（0029 ／ WBS 2-7）
     (CASE WHEN m.member_type = 'ゲスト' THEN 'ゲスト#' ELSE '街人#' END) || left(m.member_id::text, 8)
   ) AS display_name,
   m.member_type          -- 画面上のバッジ表示用。認可には使わない（v13 §2）
@@ -1601,6 +1602,14 @@ COMMENT ON VIEW v_member_public IS
   '他者向けに露出してよい会員情報はこの3列のみ。氏名・住所・連絡先・残高・XP を絶対に追加しない。'
   'display_name のフォールバック規則は 会員データモデル §5.2c の不可侵ルール（本名へ落とさない）';
 ```
+
+> [!important] フォールバックの**順序**が 2026-09-10 決定そのものである（2026-09-22 追記 ／ `0029`）
+> `nickname` → **街人番号** → **親方会員番号** → `member_id` 先頭8文字 の4段である。
+> 街人番号を親方会員番号より**先**に置くことが、§16-4「両方の番号を持つ会員は常に街人番号で表示する」
+> （＝「親方優先」は不採用）の実装にあたる。**入れ替えてはならない。**
+>
+> 第3段は `0029` で埋まった。それ以前は `legacy_member_no` を持たない純粋な親方衆44名が
+> **意味の無い UUID 断片**で表示される状態だった。検証は `tests/db/member-display-name.test.ts`。
 
 > [!danger] このビューに列を足すときは §5.2c の不可侵ルールを読み直すこと
 > `security_invoker = false` は **`members` の RLS を意図的に迂回する**。
@@ -1712,7 +1721,7 @@ GRANT INSERT ON member_identifiers TO authenticated;   -- UPDATE は与えない
 | **`account_status`** | ⚠️ **`active → withdrawn`（退会）のみ可** | ✅ staff（名寄せ成立・退会処理） | **トリガー** ＋ 列単位 GRANT 除外 |
 | **`member_type`** | 🚫 **禁止** | ✅ staff | **トリガー** ＋ 列単位 GRANT 除外 |
 | **`stay_tickets`／`total_stay_days`／`uii_balance`** | 🚫 **禁止** | 🚫 **禁止**（自他を問わず**誰も直接更新できない**。正本は取引明細／§1-1・v13 §9 #25） | **専用トリガー**（本節④）＋ 列単位 GRANT 除外 |
-| `legacy_member_no`／`oyakata_member_no`／`invite_code` | 🚫 禁止 | 取込・採番処理（`service_role`）のみ | 列単位 GRANT 除外（トリガー対象外） |
+| `legacy_member_no`／`oyakata_member_no`／`invite_code` | 🚫 禁止 | 取込・採番処理（`service_role`）のみ | 列単位 GRANT 除外（トリガー対象外）。**`oyakata_member_no` は `0029`（WBS `2-7`）で実在の列になった**（それまで本表にだけ名前があり列定義が無かった）。採番関数 `next_oyakata_member_no()` は `authenticated` から EXECUTE を剥がしてある |
 | `member_id` | 🚫 禁止（PK。変更する用途が無い） | 🚫 禁止 | **トリガー** |
 | `nickname`／`skills`／`certifications`／`line_joined`／`discord_joined` | ✅ 可 | staff も可 | — |
 
@@ -2236,7 +2245,7 @@ test('ニックネーム未設定の会員の display_name に本名が含まれ
 | ③ | **退会30日後の匿名化の具体仕様が未定義** | v13 §2 が「30日後匿名化」と定めるのみ。`member_profiles_private` の値をダミーへ UPDATE する想定だが、**旅館業法の宿泊者名簿保存義務（3年）と衝突する可能性**がある。どちらが優先するかは法務判断 |
 | ④ | **Realtime（再訪アラート）のペイロード** | [[非機能要件詳細]] §7-3 F-3 の未解決事項。`postgres_changes` は RLS 準拠で配信されるが、**再訪アラートは氏名＋運営メモを含む**。`member_profiles_private` / `member_notes` を購読対象にするか、ID のみ配信して詳細は認可済みAPIで取るかが未決 |
 | ⑤ | **`member_notes.visibility` の値域**（`core_only` のみか、`admin_only` を含む2値か） | 文書間で不一致（§6-2⑤）。実体は Vault 側 `01_schema.sql` にあり本リポジトリから確認できない |
-| ⑥ | **`role` の値域に `custom` を含めるか** | v13 §2 は5値（`custom` あり）、[[会員データモデル_ユーザーテーブル定義]] §5.2 は4値。`custom` の権限内容が未定義のため、**本節のポリシーは `custom` を「`member` 相当（staff ではない）」として扱っている** |
+| ⑥ | ~~**`role` の値域に `custom` を含めるか**~~ → ✅ **解消（2026-09-22 オーナー決定 ／ v13 §9 #66・決定ログ §22-3）** | v13 §2 の5値を採る（`0001` の CHECK は実装済み）。**`custom` は `member`（街人）と同等**であり、**本節のポリシーが採っていた「`member` 相当（staff ではない）」がそのまま正式仕様になった**（実装差分ゼロ）。出資者・VIP はバッジ表示・呼称などの演出で区別し、**認可へ持ち込まない**。⚠️ `custom` へ staff 相当を足すなら v13 §2 の側から改訂すること |
 | ⑦ | **`member_type` の値域**（3値か4値か） | v13 §2 は `親方`/`街人（コア）`/`街人（一般）`/`ゲスト` の4値、会員データモデル §5.2 は3値。認可には使わないため RLS には影響しないが、§6-4 の `display_name` の接頭辞判定が値に依存する |
 | ⑧ | **正本 §8 の「`contact_info` のユニーク制約で二重取込を防ぐ」が成立していない** | §5.3 のユニークは `WHERE is_verified = true` の部分ユニークであり、**移行時は全件 `is_verified = false` のため制約が効かない**。A案とは独立した既存の穴（[[会員データモデル_ユーザーテーブル定義]] §6.5） |
 | ⑨ | **`v_member_public` を `anon` へ開けるか** | 公開予約ページ `/reserve` はログイン不要だが、クエストボードの公開範囲は未定義。現設計は `authenticated` 限定 |
