@@ -3,7 +3,7 @@
   "issue": 147,
   "pr": null,
   "branch": null,
-  "phase": "plan",
+  "phase": "implement",
   "risk": "high",
   "attempts": {
     "infra": 0,
@@ -21,11 +21,88 @@
     "review": 0
   },
   "tokens": {
-    "input": 146,
-    "output": 90792,
-    "costUsd": 8.2827515
+    "input": 206,
+    "output": 159510,
+    "costUsd": 12.975484
   },
-  "testHashes": {},
+  "testHashes": {
+    "e2e/TEST_PLAN.md": "9e1ff3682d6cdff6",
+    "e2e/smoke.spec.ts": "ed6ce8db5e0004a2",
+    "e2e/unauthenticated-access.spec.ts": "21a3ebc8b9acfac3",
+    "tests/acceptance.test.ts": "ba0921981b4630b7",
+    "tests/accommodation-rates.test.ts": "c6fe0752abed4c8e",
+    "tests/ai-client.test.ts": "26b0511e481725da",
+    "tests/ai-env.test.ts": "af2ee601c87cfcce",
+    "tests/auth-guard.test.ts": "d5f5764a1a6cd138",
+    "tests/checkin-ops.test.ts": "01bede9045bf2ad5",
+    "tests/concierge-admin-link.test.ts": "9c74468cb3723c2e",
+    "tests/customer-sort.test.ts": "688da7e20b4f533d",
+    "tests/db-test-infra.test.ts": "b4db59cc79914376",
+    "tests/db/accommodation-rates.test.ts": "4580ed3e6630dc91",
+    "tests/db/check-ins-and-availability.test.ts": "dd5b7f024e5723b1",
+    "tests/db/current-operator-id.test.ts": "82e8173ec61178d7",
+    "tests/db/eumo-self-receipt.test.ts": "f714d3bc89bf1e0b",
+    "tests/db/helpers/fixtures.ts": "a19cb8b08e440a6d",
+    "tests/db/helpers/psql.ts": "d95bcca15e534a0a",
+    "tests/db/lodging-register.test.ts": "30b65e1be2f195fd",
+    "tests/db/login-binding.test.ts": "951155ad26536214",
+    "tests/db/media-assets.test.ts": "7056a46ab127be72",
+    "tests/db/member-display-name.test.ts": "2523551edafc36af",
+    "tests/db/members-guard-trigger.test.ts": "c0675285d9d0be31",
+    "tests/db/members-schema.test.ts": "a8be52aaca0f7994",
+    "tests/db/morning-meetings-rls.test.ts": "d20220c01e6fa90c",
+    "tests/db/order-items-void.test.ts": "2978314ba8257104",
+    "tests/db/oyakata-member-no-and-nickname.test.ts": "27c798c90b1fb10e",
+    "tests/db/quest-review-guard.test.ts": "64707ab63ba3c3a3",
+    "tests/db/quests-guest-visibility.test.ts": "90a7edbc7e331f04",
+    "tests/db/rag-pgvector.test.ts": "35a7033913d7df2a",
+    "tests/db/rls-and-helper-functions.test.ts": "9ac749d11b2c42ad",
+    "tests/db/rls-policies.test.ts": "3748be28b027dcc3",
+    "tests/db/rooms.test.ts": "593113cb58ea14ca",
+    "tests/db/shopping-list-items.test.ts": "e84ecf4454ad60b9",
+    "tests/eumo-grants.test.ts": "78634abea96ac68d",
+    "tests/fixtures-are-synthetic.test.ts": "1175f89a51b8831a",
+    "tests/fixtures/quest-board.ts": "2177f6c4931566c8",
+    "tests/helpers/ai-sources.ts": "b976105b854a38e2",
+    "tests/helpers/concierge-sources.ts": "a3b2ceefd9c779bf",
+    "tests/home-entry.test.ts": "9077e2c7ff02ef55",
+    "tests/invitation-route-b.test.ts": "4b88c22c9dafa615",
+    "tests/lodging-calendar.test.ts": "1225291bb46635a2",
+    "tests/lodging-cancellation.test.ts": "0b007d98e5ede355",
+    "tests/lodging-register.test.ts": "8da422d56bcbdd87",
+    "tests/login-invitation-gate.test.ts": "9739538ce903c5b7",
+    "tests/media-env.test.ts": "342023269f6ec655",
+    "tests/media-exif.test.ts": "5fb355521f9e0529",
+    "tests/media-signed-url.test.ts": "42e219fc5ae67d82",
+    "tests/media-upload-client.test.ts": "d2a9a4b110a729bb",
+    "tests/media-upload-policy.test.ts": "de1e345c465f6fdc",
+    "tests/middleware-resilience.test.ts": "ffd48fd3af959071",
+    "tests/migrations-baseline.test.ts": "cd1b6e29a043b253",
+    "tests/morning-meeting-intake.test.ts": "9256f65a908066c8",
+    "tests/morning-meeting-structuring.test.ts": "98c410024c211ee6",
+    "tests/nickname.test.ts": "4a2293853eb17903",
+    "tests/no-line-rag-bot-integration.test.ts": "78a9bcd933b7ea04",
+    "tests/order-totals.test.ts": "4ab4cfe04b9eae89",
+    "tests/orders-menu.test.ts": "9597bcd5b03c6a07",
+    "tests/quest-application-gate.test.ts": "daf570f863ab6141",
+    "tests/quest-board.test.ts": "e5bfc002c8c4c8b2",
+    "tests/quest-review.test.ts": "1e04017f5b38bb31",
+    "tests/reservation-otp.test.ts": "746960f1c378a1ab",
+    "tests/revisit-alerts.test.ts": "d98b45a310817310",
+    "tests/role-labels.test.ts": "40883f8cad8dcbaa",
+    "tests/role-navigation.test.ts": "cf16b87575989f3a",
+    "tests/room-availability.test.ts": "5f1e319a1a1878da",
+    "tests/serving-status.test.ts": "4b3d762719a30c34",
+    "tests/settlement-qr.test.ts": "191a2fb8db6725b8",
+    "tests/shopping-list.test.ts": "e1bf5282967ab550",
+    "tests/slip-edit.test.ts": "cb9070bb9f9c13d8",
+    "tests/staff-knowledge-page.test.ts": "41e23e6ba5ee51d7",
+    "tests/stay-history.test.ts": "b1af641092cab662",
+    "tests/supabase-env.test.ts": "2e12df77018a4f12",
+    "tests/uii.test.ts": "b5791629644723f4",
+    "tests/unsettled-totals.test.ts": "e90a9b97fa9fb23f",
+    "tests/work-log-report.test.ts": "de6c85fb35ed638c"
+  },
   "specRefs": [
     {
       "ref": "v13 §5.12.1",
@@ -82,131 +159,156 @@
     {
       "criterion": "`public.shopping_list_items` が存在し、v13 §7「★ 買い物リスト」が列挙する項目を列として持つ",
       "origin": "issue",
-      "test": "`shopping_list_items` は v13 §7 が列挙する項目をすべて列として持つ"
+      "basis": "v13 §7 L2601〜2609",
+      "test": "tests/db/shopping-list-schema.test.ts:`shopping_list_items が存在する` ／ `§7 の「%s」に相当する列がある`（24項目）"
     },
     {
       "criterion": "品名だけを与えた INSERT が成功する（品名以外に NOT NULL 制約が無い）",
       "origin": "issue",
-      "test": "品名だけを与えた INSERT が成功する"
+      "basis": "v13 §5.12.1（必須は品名のみ）",
+      "test": "tests/db/shopping-list-schema.test.ts:`品名以外に「既定値も無く NOT NULL」な列が1つも無い` ／ `品名と登録者だけを与えた INSERT が成功する`"
     },
     {
       "criterion": "品名が空文字・空白のみの INSERT は拒否される",
       "origin": "issue",
-      "test": "品名が空白のみの INSERT は CHECK 制約で落ちる（23514）"
+      "basis": "v13 §5.12.1",
+      "test": "tests/db/shopping-list-schema.test.ts:`空文字の品名は拒否される` ／ `空白だけの品名は拒否される`"
     },
     {
       "criterion": "ステータスは `希望`/`買う`/`クエスト化済`/`購入済`/`見送り` の5値のみを受け付け、未指定時の既定が `希望` である",
       "origin": "issue",
-      "test": "5値以外のステータスを入れると CHECK 制約で落ちる（23514） ／ ステータスを指定しない INSERT は `希望` になる"
+      "basis": "v13 §5.12.2・§7",
+      "test": "tests/db/shopping-list-schema.test.ts:`希望 / 買う / 購入済 は受け付ける` ／ `クエスト化済 は紐づくクエストを添えれば受け付ける` ／ `見送り は理由を添えれば受け付ける` ／ `5値以外のステータスは受け付けない` ／ `ステータスを指定しない登録の既定は 希望 である`"
     },
     {
       "criterion": "優先度は `至急`/`通常`/`いつでも` の3値のみを受け付ける",
       "origin": "issue",
-      "test": "3値以外の優先度を入れると CHECK 制約で落ちる（23514）"
+      "basis": "v13 §7・§5.12.1",
+      "test": "tests/db/shopping-list-schema.test.ts:`至急 / 通常 / いつでも は受け付ける` ／ `3値以外の優先度は受け付けない`"
     },
     {
       "criterion": "立替実費に相当する列（`advance_payer_id` / `advance_amount_jpy` / `receipt_media_id` / `advance_settled*`）が存在しない",
       "origin": "issue",
-      "test": "`shopping_list_items` に `advance_` で始まる列も `receipt_media_id` も存在しない"
+      "basis": "v13 §5.12.4・§7 L2605",
+      "test": "tests/db/shopping-list-schema.test.ts:`advance_ で始まる列が1つも無い` ／ `レシートのメディアを持つ列が1つも無い`"
     },
     {
       "criterion": "クエストとの紐付けは品目側の `quest_id` 1列で表され、品目とクエストの中間テーブルが存在しない",
       "origin": "issue",
-      "test": "品目とクエストを結ぶ中間テーブルが存在しない"
+      "basis": "v13 §7 L2608・§5.12.3",
+      "test": "tests/db/shopping-list-schema.test.ts:`quest_id 列がある` ／ `quest_id が quests を参照している` ／ `品目を参照する中間テーブルが1つも無い`"
     },
     {
       "criterion": "ステータスが `見送り` かつ見送り理由が空の行は、INSERT・UPDATE のいずれでも拒否される",
       "origin": "issue",
-      "test": "`見送り` を理由なしで INSERT すると CHECK 制約で落ちる（23514） ／ 理由が NULL なら見送りへの UPDATE が落ちる（既存） ／ 理由が空白文字だけでも見送れない（既存）"
+      "basis": "v13 §5.12.2（見送りは理由の入力を必須）",
+      "test": "tests/db/shopping-list-schema.test.ts:`理由の無い 見送り は INSERT できない` ／ `空白だけの理由を付けた 見送り も INSERT できない` ／ `理由の無い 見送り への UPDATE は通らず、状態が 希望 のまま残る` ／ `空白だけの理由を付けた UPDATE も通らず、状態が 希望 のまま残る`"
     },
     {
       "criterion": "街人（`member`）が品目のステータスを `希望` から `買う` へ変更しようとすると拒否される",
       "origin": "issue",
-      "test": "立場が親方でも `role` が `member` なら承認できない（42501） ／ 登録者本人が自分の希望を承認しようとするとトリガーが拒否する（42501） ／ 街人は他人の品目を直接 UPDATE できない（0 行）"
+      "basis": "v13 §5.12.2・§6 L2361",
+      "test": "tests/db/shopping-list-authz.test.ts:`街人は自分が登録した品目でも 買う へ変更できない` ／ `立場が親方でも role が member なら 買う へ変更できない` ／ `ゲストは 買う へ変更できない`。tests/shopping-list-acceptance.test.ts:`街人は自分が登録した品目でも 買う へ変更できない`"
     },
     {
       "criterion": "管理者・コアメンバーは品目のステータスを `希望` → `買う`、および `見送り`（理由つき）へ変更できる",
       "origin": "issue",
-      "test": "管理者は購入対象として承認できる ／ コアメンバーも承認できる ／ 理由があれば見送れる"
+      "basis": "v13 §5.12.2・§6 L2361",
+      "test": "tests/db/shopping-list-authz.test.ts:`管理者は 希望 から 買う へ変更できる` ／ `コアメンバーは 希望 から 買う へ変更できる` ／ `管理者は理由を添えて 見送り にできる` ／ `コアメンバーも理由を添えて 見送り にできる`。tests/shopping-list-acceptance.test.ts:同名4件"
     },
     {
       "criterion": "取下げは論理削除であり、取下げ理由を伴わない取下げは拒否される",
       "origin": "issue",
-      "test": "登録者本人は理由を添えて取り下げられる（既存） ／ 取下げ理由が空のまま取下げると CHECK 制約で落ちる（23514）"
+      "basis": "v13 §5.12.1（取下げは論理削除・理由を残す）",
+      "test": "tests/db/shopping-list-authz.test.ts:`取り下げても行は消えない（論理削除である）` ／ `理由を伴わない取下げは通らない` ／ `空白だけの理由でも取り下げられない`。tests/shopping-list-acceptance.test.ts:`理由が空なら取り下げられない`"
     },
     {
       "criterion": "品目の行を物理削除（DELETE）できるロールが存在しない",
       "origin": "issue",
-      "test": "運営でも DELETE できない（42501・GRANT 自体が無い）"
+      "basis": "v13 §5.12.1（取下げは論理削除）",
+      "test": "tests/db/shopping-list-authz.test.ts:`管理者 / コアメンバー / 登録者本人 / 他の街人 / ゲスト が DELETE を試みても行が残る`（5件）"
     },
     {
       "criterion": "ゲスト（`guest`）の登録がサーバサイドで拒否される — 画面を経由しない直接リクエストでも通らない",
       "origin": "issue",
-      "test": "ゲストの登録はトリガーが拒否する（42501） ／ `canRegister()` はゲストに false を返す ／ 他人名義では登録できない（RLS の WITH CHECK）"
+      "basis": "v13 §5.12.1・§9 #65②・§5.9.3",
+      "test": "tests/db/shopping-list-authz.test.ts:`ゲストの登録は DB まで届いても保存されない`（許可側 `街人は登録できる`）。tests/shopping-list-screen.test.ts:`登録の Server Action がロールを判定している`。tests/shopping-list-acceptance.test.ts:`ゲストは登録できない`"
     },
     {
       "criterion": "ゲストは買い物リストを閲覧できる",
       "origin": "issue",
-      "test": "ゲストでも取下げ前の品目を SELECT できる"
+      "basis": "v13 §6 L2358（買い物リストの閲覧＝ゲスト 〇）",
+      "test": "tests/db/shopping-list-authz.test.ts:`ゲストからも品目が1件見える`。tests/shopping-list-screen.test.ts:`ゲストは /shopping へ到達できる`"
     },
     {
       "criterion": "管理者・コアメンバー・街人は他人が登録した品目に「自分も欲しい」を付けられ、`requesters[]` に自分の会員IDが加わる",
       "origin": "issue",
-      "test": "他人の品目にも相乗りできる"
+      "basis": "v13 §5.12.1（相乗り）・§6 L2359",
+      "test": "tests/db/shopping-list-authz.test.ts:`管理者は他人の品目に自分も欲しいを付けられる` ／ `コアメンバーは…` ／ `街人は…`"
     },
     {
       "criterion": "同じ会員が同じ品目へ2回「自分も欲しい」を実行しても `requesters[]` の要素は増えない",
       "origin": "issue",
-      "test": "同じ会員が2回相乗りしても `requesters` の要素数は増えない"
+      "basis": "v13 §5.12.1（希望者数が運営の優先順位の根拠）",
+      "test": "tests/db/shopping-list-authz.test.ts:`同じ会員が2回実行しても requesters の要素は増えない`"
     },
     {
       "criterion": "ゲストは「自分も欲しい」を実行できない",
       "origin": "issue",
-      "test": "ゲストは相乗りできない（42501）"
+      "basis": "v13 §6 L2359（相乗り＝ゲスト −）",
+      "test": "tests/db/shopping-list-authz.test.ts:`ゲストは自分も欲しいを付けられない`"
     },
     {
       "criterion": "相乗りの操作で `requesters[]` 以外の列（品名・参考価格等）が書き換わらない",
       "origin": "issue",
-      "test": "相乗りのあとも品名と参考価格は変わらない"
+      "basis": "v13 §5.12.1（相乗りは「自分も欲しい」を付けるだけ）",
+      "test": "tests/db/shopping-list-authz.test.ts:`相乗りの前後で requesters 以外の列がすべて同じである` ／ `相乗りしても品名が変わらない`"
     },
     {
       "criterion": "登録者本人が、自分が登録した品目を編集・取下げできる",
       "origin": "issue",
-      "test": "登録者本人は自分の品目の品名を編集できる ／ 登録者本人は理由を添えて取り下げられる（既存）"
+      "basis": "v13 §5.12.1・§6 L2360（自分が登録した品目の編集・取下げ）",
+      "test": "tests/db/shopping-list-authz.test.ts:`登録者本人の編集は反映される`（拒否側 `他の街人は他人の品目を編集できない` ／ `ゲストは他人の品目を編集できない`） ／ `登録者本人は理由を添えて取り下げられる`"
     },
     {
       "criterion": "登録時に、未購入の既存品目を品名で部分一致検索した候補が提示される",
       "origin": "issue",
-      "test": "部分一致で重複候補を拾う（既存） ／ 重複候補が返ると登録フォームが候補一覧を描画する"
+      "basis": "v13 §5.12.1（重複の扱い）",
+      "test": "tests/shopping-list-acceptance.test.ts:`品名の部分一致で既存の品目を候補に出す` ／ `買う まで進んだ品目も候補に出す` ／ `購入済みの品目は候補に出さない` ／ `取下げ済みの品目は候補に出さない`。tests/shopping-list-screen.test.ts:`登録フォームが重複候補を描画している`"
     },
     {
       "criterion": "重複候補が提示されても自動でマージされず、そのまま登録すれば別の品目として登録できる",
       "origin": "issue",
-      "test": "重複を確認したうえで送信すると別の品目として登録される（マージしない）"
+      "basis": "v13 §5.12.1（自動マージはしない）",
+      "test": "tests/shopping-list-acceptance.test.ts:`候補の検索は既存の品目を書き換えない`。tests/db/shopping-list-schema.test.ts:`同じ品名の品目を2件登録できる` ／ `品名だけの一意索引が無い`"
     },
     {
       "criterion": "買い物リストの一覧で、各品目のステータス・優先度・希望者数（相乗りを含む）が読める",
       "origin": "issue",
-      "test": "一覧はステータス・優先度・希望者数を描画する"
+      "basis": "v13 §5.12.2・§7（ステータス・優先度・requesters[]）",
+      "test": "tests/shopping-list-screen.test.ts:`一覧がステータスを表示している` ／ `一覧が優先度を表示している` ／ `一覧が希望者数を requesters から数えて表示している`"
     },
     {
       "criterion": "登録が専用画面へ遷移せずモーダル1枚で完結する",
       "origin": "issue",
-      "test": "登録フォームは `<dialog>` の中にあり、別ページへの遷移リンクを持たない"
+      "basis": "v13 §5.12.1（入口＝専用画面へ遷移させずモーダル1枚）",
+      "test": "tests/shopping-list-screen.test.ts:`登録専用のページ（/shopping/new）が存在しない` ／ `一覧の画面が登録フォームを同じ画面に描画している` ／ `登録の Server Action が別画面へ遷移させない`"
     },
     {
       "criterion": "ゲストの画面に登録導線が描画されない",
       "origin": "issue",
-      "test": "ゲストのページには登録導線が描画されない"
+      "basis": "v13 §5.12.1（ゲストは登録不可・閲覧のみ）・§5.9.2（DOM から除外）",
+      "test": "tests/shopping-list-screen.test.ts:`一覧の画面が canRegister() で登録導線を出し分けている` ／ `認可判定より前に登録フォームを組み立てていない`"
     },
     {
       "criterion": "買い物リストのためにタブを新設していない",
       "origin": "issue",
-      "test": "街人・ゲストの平置きナビ項目は7件を超えない（v13 §5.9.5）"
+      "basis": "v13 §5.12.1 note・§5.9.5（常時表示するナビ項目は7つまで）",
+      "test": "tests/shopping-list-screen.test.ts:`member の常時表示ナビが7項目を超えない` ／ `guest の常時表示ナビが7項目を超えない`"
     }
   ],
   "acceptanceDerived": false,
-  "updatedAt": "2026-09-22T12:53:19.235Z",
+  "updatedAt": "2026-09-22T13:06:49.550Z",
   "provisional": [
     {
       "question": "調査メモが報告した種類A（正本 v13 §5.12.4 vs 派生文書の「立替実費は記録のみ」）を、リスク区分が高であることを理由に完全停止すべきか",

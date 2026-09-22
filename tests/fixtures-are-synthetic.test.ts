@@ -16,7 +16,11 @@ import { FIXTURE_EMAILS, TEST_MEMBERS } from "./db/helpers/fixtures";
  * フィクスチャ定義の置き場（`tests/` からの相対）。増えたらここへ足す。
  * 走査から漏れたファイルは守られないため、テスト名にパスを出して漏れが見えるようにする。
  */
-const FIXTURE_SOURCE_PATHS = ["db/helpers/fixtures.ts", "fixtures/quest-board.ts"];
+const FIXTURE_SOURCE_PATHS = [
+  "db/helpers/fixtures.ts",
+  "db/helpers/shopping-list.ts",
+  "fixtures/quest-board.ts",
+];
 
 /**
  * 実データの所在。フィクスチャがここを参照していたら、その時点で §7.1 違反である。
