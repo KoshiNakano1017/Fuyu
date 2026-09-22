@@ -15,7 +15,14 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { describeDb, query, queryRows, runSql, sqlstateOf } from "./helpers/psql";
-import { FIXTURE_SQL, loginAsSql, TEST_AUTH_USERS, TEST_MEMBERS } from "./helpers/fixtures";
+import {
+  FIXTURE_SQL,
+  loginAsSql,
+  STAY_FIXTURE_SQL,
+  TEST_AUTH_USERS,
+  TEST_CHECK_INS,
+  TEST_MEMBERS,
+} from "./helpers/fixtures";
 
 const TABLE = "public.lodging_register_entries";
 
@@ -25,11 +32,16 @@ const CORE = TEST_MEMBERS.core;
 const OYAKATA = TEST_MEMBERS.oyakata;
 
 /**
- * `check_ins` は WBS 3-2（Issue #54）の成果物でまだ存在しない。
- * 本タスクは `checkin_id` 列だけを作り、FK は 3-2 側の `ALTER` で後付けする
- * （`0006_rooms_and_assignments.sql` の前例と同じ扱い）。そのため任意の UUID を入れられる。
+ * 会員フィクスチャ ＋ 滞在フィクスチャ。
+ *
+ * ⚠️ `0028_lodging_register_check_in_fk.sql` で `checkin_id` に `check_ins` への
+ * FK が付いたため、`FIXTURE_SQL` 単体（会員のみ）ではもう INSERT できない。
+ * `check_ins` に実在する行を指す必要がある（WBS 3-2 ／ Issue #54 の完了に伴う追随）。
  */
-const ANY_CHECK_IN = "eeeeeeee-0000-4000-8000-00000000d001";
+const SETUP_SQL = FIXTURE_SQL + "\n" + STAY_FIXTURE_SQL;
+
+/** `self` の滞在（`TEST_CHECK_INS.selfStay`）を指す。FK 制約を満たす実在の checkin_id。 */
+const ANY_CHECK_IN = TEST_CHECK_INS.selfStay.checkinId;
 
 const ENTRY_ID = "dddddddd-0000-4000-8000-00000000e001";
 
@@ -183,7 +195,7 @@ describeDb("lodging_register_entries の DDL（完了条件1 ／ DB物理設計 
 
   test("source の既定値が 'checkin' である", () => {
     const source = query(`
-      ${FIXTURE_SQL}
+      ${SETUP_SQL}
       INSERT INTO ${TABLE} (full_name_snapshot, address_snapshot, checked_in_on)
       VALUES ('${SYNTHETIC.fullName}', '${SYNTHETIC.address}', DATE '${CHECKED_IN_ON}');
       SELECT source FROM ${TABLE};
@@ -193,7 +205,7 @@ describeDb("lodging_register_entries の DDL（完了条件1 ／ DB物理設計 
 
   test("is_representative の既定値が true である（false = 同伴者）", () => {
     const isRepresentative = query(`
-      ${FIXTURE_SQL}
+      ${SETUP_SQL}
       INSERT INTO ${TABLE} (full_name_snapshot, address_snapshot, checked_in_on)
       VALUES ('${SYNTHETIC.fullName}', '${SYNTHETIC.address}', DATE '${CHECKED_IN_ON}');
       SELECT is_representative::text FROM ${TABLE};
@@ -204,7 +216,7 @@ describeDb("lodging_register_entries の DDL（完了条件1 ／ DB物理設計 
   test("同伴者の行（is_representative = false）を作れる（§3-13②）", () => {
     // `check_ins` は人数しか持たないため、同伴者ひとりひとりの記録先は本表しかない（§3-13①）
     const companions = query(`
-      ${FIXTURE_SQL}
+      ${SETUP_SQL}
       ${insertEntrySql({ entryId: ENTRY_ID, isRepresentative: true })}
       ${insertEntrySql({
         entryId: "dddddddd-0000-4000-8000-00000000e002",
@@ -262,7 +274,7 @@ describeDb("lodging_register_entries の DDL（完了条件1 ／ DB物理設計 
 describeDb("chk_stay_period（完了条件1 ／ §3-13②）", () => {
   test("チェックアウト日がチェックイン日より前の行は 23514 で拒否される", () => {
     const sqlstate = sqlstateOf(`
-      ${FIXTURE_SQL}
+      ${SETUP_SQL}
       ${insertEntrySql({ checkedInOn: CHECKED_IN_ON, checkedOutOn: "2026-09-18" })}
     `);
     expect(sqlstate).toBe("23514");
@@ -270,14 +282,14 @@ describeDb("chk_stay_period（完了条件1 ／ §3-13②）", () => {
 
   test("チェックアウト日とチェックイン日が同日の行は INSERT できる（境界値：同日は許可）", () => {
     const result = runSql(`
-      ${FIXTURE_SQL}
+      ${SETUP_SQL}
       ${insertEntrySql({ checkedInOn: CHECKED_IN_ON, checkedOutOn: CHECKED_IN_ON })}
     `);
     expect(result.ok).toBe(true);
   });
 
   test("チェックアウト日が NULL の行（滞在中）は INSERT できる", () => {
-    const result = runSql(`${FIXTURE_SQL}\n${insertEntrySql({ checkedOutOn: null })}`);
+    const result = runSql(`${SETUP_SQL}\n${insertEntrySql({ checkedOutOn: null })}`);
     expect(result.ok).toBe(true);
   });
 });
@@ -285,7 +297,7 @@ describeDb("chk_stay_period（完了条件1 ／ §3-13②）", () => {
 describeDb("source の値域（完了条件1 ／ v13 §7 の4値）", () => {
   test("checkin / web_public / staff_manual / migration の4値は INSERT できる", () => {
     const result = runSql(`
-      ${FIXTURE_SQL}
+      ${SETUP_SQL}
       INSERT INTO ${TABLE} (full_name_snapshot, address_snapshot, checked_in_on, source)
       SELECT '${SYNTHETIC.fullName}', '${SYNTHETIC.address}', DATE '${CHECKED_IN_ON}', source_value
       FROM   unnest(ARRAY['${SOURCES.join("', '")}']) AS source_value;
@@ -295,7 +307,7 @@ describeDb("source の値域（完了条件1 ／ v13 §7 の4値）", () => {
 
   test("4値以外の source は 23514 で拒否される", () => {
     const sqlstate = sqlstateOf(`
-      ${FIXTURE_SQL}
+      ${SETUP_SQL}
       ${insertEntrySql({ source: "self_report" })}
     `);
     expect(sqlstate).toBe("23514");
@@ -345,7 +357,7 @@ describeDb("会員が消えても名簿は残る（完了条件2 ／ v13 §7 ・
 
   test("会員行を物理削除しても名簿行は消えない", () => {
     const remaining = query(`
-      ${FIXTURE_SQL}
+      ${SETUP_SQL}
       ${insertEntrySql({ memberId: SELF.memberId })}
       DELETE FROM public.members WHERE member_id = '${SELF.memberId}';
       SELECT count(*) FROM ${TABLE} WHERE entry_id = '${ENTRY_ID}';
@@ -355,7 +367,7 @@ describeDb("会員が消えても名簿は残る（完了条件2 ／ v13 §7 ・
 
   test("会員行を物理削除しても氏名スナップショットが残る", () => {
     const fullName = query(`
-      ${FIXTURE_SQL}
+      ${SETUP_SQL}
       ${insertEntrySql({ memberId: SELF.memberId })}
       DELETE FROM public.members WHERE member_id = '${SELF.memberId}';
       SELECT full_name_snapshot FROM ${TABLE} WHERE entry_id = '${ENTRY_ID}';
@@ -365,7 +377,7 @@ describeDb("会員が消えても名簿は残る（完了条件2 ／ v13 §7 ・
 
   test("会員行を物理削除しても住所スナップショットが残る", () => {
     const address = query(`
-      ${FIXTURE_SQL}
+      ${SETUP_SQL}
       ${insertEntrySql({ memberId: SELF.memberId })}
       DELETE FROM public.members WHERE member_id = '${SELF.memberId}';
       SELECT address_snapshot FROM ${TABLE} WHERE entry_id = '${ENTRY_ID}';
@@ -375,7 +387,7 @@ describeDb("会員が消えても名簿は残る（完了条件2 ／ v13 §7 ・
 
   test("会員行を物理削除すると member_id だけが NULL になる", () => {
     const memberIdIsNull = query(`
-      ${FIXTURE_SQL}
+      ${SETUP_SQL}
       ${insertEntrySql({ memberId: SELF.memberId })}
       DELETE FROM public.members WHERE member_id = '${SELF.memberId}';
       SELECT (member_id IS NULL)::text FROM ${TABLE} WHERE entry_id = '${ENTRY_ID}';
@@ -385,7 +397,7 @@ describeDb("会員が消えても名簿は残る（完了条件2 ／ v13 §7 ・
 
   test("記録者（recorded_by）の会員行を物理削除しても名簿行は残る", () => {
     const remaining = query(`
-      ${FIXTURE_SQL}
+      ${SETUP_SQL}
       ${insertEntrySql({ recordedBy: ADMIN.memberId })}
       DELETE FROM public.members WHERE member_id = '${ADMIN.memberId}';
       SELECT count(*) FROM ${TABLE} WHERE entry_id = '${ENTRY_ID}' AND recorded_by IS NULL;
@@ -396,7 +408,7 @@ describeDb("会員が消えても名簿は残る（完了条件2 ／ v13 §7 ・
   test("★ 会員マスタの住所を更新しても address_snapshot は変わらない（遡及改変の禁止）", () => {
     // ここが `member_profiles_private` への参照だと、引っ越した瞬間に3年前の名簿の住所まで変わる（v13 §7）
     const address = query(`
-      ${FIXTURE_SQL}
+      ${SETUP_SQL}
       INSERT INTO public.member_profiles_private (member_id, full_name, address)
       VALUES ('${SELF.memberId}', '${SYNTHETIC.fullName}', '${SYNTHETIC.address}');
       ${insertEntrySql({ memberId: SELF.memberId, address: SYNTHETIC.address })}
@@ -435,7 +447,7 @@ describeDb("retention_until_on（完了条件3 ／ §3-13②④ ・ v13 §7 の3
 
   test("滞在中（checked_out_on が NULL）はチェックイン日の3年後になる", () => {
     const retention = query(`
-      ${FIXTURE_SQL}
+      ${SETUP_SQL}
       ${insertEntrySql({ checkedInOn: CHECKED_IN_ON, checkedOutOn: null })}
       SELECT retention_until_on::text FROM ${TABLE} WHERE entry_id = '${ENTRY_ID}';
     `);
@@ -444,7 +456,7 @@ describeDb("retention_until_on（完了条件3 ／ §3-13②④ ・ v13 §7 の3
 
   test("チェックアウト済みならチェックアウト日の3年後になる", () => {
     const retention = query(`
-      ${FIXTURE_SQL}
+      ${SETUP_SQL}
       ${insertEntrySql({ checkedInOn: CHECKED_IN_ON, checkedOutOn: CHECKED_OUT_ON })}
       SELECT retention_until_on::text FROM ${TABLE} WHERE entry_id = '${ENTRY_ID}';
     `);
@@ -453,7 +465,7 @@ describeDb("retention_until_on（完了条件3 ／ §3-13②④ ・ v13 §7 の3
 
   test("チェックアウト日を後から入れると保存期限が追随する", () => {
     const retention = query(`
-      ${FIXTURE_SQL}
+      ${SETUP_SQL}
       ${insertEntrySql({ checkedInOn: CHECKED_IN_ON, checkedOutOn: null })}
       UPDATE ${TABLE} SET checked_out_on = DATE '${CHECKED_OUT_ON}' WHERE entry_id = '${ENTRY_ID}';
       SELECT retention_until_on::text FROM ${TABLE} WHERE entry_id = '${ENTRY_ID}';
@@ -464,7 +476,7 @@ describeDb("retention_until_on（完了条件3 ／ §3-13②④ ・ v13 §7 の3
   test("INSERT で retention_until_on を直接指定できない（428C9）", () => {
     // 保存期限を短く詐称できると、3年保存義務が書き込み側の裁量になる
     const sqlstate = sqlstateOf(`
-      ${FIXTURE_SQL}
+      ${SETUP_SQL}
       INSERT INTO ${TABLE}
         (full_name_snapshot, address_snapshot, checked_in_on, retention_until_on)
       VALUES ('${SYNTHETIC.fullName}', '${SYNTHETIC.address}',
@@ -475,7 +487,7 @@ describeDb("retention_until_on（完了条件3 ／ §3-13②④ ・ v13 §7 の3
 
   test("UPDATE で retention_until_on を直接書き換えられない（428C9）", () => {
     const sqlstate = sqlstateOf(`
-      ${FIXTURE_SQL}
+      ${SETUP_SQL}
       ${insertEntrySql()}
       UPDATE ${TABLE} SET retention_until_on = DATE '2026-10-01' WHERE entry_id = '${ENTRY_ID}';
     `);
@@ -514,7 +526,7 @@ describeDb("RLS の有効化（完了条件4 ／ §6-7 ・ §1-8）", () => {
 describeDb("RLS：SELECT は本人の行 ＋ admin/core_member（完了条件4 ／ §6-1 表 No.32）", () => {
   test("本人は自分の名簿行を SELECT できる", () => {
     const rows = query(`
-      ${FIXTURE_SQL}
+      ${SETUP_SQL}
       ${insertEntrySql({ memberId: SELF.memberId })}
       ${loginAs(TEST_AUTH_USERS.self.id)}
       SELECT count(*) FROM ${TABLE};
@@ -525,7 +537,7 @@ describeDb("RLS：SELECT は本人の行 ＋ admin/core_member（完了条件4 �
   test("一般会員は他人の名簿行を1行も取得できない（エラーではなく0行）", () => {
     // エラーで返すと「その人が泊まったこと」自体が漏れる。0行が正しい（§6-8⑤）
     const rows = query(`
-      ${FIXTURE_SQL}
+      ${SETUP_SQL}
       ${insertEntrySql({ memberId: ADMIN.memberId })}
       ${loginAs(TEST_AUTH_USERS.self.id)}
       SELECT count(*) FROM ${TABLE};
@@ -535,7 +547,7 @@ describeDb("RLS：SELECT は本人の行 ＋ admin/core_member（完了条件4 �
 
   test("admin は他人の名簿行を SELECT できる（法定出力のため）", () => {
     const rows = query(`
-      ${FIXTURE_SQL}
+      ${SETUP_SQL}
       ${insertEntrySql({ memberId: SELF.memberId })}
       ${loginAs(TEST_AUTH_USERS.admin.id)}
       SELECT count(*) FROM ${TABLE};
@@ -545,7 +557,7 @@ describeDb("RLS：SELECT は本人の行 ＋ admin/core_member（完了条件4 �
 
   test("core_member は他人の名簿行を SELECT できる", () => {
     const rows = query(`
-      ${FIXTURE_SQL}
+      ${SETUP_SQL}
       ${insertEntrySql({ memberId: SELF.memberId })}
       ${loginAs(TEST_AUTH_USERS.core.id)}
       SELECT count(*) FROM ${TABLE};
@@ -556,7 +568,7 @@ describeDb("RLS：SELECT は本人の行 ＋ admin/core_member（完了条件4 �
   test("★ member_type が親方の一般会員でも他人の名簿行は1行も取得できない（v13 §2）", () => {
     // 立場（member_type）ではなく権限（role）で判定していることの反証テスト
     const rows = query(`
-      ${FIXTURE_SQL}
+      ${SETUP_SQL}
       ${insertEntrySql({ memberId: SELF.memberId })}
       ${loginAs(TEST_AUTH_USERS.oyakata.id)}
       SELECT count(*) FROM ${TABLE};
@@ -567,7 +579,7 @@ describeDb("RLS：SELECT は本人の行 ＋ admin/core_member（完了条件4 �
   test("member_id が NULL の行（退会者・同伴者）は一般会員から見えない", () => {
     // 「持ち主のいない行」が誰にでも見えると、氏名・住所が全会員へ開く
     const rows = query(`
-      ${FIXTURE_SQL}
+      ${SETUP_SQL}
       ${insertEntrySql({ memberId: null })}
       ${loginAs(TEST_AUTH_USERS.self.id)}
       SELECT count(*) FROM ${TABLE};
@@ -579,7 +591,7 @@ describeDb("RLS：SELECT は本人の行 ＋ admin/core_member（完了条件4 �
 describeDb("RLS：書き込みは staff のみ（完了条件4 ／ §6-1 表 No.32）", () => {
   test("admin は名簿行を INSERT できる", () => {
     const rows = query(`
-      ${FIXTURE_SQL}
+      ${SETUP_SQL}
       ${loginAs(TEST_AUTH_USERS.admin.id)}
       ${insertEntrySql({ memberId: SELF.memberId })}
       SELECT count(*) FROM ${TABLE} WHERE entry_id = '${ENTRY_ID}';
@@ -589,7 +601,7 @@ describeDb("RLS：書き込みは staff のみ（完了条件4 ／ §6-1 表 No.
 
   test("core_member は名簿行を INSERT できる（現地チェックインの記録者）", () => {
     const rows = query(`
-      ${FIXTURE_SQL}
+      ${SETUP_SQL}
       ${loginAs(TEST_AUTH_USERS.core.id)}
       ${insertEntrySql({ memberId: SELF.memberId, recordedBy: CORE.memberId })}
       SELECT count(*) FROM ${TABLE} WHERE entry_id = '${ENTRY_ID}';
@@ -600,7 +612,7 @@ describeDb("RLS：書き込みは staff のみ（完了条件4 ／ §6-1 表 No.
   test("一般会員は自分の名簿行であっても INSERT できない（42501）", () => {
     // 自己申告で名簿を作れると、法定名簿が「本人の言い値」になる（書き込みは staff ／ §3-13⑤）
     const sqlstate = sqlstateOf(`
-      ${FIXTURE_SQL}
+      ${SETUP_SQL}
       ${loginAs(TEST_AUTH_USERS.self.id)}
       ${insertEntrySql({ memberId: SELF.memberId, recordedBy: null })}
     `);
@@ -609,7 +621,7 @@ describeDb("RLS：書き込みは staff のみ（完了条件4 ／ §6-1 表 No.
 
   test("member_type が親方の一般会員も名簿行を INSERT できない（42501）", () => {
     const sqlstate = sqlstateOf(`
-      ${FIXTURE_SQL}
+      ${SETUP_SQL}
       ${loginAs(TEST_AUTH_USERS.oyakata.id)}
       ${insertEntrySql({ memberId: OYAKATA.memberId, recordedBy: null })}
     `);
@@ -618,7 +630,7 @@ describeDb("RLS：書き込みは staff のみ（完了条件4 ／ §6-1 表 No.
 
   test("admin は名簿行を UPDATE できる（誤記の訂正）", () => {
     const nextDestination = query(`
-      ${FIXTURE_SQL}
+      ${SETUP_SQL}
       ${insertEntrySql({ memberId: SELF.memberId })}
       ${loginAs(TEST_AUTH_USERS.admin.id)}
       UPDATE ${TABLE} SET next_destination = 'テスト県訂正市' WHERE entry_id = '${ENTRY_ID}';
@@ -629,7 +641,7 @@ describeDb("RLS：書き込みは staff のみ（完了条件4 ／ §6-1 表 No.
 
   test("本人は自分の名簿行を UPDATE しても更新行数が0になる（法定記録の自己改変を許さない）", () => {
     const affected = query(`
-      ${FIXTURE_SQL}
+      ${SETUP_SQL}
       ${insertEntrySql({ memberId: SELF.memberId })}
       ${loginAs(TEST_AUTH_USERS.self.id)}
       WITH changed AS (
@@ -646,7 +658,7 @@ describeDb("RLS：DELETE は全拒否（完了条件4 ／ §1-3 ・ §3-13③）
   test("admin でも名簿行を DELETE できない（42501）", () => {
     // 3年経過分の削除は `retention_until_on < current_date` の定期ジョブ（service_role）だけが行う
     const sqlstate = sqlstateOf(`
-      ${FIXTURE_SQL}
+      ${SETUP_SQL}
       ${insertEntrySql({ memberId: SELF.memberId })}
       ${loginAs(TEST_AUTH_USERS.admin.id)}
       DELETE FROM ${TABLE} WHERE entry_id = '${ENTRY_ID}';
@@ -656,7 +668,7 @@ describeDb("RLS：DELETE は全拒否（完了条件4 ／ §1-3 ・ §3-13③）
 
   test("一般会員も名簿行を DELETE できない（42501）", () => {
     const sqlstate = sqlstateOf(`
-      ${FIXTURE_SQL}
+      ${SETUP_SQL}
       ${insertEntrySql({ memberId: SELF.memberId })}
       ${loginAs(TEST_AUTH_USERS.self.id)}
       DELETE FROM ${TABLE} WHERE entry_id = '${ENTRY_ID}';
@@ -668,7 +680,7 @@ describeDb("RLS：DELETE は全拒否（完了条件4 ／ §1-3 ・ §3-13③）
 describeDb("anon の権限ゼロ化（完了条件4 ／ §6-6①）", () => {
   test("anon は名簿を SELECT できない（0行ではなく権限エラー）", () => {
     const sqlstate = sqlstateOf(`
-      ${FIXTURE_SQL}
+      ${SETUP_SQL}
       SET ROLE anon;
       SELECT count(*) FROM ${TABLE};
     `);
@@ -677,7 +689,7 @@ describeDb("anon の権限ゼロ化（完了条件4 ／ §6-6①）", () => {
 
   test("anon は名簿へ INSERT できない", () => {
     const sqlstate = sqlstateOf(`
-      ${FIXTURE_SQL}
+      ${SETUP_SQL}
       SET ROLE anon;
       ${insertEntrySql({ memberId: null, recordedBy: null })}
     `);
