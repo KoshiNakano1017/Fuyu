@@ -1,13 +1,22 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 
 import { registerShoppingItemAction, type RegisterFormState } from "./actions";
 
 const INITIAL: RegisterFormState = { status: "idle" };
 
 /**
- * 「ほしいもの」の登録フォーム（v13 §5.12.1）。
+ * 「ほしいもの」の登録（v13 §5.12.1）。**クイックアクション1つとモーダル1枚**で構成する。
+ *
+ * ## なぜインラインのフォームではなくモーダルなのか
+ *
+ * §5.12.1「入口」は「**専用画面へ遷移させず、モーダル1枚で登録が完結する**」と定めている
+ * （画面設計 A13 も「A2 ホームからの登録モーダル ＋ 一覧」）。フォームを一覧の上に
+ * 開いたまま置くと、**一覧を見に来ただけの人にも常時フォームが居座る**うえ、
+ * 「登録は画面のどこかにある入力欄」になり、仕様が意図した「🛒 ほしいものを登録」という
+ * 1つの入口が消える。ここをボタン＋`<dialog>` にしておけば、置き場所が
+ * 一覧でもダッシュボード（A2／C1）でも**同じ1枚のモーダル**を使い回せる。
  *
  * ## 必須は品名だけ
  *
@@ -34,8 +43,86 @@ export function ShoppingRegisterForm() {
   /** 重複「候補」。自動でまとめず、相乗りか「それでも登録する」かを利用者に選ばせる。 */
   const duplicateCandidates = state.duplicates ?? [];
 
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const [isOpen, setIsOpen] = useState(false);
+
+  // `open` 属性を直接書くと背景が操作できてしまう（ブラウザの非モーダル表示になる）。
+  // 「モーダル1枚で完結する」ためには `showModal()` で開く必要がある。
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (dialog === null) {
+      return;
+    }
+    if (isOpen && !dialog.open) {
+      dialog.showModal();
+    } else if (!isOpen && dialog.open) {
+      dialog.close();
+    }
+  }, [isOpen]);
+
+  // 登録できたときだけ閉じる。重複候補・エラーは**開いたまま**でないと、
+  // 「それでも登録する」も入力の直しもモーダルの外からは行えない。
+  // 閉じるのは `close()` だけにして、状態の更新は `onClose`（イベント）側へ寄せる。
+  useEffect(() => {
+    if (state.status === "saved") {
+      dialogRef.current?.close();
+    }
+  }, [state.status]);
+
   return (
-    <form action={submit} className="flex flex-col gap-3 rounded border border-neutral-300 p-4">
+    <div className="flex flex-col gap-2">
+      <button
+        type="button"
+        onClick={() => setIsOpen(true)}
+        className="self-start rounded bg-neutral-900 px-4 py-2 text-white"
+      >
+        🛒 ほしいものを登録
+      </button>
+
+      {/* 登録できた旨はモーダルを閉じた後に残す。閉じた瞬間に消えると、保存できたか分からない。 */}
+      {state.status === "saved" && state.message && <p className="text-sm text-green-700">{state.message}</p>}
+
+      <dialog
+        ref={dialogRef}
+        aria-label="ほしいものを登録"
+        onClose={() => setIsOpen(false)}
+        className="w-full max-w-xl rounded border border-neutral-300 p-0 backdrop:bg-neutral-900/40"
+      >
+        <div className="flex items-center justify-between gap-2 border-b border-neutral-200 px-4 py-3">
+          <h2 className="text-lg font-bold">ほしいものを登録</h2>
+          <button type="button" onClick={() => setIsOpen(false)} className="rounded px-2 py-1 text-sm">
+            閉じる
+          </button>
+        </div>
+
+        <FormBody
+          submit={submit}
+          state={state}
+          duplicated={duplicated}
+          values={values}
+          duplicateCandidates={duplicateCandidates}
+        />
+      </dialog>
+    </div>
+  );
+}
+
+/** モーダルの中身。入力欄の並びは §5.12.1「入力項目」の順に合わせてある。 */
+function FormBody({
+  submit,
+  state,
+  duplicated,
+  values,
+  duplicateCandidates,
+}: {
+  submit: (formData: FormData) => void;
+  state: RegisterFormState;
+  duplicated: boolean;
+  values: RegisterFormState["values"];
+  duplicateCandidates: NonNullable<RegisterFormState["duplicates"]>;
+}) {
+  return (
+    <form action={submit} className="flex flex-col gap-3 p-4">
       <label className="flex flex-col gap-1 text-sm font-medium">
         ほしいもの（品名）
         <input
@@ -154,9 +241,7 @@ export function ShoppingRegisterForm() {
         {duplicated ? "それでも登録する" : "ほしいものを登録する"}
       </button>
 
-      {state.message && state.status !== "duplicate" ? (
-        <p className={state.status === "error" ? "text-sm text-red-700" : "text-sm text-green-700"}>{state.message}</p>
-      ) : null}
+      {state.status === "error" && state.message ? <p className="text-sm text-red-700">{state.message}</p> : null}
     </form>
   );
 }
