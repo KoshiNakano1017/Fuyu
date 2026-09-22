@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useActionState } from "react";
 
 import { SUBMIT_IDLE, type SubmitState } from "@/lib/forms/submit-state";
+import { CANCEL_REASON_TYPES } from "@/lib/lodging/cancellation";
 // 型だけを取る（`fetch-checkin-board.ts` はサーバ専用モジュール）。
 import type { CheckInBoardRow } from "@/lib/lodging/fetch-checkin-board";
 
@@ -35,10 +36,12 @@ export function CheckInBoard({
   rows,
   checkIn,
   checkOut,
+  cancelStay,
 }: {
   rows: readonly CheckInBoardRow[];
   checkIn: CheckInAction;
   checkOut: CheckInAction;
+  cancelStay: CheckInAction;
 }) {
   if (rows.length === 0) {
     return <p className="text-sm text-neutral-600">本日の到着・滞在はありません。</p>;
@@ -47,7 +50,13 @@ export function CheckInBoard({
   return (
     <ul className="flex flex-col gap-2">
       {rows.map((row) => (
-        <CheckInRow key={row.checkinId} row={row} checkIn={checkIn} checkOut={checkOut} />
+        <CheckInRow
+          key={row.checkinId}
+          row={row}
+          checkIn={checkIn}
+          checkOut={checkOut}
+          cancelStay={cancelStay}
+        />
       ))}
     </ul>
   );
@@ -57,13 +66,16 @@ function CheckInRow({
   row,
   checkIn,
   checkOut,
+  cancelStay,
 }: {
   row: CheckInBoardRow;
   checkIn: CheckInAction;
   checkOut: CheckInAction;
+  cancelStay: CheckInAction;
 }) {
   const [checkInState, submitCheckIn, checkInPending] = useActionState(checkIn, SUBMIT_IDLE);
   const [checkOutState, submitCheckOut, checkOutPending] = useActionState(checkOut, SUBMIT_IDLE);
+  const [cancelState, submitCancel, cancelPending] = useActionState(cancelStay, SUBMIT_IDLE);
 
   const canCheckIn = row.status === "pre_registered" || row.status === "confirmed";
   const canCheckOut = row.status === "staying";
@@ -121,8 +133,54 @@ function CheckInRow({
         )}
       </div>
 
+      {/*
+        キャンセル・ノーショー（WBS 3-3 ／ v13 §5.2.2）。**入館前の予約にだけ**出す。
+        途中退去は「退館」であってキャンセルではない（キャンセルにすると滞在の記録が
+        通算来訪回数・宿泊履歴から抜け落ちる）。
+      */}
+      {canCheckIn ? (
+        <form action={submitCancel} className="mt-2 flex flex-wrap items-end gap-2">
+          <input type="hidden" name="checkinId" value={row.checkinId} />
+          <label className="flex flex-col gap-1 text-xs">
+            キャンセル種別
+            <select
+              name="reasonType"
+              required
+              defaultValue=""
+              className="rounded border border-neutral-300 px-2 py-1"
+            >
+              <option value="" disabled>
+                選んでください
+              </option>
+              {CANCEL_REASON_TYPES.map((reasonType) => (
+                <option key={reasonType} value={reasonType}>
+                  {reasonType}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-xs">
+            理由（必須）
+            <input
+              type="text"
+              name="reason"
+              required
+              className="rounded border border-neutral-300 px-2 py-1"
+            />
+          </label>
+          <button
+            type="submit"
+            disabled={cancelPending}
+            className="rounded border border-red-400 px-3 py-1.5 text-xs text-red-700 disabled:opacity-50"
+          >
+            {cancelPending ? "処理しています…" : "キャンセル／ノーショーにする"}
+          </button>
+        </form>
+      ) : null}
+
       <Message state={checkInState} />
       <Message state={checkOutState} />
+      <Message state={cancelState} />
     </li>
   );
 }

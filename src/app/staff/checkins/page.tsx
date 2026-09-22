@@ -3,7 +3,7 @@ import { CheckInBoard } from "@/components/lodging/CheckInBoard";
 import { AccessDeniedError, requireStaff } from "@/lib/auth/guard";
 import { fetchCheckInBoard } from "@/lib/lodging/fetch-checkin-board";
 
-import { checkInAction, checkOutAction } from "./actions";
+import { cancelStayAction, checkInAction, checkOutAction } from "./actions";
 
 /**
  * チェックイン／チェックアウト（画面ID A1 ／ WBS 3-2 ／ v13 §5.2.2）。運営専用。
@@ -50,7 +50,12 @@ export default async function StaffCheckInsPage() {
         チェックインを確定すると、<strong>初回来訪の街人にはキャッシュバックの発行依頼が自動で起票</strong>
         されます（v13 §5.10.8）。
       </p>
-      <CheckInBoard rows={rows} checkIn={checkInAction} checkOut={checkOutAction} />
+      <CheckInBoard
+        rows={rows}
+        checkIn={checkInAction}
+        checkOut={checkOutAction}
+        cancelStay={cancelStayAction}
+      />
     </main>
   );
 }

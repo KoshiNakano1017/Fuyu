@@ -12,6 +12,7 @@ import {
   insertGrant,
 } from "@/lib/eumo/store";
 import type { SubmitState } from "@/lib/forms/submit-state";
+import { cancelStay } from "@/lib/lodging/cancellation";
 import { decideCheckIn, decideCheckOut } from "@/lib/lodging/checkin-ops";
 import { fetchCheckInStatus, updateCheckInStatus } from "@/lib/lodging/fetch-checkin-board";
 
@@ -159,4 +160,64 @@ async function draftFirstVisitCashback(memberId: string): Promise<string> {
   return saved
     ? `初回来訪のため、キャッシュバック ${judgement.amountUii} Uii を発行依頼として起票しました。`
     : "⚠️ 初回来訪キャッシュバックの起票に失敗しました。給付一覧から手動で起票してください。";
+}
+
+/**
+ * 予約のキャンセル／ノーショー（WBS 3-3 ／ v13 §5.2.2）。
+ *
+ * 処理の本体は `cancelStay()` にある（`check_ins` の論理削除 ＋ 部屋の解放を必ず一緒にやる）。
+ * ここは**認可と入力の受け渡しだけ**を行う。
+ *
+ * ⚠️ **滞在中の予約も取り消せる形にはしていない。** 途中退去は「退館」であって
+ * キャンセルではなく、キャンセルにすると滞在の記録そのものが消えて
+ * 通算来訪回数・宿泊履歴（§5.6.8）から抜け落ちる。
+ */
+export async function cancelStayAction(
+  _prev: SubmitState,
+  formData: FormData,
+): Promise<SubmitState> {
+  const viewer = await readViewer();
+  if (!viewer.signedIn || (viewer.role !== "admin" && viewer.role !== "core_member")) {
+    return fail("not_staff");
+  }
+
+  const checkinId = String(formData.get("checkinId") ?? "").trim();
+  const current = await fetchCheckInStatus(checkinId);
+  if (current === null) {
+    return fail("not_found");
+  }
+  if (current.status === "staying" || current.status === "checked_out") {
+    return {
+      status: "error",
+      message: "入館済みの滞在は取り消せません。途中退去はチェックアウトで記録してください。",
+    };
+  }
+
+  const result = await cancelStay({
+    checkinId,
+    reasonType: String(formData.get("reasonType") ?? ""),
+    reason: String(formData.get("reason") ?? ""),
+    cancelledByMemberId: viewer.memberId,
+  });
+
+  if (!result.ok) {
+    const message: Record<string, string> = {
+      blank_reason: "キャンセルの理由を入力してください（v13 §5.2.2）。",
+      invalid_reason_type: "キャンセル種別を選んでください。",
+      already_cancelled: "この予約は既にキャンセル済みです。",
+      denied: MESSAGE.not_staff,
+      failed: MESSAGE.failed,
+    };
+    return { status: "error", message: message[result.reason] ?? MESSAGE.failed };
+  }
+
+  revalidatePath("/staff/checkins");
+  revalidatePath("/staff/calendar");
+  return {
+    status: "done",
+    message:
+      result.releasedRoomAssignmentCount === 0
+        ? "キャンセルとして記録しました。"
+        : `キャンセルとして記録し、部屋 ${result.releasedRoomAssignmentCount} 件を空き枠へ戻しました。`,
+  };
 }
