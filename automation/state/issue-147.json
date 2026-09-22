@@ -21,9 +21,9 @@
     "review": 0
   },
   "tokens": {
-    "input": 1756,
-    "output": 1151449,
-    "costUsd": 123.27669400000002
+    "input": 1938,
+    "output": 1257849,
+    "costUsd": 135.39439450000003
   },
   "testHashes": {
     "e2e/TEST_PLAN.md": "9e1ff3682d6cdff6",
@@ -308,7 +308,7 @@
     }
   ],
   "acceptanceDerived": false,
-  "updatedAt": "2026-09-22T18:53:44.799Z",
+  "updatedAt": "2026-09-22T19:15:29.469Z",
   "provisional": [
     {
       "question": "調査メモが報告した種類A（正本 v13 §5.12.4 vs 派生文書の「立替実費は記録のみ」）を、リスク区分が高であることを理由に完全停止すべきか",

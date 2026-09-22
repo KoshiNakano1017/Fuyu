@@ -62,6 +62,8 @@ const MESSAGE: Record<string, string> = {
   guest_denied: "ゲストは買い物リストへ登録できません。",
   blank_name: "品名を入力してください。",
   bad_shop_url: "入手先URLは http:// または https:// で始まるものを入力してください。",
+  bad_quantity: "数量は0より大きい値を入力してください（空欄のままでも登録できます）。",
+  not_found: "対象の品目が見つかりませんでした。一覧を読み込み直してください。",
   blank_reason: "理由を入力してください。",
   not_staff: "買う・見送りの判断は運営のみが行えます。",
   not_owner: "自分が登録した品目のみ取り下げられます。",
@@ -184,16 +186,31 @@ export async function registerShoppingItemAction(
 }
 
 /**
+ * 編集の結果。**成功も失敗も画面へ返す。**
+ *
+ * `void` を返していると、権限で弾かれたのか、数量が CHECK に触れて DB が拒否したのかを
+ * 利用者が区別できない。編集は「一覧で違いに気づいて直す」操作であり、
+ * 黙って破棄されると**直したつもりの値が消えたことにすら気づけない**。
+ */
+export type EditFormState = {
+  status: "idle" | "saved" | "error";
+  message?: string;
+};
+
+/**
  * 登録した品目の内容を直す（v13 §5.12.1「編集・取下げは登録者本人と運営が行える」）。
  *
  * 通してよい相手は **登録者本人と運営**で、取下げ（`changeShoppingItemStatusAction` の
  * `withdraw`）と同じである。一方で**動かせるのは内容だけ**であり、状態は動かさない。
  * 判定は純関数 `decideEdit()` が持ち、ここは入出力の詰め替えに徹する。
  */
-export async function editShoppingItemAction(formData: FormData): Promise<void> {
+export async function editShoppingItemAction(
+  _prev: EditFormState,
+  formData: FormData,
+): Promise<EditFormState> {
   const viewer = await readViewer();
   if (!viewer.signedIn) {
-    return;
+    return { status: "error", message: MESSAGE.denied };
   }
 
   const itemId = String(formData.get("itemId") ?? "");
@@ -202,7 +219,7 @@ export async function editShoppingItemAction(formData: FormData): Promise<void> 
   const items = await fetchShoppingItemsByIds([itemId]);
   const item = items[0];
   if (item === undefined) {
-    return;
+    return { status: "error", message: MESSAGE.not_found };
   }
 
   const decision = decideEdit({
@@ -213,22 +230,32 @@ export async function editShoppingItemAction(formData: FormData): Promise<void> 
     itemName,
   });
 
+  // 拒否の理由をそのまま画面の文言へ移す。`decideEdit()` の reason は
+  // `blank_name` / `not_owner` / `invalid_transition` / `already_withdrawn` の4つで、
+  // すべて MESSAGE に対応する文言がある。
   if (!decision.allowed) {
-    return;
+    return { status: "error", message: MESSAGE[decision.reason] ?? MESSAGE.denied };
   }
 
   // 登録と同じ検証を編集にも通す（`shop-url.ts`）。ここが抜けていると、
   // 一度登録した品目を編集するだけで検証を迂回できる。
   const shopUrl = readShopUrlInput(toTextOrNull(formData.get("shopUrl")));
   if (shopUrl === undefined) {
-    return;
+    return { status: "error", message: MESSAGE.bad_shop_url };
   }
 
-  await updateShoppingItemFields({
+  // 数量は DB 側が `quantity > 0` を CHECK しており（0030）、0 や負数は UPDATE ごと弾かれる。
+  // ここで見ておかないと、**品名を含む編集全体**が数量欄の 0 ひとつで破棄される。
+  const quantity = toNumberOrNull(formData.get("quantity"));
+  if (quantity !== null && quantity <= 0) {
+    return { status: "error", message: MESSAGE.bad_quantity };
+  }
+
+  const saved = await updateShoppingItemFields({
     itemId,
     edit: {
       itemName,
-      quantity: toNumberOrNull(formData.get("quantity")),
+      quantity,
       unit: toTextOrNull(formData.get("unit")),
       wantedBy: toTextOrNull(formData.get("wantedBy")),
       purpose: toTextOrNull(formData.get("purpose")),
@@ -239,7 +266,12 @@ export async function editShoppingItemAction(formData: FormData): Promise<void> 
     },
   });
 
+  if (!saved) {
+    return { status: "error", message: MESSAGE.failed };
+  }
+
   revalidatePath(PATH);
+  return { status: "saved", message: "内容を直しました。" };
 }
 
 /** 「自分も欲しい」（相乗り）。 */
