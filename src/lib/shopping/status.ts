@@ -38,6 +38,7 @@ export type ShoppingDenialReason =
   | "not_owner"
   | "invalid_transition"
   | "blank_reason"
+  | "blank_name"
   | "already_withdrawn";
 
 export type ShoppingDecision =
@@ -105,6 +106,54 @@ export function decideStatusChange(params: {
   }
 
   return { allowed: true, next: action === "withdraw" ? current : transition.to };
+}
+
+export type ShoppingEditDecision = { allowed: true } | { allowed: false; reason: ShoppingDenialReason };
+
+/**
+ * 内容を直せる状態（v13 §5.12.1「編集・取下げ」）。
+ *
+ * `購入済` と `見送り` を外しているのは、どちらも**結論が出た記録**だからである。
+ * 買った後に品名や数量を書き換えられると、購入の記録が何に対するものだったか分からなくなり、
+ * 見送った後に書き換えられると、見送り理由（§5.12.2 で必須）が別の品目の理由になる。
+ * 直したいときは登録し直す方が、言い出した時点と決まった時点の両方が残る。
+ */
+const EDITABLE_STATUSES: readonly ShoppingItemStatus[] = ["希望", "買う", "クエスト化済"];
+
+/**
+ * 品目の内容（品名・数量・優先度等）を直してよいか（v13 §5.12.1「編集・取下げ」）。
+ *
+ * 状態遷移とは別の判定にしてある。編集は**誰が言い出したか**を動かさない操作であり、
+ * 「買う／見送り」のような運営の判断（`decideStatusChange()`）とは通す相手が違う
+ * （§6「自分が登録した品目の編集・取下げ」＝本人と運営）。
+ */
+export function decideEdit(params: {
+  actorRole: Role;
+  current: ShoppingItemStatus;
+  withdrawn: boolean;
+  isOwner?: boolean;
+  itemName?: string;
+}): ShoppingEditDecision {
+  const { actorRole, current, withdrawn, isOwner = false, itemName } = params;
+
+  if (withdrawn) {
+    return { allowed: false, reason: "already_withdrawn" };
+  }
+
+  if (!isOwner && !isStaff(actorRole)) {
+    return { allowed: false, reason: "not_owner" };
+  }
+
+  if (!EDITABLE_STATUSES.includes(current)) {
+    return { allowed: false, reason: "invalid_transition" };
+  }
+
+  // 必須は品名のみ（§5.12.1）。編集で空にできると、必須の意味が登録時だけになる。
+  if (!hasText(itemName)) {
+    return { allowed: false, reason: "blank_name" };
+  }
+
+  return { allowed: true };
 }
 
 /**

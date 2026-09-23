@@ -2,6 +2,9 @@ import Link from "next/link";
 
 import { readViewer } from "@/lib/auth/session";
 import { visibleAreasFor } from "@/lib/auth/navigation";
+import { canRegister } from "@/lib/shopping/status";
+
+import { ShoppingRegisterForm } from "./shopping/ShoppingRegisterForm";
 
 /**
  * ホーム（画面ID A2 ／ WBS 2-6 管理系メニューの到達性（ナビ情報設計））。
@@ -24,6 +27,17 @@ import { visibleAreasFor } from "@/lib/auth/navigation";
  *
  * ⚠️ **この一覧は防壁ではない。** 各画面側の `requireStaff()` / `requireAdmin()` が
  * 実際の関門である（v13 §5.9.3）。
+ *
+ * ## クイックアクション「🛒 ほしいものを登録」
+ *
+ * v13 §5.12.1「入口」が **A2 ホームと C1 統合ダッシュボードに置く**と名指しで定めている
+ * （同 note：タブを増やさず、登録はダッシュボードのクイックアクションから行う）。
+ * 領域リンクの並びとは別物なので、`visibleAreasFor()` の一覧には混ぜない。
+ * **ここは「買い物リストを開く」リンクではなく、モーダル1枚で登録が完結する入口である。**
+ *
+ * 出し分けは一覧画面と同じ `canRegister()` で行う。ゲストは登録不可・閲覧のみであり
+ * （§5.12.1「登録できるロール」／§9 #65②）、DOM ごと描画しない（§5.9.2）。
+ * 画面から消すことは認可ではないため、Server Action 側でも同じ判定で拒否する（§5.9.3）。
  */
 export default async function HomePage() {
   const viewer = await readViewer();
@@ -52,6 +66,13 @@ export default async function HomePage() {
   return (
     <main className="mx-auto flex max-w-3xl flex-col gap-6 p-6">
       <h1 className="text-2xl font-bold">浮遊街アプリ</h1>
+
+      {canRegister(viewer.role) && (
+        <section className="flex flex-col gap-2 rounded border border-neutral-200 bg-white p-4">
+          <h2 className="text-sm font-medium text-neutral-700">クイックアクション</h2>
+          <ShoppingRegisterForm />
+        </section>
+      )}
 
       <ul className="grid gap-3 sm:grid-cols-2">
         {areas.map((area) => (

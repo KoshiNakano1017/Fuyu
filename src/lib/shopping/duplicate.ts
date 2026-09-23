@@ -28,9 +28,19 @@ export function normalizeItemName(name: string): string {
   return name.normalize("NFKC").toLowerCase().replace(/\s+/gu, "");
 }
 
-/** 未購入（`希望` / `買う`）かつ取下げでないものだけが重複の対象。 */
+/**
+ * 未購入かつ取下げでないものだけが重複の対象。
+ *
+ * `クエスト化済` も**まだ買われていない**ので含める（v13 §5.12.1「未購入の既存品目」）。
+ * ここを `希望` / `買う` に絞ると、買い出しクエストが走っている最中に同じ品を登録しても
+ * 警告が出ず、§5.12.1 が避けようとした「同じものが3件並ぶリスト」がそのまま起きる。
+ * 除外するのは**買われた（`購入済`）か、買わないと決めた（`見送り`）か、取り下げられたもの**だけ。
+ */
 function isOpen(candidate: DuplicateCandidate): boolean {
-  return candidate.withdrawnAt === null && (candidate.status === "希望" || candidate.status === "買う");
+  if (candidate.withdrawnAt !== null) {
+    return false;
+  }
+  return candidate.status === "希望" || candidate.status === "買う" || candidate.status === "クエスト化済";
 }
 
 /**

@@ -18,7 +18,8 @@ export type ShoppingItem = {
   unit: string | null;
   wantedBy: string | null;
   purpose: string | null;
-  sourceHint: string | null;
+  shopName: string | null;
+  shopUrl: string | null;
   referencePriceJpy: number | null;
   priority: "至急" | "通常" | "いつでも";
   status: ShoppingItemStatus;
@@ -38,7 +39,7 @@ export type ShoppingItem = {
  *   名前を載せると、ニックネーム未設定の会員で実名が露出する（v13 §9 #62）。
  */
 const ITEM_COLUMNS =
-  "item_id, item_name, quantity, unit, wanted_by, purpose, source_hint, reference_price_jpy, priority, status, registered_by, requesters, skip_reason, quest_id, withdrawn_at, created_at";
+  "item_id, item_name, quantity, unit, wanted_by, purpose, shop_name, shop_url, reference_price_jpy, priority, status, registered_by, requesters, skip_reason, quest_id, withdrawn_at, created_at";
 
 type ShoppingItemRow = {
   item_id: string;
@@ -47,7 +48,8 @@ type ShoppingItemRow = {
   unit: string | null;
   wanted_by: string | null;
   purpose: string | null;
-  source_hint: string | null;
+  shop_name: string | null;
+  shop_url: string | null;
   reference_price_jpy: number | null;
   priority: ShoppingItem["priority"];
   status: ShoppingItemStatus;
@@ -67,7 +69,8 @@ function toItem(row: ShoppingItemRow): ShoppingItem {
     unit: row.unit,
     wantedBy: row.wanted_by,
     purpose: row.purpose,
-    sourceHint: row.source_hint,
+    shopName: row.shop_name,
+    shopUrl: row.shop_url,
     referencePriceJpy: row.reference_price_jpy,
     priority: row.priority,
     status: row.status,
@@ -108,7 +111,8 @@ export type NewShoppingItem = {
   unit: string | null;
   wantedBy: string | null;
   purpose: string | null;
-  sourceHint: string | null;
+  shopName: string | null;
+  shopUrl: string | null;
   referencePriceJpy: number | null;
   priority: ShoppingItem["priority"];
   registeredBy: string;
@@ -124,11 +128,60 @@ export async function insertShoppingItem(input: NewShoppingItem): Promise<boolea
     unit: input.unit,
     wanted_by: input.wantedBy,
     purpose: input.purpose,
-    source_hint: input.sourceHint,
+    shop_name: input.shopName,
+    shop_url: input.shopUrl,
     reference_price_jpy: input.referencePriceJpy,
     priority: input.priority,
     registered_by: input.registeredBy,
   });
+
+  return error === null;
+}
+
+/** 編集で直せる項目（v13 §5.12.1「入力項目」）。状態・登録者・相乗りは含めない。 */
+export type ShoppingItemEdit = {
+  itemName: string;
+  quantity: number | null;
+  unit: string | null;
+  wantedBy: string | null;
+  purpose: string | null;
+  shopName: string | null;
+  shopUrl: string | null;
+  referencePriceJpy: number | null;
+  priority: ShoppingItem["priority"];
+};
+
+/**
+ * 品目の内容を直す（v13 §5.12.1「編集・取下げは登録者本人と運営が行える」）。
+ *
+ * ★ **書き換える列をここで固定する。** フォームの値をそのまま展開すると、
+ *   `status`・`registered_by`・`requesters` まで送れてしまう。DB 側は 0030 のトリガーが
+ *   登録者の書き換えと本人による状態変更を止めるが、**止まるのは例外としてであり**、
+ *   アプリから送らないのが先である（v13 §5.9.3 の二重防御と同じ向き）。
+ *   相乗り（`requesters`）は `shopping_item_add_requester()` 以外から触らない（0030 ③）。
+ *
+ * 可否の判定は呼び出し側が `decideEdit()` で済ませてある前提。
+ */
+export async function updateShoppingItemFields(params: {
+  itemId: string;
+  edit: ShoppingItemEdit;
+}): Promise<boolean> {
+  const supabase = await createServerSupabaseClient();
+
+  const { error } = await supabase
+    .from("shopping_list_items")
+    .update({
+      item_name: params.edit.itemName,
+      quantity: params.edit.quantity,
+      unit: params.edit.unit,
+      wanted_by: params.edit.wantedBy,
+      purpose: params.edit.purpose,
+      shop_name: params.edit.shopName,
+      shop_url: params.edit.shopUrl,
+      reference_price_jpy: params.edit.referencePriceJpy,
+      priority: params.edit.priority,
+    })
+    .eq("item_id", params.itemId);
 
   return error === null;
 }
@@ -184,8 +237,14 @@ export async function addRequester(itemId: string): Promise<boolean> {
   return error === null;
 }
 
-/** 買い出しクエストの起案対象を読む（`買う` の品目のみ）。 */
-export async function fetchApprovedItems(itemIds: readonly string[]): Promise<ShoppingItem[]> {
+/**
+ * ID を指定して読む。
+ *
+ * 状態で絞らないのは、**その行に対して何をしてよいか**を決めるのが呼び出し側の純関数
+ * （`decideStatusChange()` / `decideEdit()`）だからである。ここで先に落とすと、
+ * 「対象が無い」と「その状態では操作できない」が区別できなくなる。
+ */
+export async function fetchShoppingItemsByIds(itemIds: readonly string[]): Promise<ShoppingItem[]> {
   if (itemIds.length === 0) {
     return [];
   }
@@ -197,6 +256,11 @@ export async function fetchApprovedItems(itemIds: readonly string[]): Promise<Sh
     throw new Error("買い物リストを取得できませんでした");
   }
   return (data as ShoppingItemRow[]).map(toItem);
+}
+
+/** 買い出しクエストの起案対象を読む（`買う` かどうかの判定は `quest-draft.ts` が行う）。 */
+export async function fetchApprovedItems(itemIds: readonly string[]): Promise<ShoppingItem[]> {
+  return fetchShoppingItemsByIds(itemIds);
 }
 
 /**

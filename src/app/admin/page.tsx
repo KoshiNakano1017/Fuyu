@@ -11,6 +11,8 @@ import { fetchAvailability, fetchStaysOverlapping } from "@/lib/lodging/fetch-lo
 import { fetchOpenOrders } from "@/lib/orders/fetch-orders";
 import { fetchPendingApplications, fetchPendingWorkLogs } from "@/lib/quests/applications";
 
+import { ShoppingRegisterForm } from "../shopping/ShoppingRegisterForm";
+
 /**
  * 今日の浮遊街サマリー（画面ID C1 ／ WBS 13-1）。
  *
@@ -25,6 +27,20 @@ import { fetchPendingApplications, fetchPendingWorkLogs } from "@/lib/quests/app
  * 件数はそれぞれの一覧取得を数えて出す。専用の集計ビューを足すと、
  * 一覧と件数が食い違ったときにどちらが正しいか分からなくなる
  * （残枠だけは `v_room_availability` が正本なのでビューを読む）。
+ *
+ * ## クイックアクション「🛒 ほしいものを登録」
+ *
+ * v13 §5.12.1「入口」が **A2 ホームと C1 統合ダッシュボードに置く**と名指しで定めている
+ * （同 note：タブを増やさず、登録はダッシュボードのクイックアクションから行う）。
+ * **「買い物リストを開く」リンクではなく、モーダル1枚で登録が完結する入口である。**
+ *
+ * サマリーカードの並びには混ぜない。カードは「今日の実数」を数える器であり、
+ * 登録の入口を同じ並びに置くと、上記「数えるだけで、判断はしない」の切り分けが崩れる。
+ *
+ * A2 ホームと違い `canRegister()` で囲わない。この画面は `requireAdmin()` を通過した
+ * 訪問者しか到達せず、**登録不可なのはゲストだけ**（§5.12.1「登録できるロール」／§9 #65②）
+ * なので、ここで再判定しても常に真になる。画面から消すことは認可ではなく、
+ * 実際の関門は Server Action 側の判定である（§5.9.3）。
  */
 export default async function AdminDashboardPage() {
   try {
@@ -65,6 +81,11 @@ export default async function AdminDashboardPage() {
       <p className="text-sm text-neutral-600">{today}</p>
 
       <RevisitAlerts alerts={revisitAlerts} />
+
+      <section className="flex flex-col gap-2 rounded border border-neutral-200 bg-white p-4">
+        <h2 className="text-sm font-medium text-neutral-700">クイックアクション</h2>
+        <ShoppingRegisterForm />
+      </section>
 
       <div className="grid gap-3 sm:grid-cols-2">
         <SummaryCard

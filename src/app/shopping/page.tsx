@@ -1,8 +1,10 @@
 import { requireSignedIn } from "@/lib/auth/guard";
 import { isStaff } from "@/lib/auth/session";
 import { fetchShoppingItems, type ShoppingItem } from "@/lib/shopping/fetch-items";
-import { canRegister } from "@/lib/shopping/status";
+import { isOpenableShopUrl } from "@/lib/shopping/shop-url";
+import { canRegister, decideEdit } from "@/lib/shopping/status";
 
+import { ShoppingItemEditForm } from "./ShoppingItemEditForm";
 import { ShoppingRegisterForm } from "./ShoppingRegisterForm";
 import { changeShoppingItemStatusAction, convertToQuestAction, joinShoppingItemAction } from "./actions";
 
@@ -100,6 +102,15 @@ export default async function ShoppingPage() {
         {items.map((item) => {
           const owner = item.registeredBy === viewer.memberId;
           const withdrawn = item.withdrawnAt !== null;
+          // 編集フォームを描くかどうかも Server Action と同じ判定で決める（v13 §5.9.2）。
+          // 画面側に別の条件を書くと、出ているのに通らないボタンが生まれる。
+          const editable = decideEdit({
+            actorRole: viewer.role,
+            current: item.status,
+            withdrawn,
+            isOwner: owner,
+            itemName: item.itemName,
+          }).allowed;
 
           return (
             <li
@@ -111,7 +122,11 @@ export default async function ShoppingPage() {
                   {item.itemName}
                   {amountLabel(item) && <span className="ml-1 text-sm text-neutral-500">{amountLabel(item)}</span>}
                 </p>
-                <span className={`rounded px-2 py-0.5 text-xs ${STATUS_STYLE[item.status]}`}>
+                <span
+                  // バッジの色だけでは何を表しているか読めない。読み上げにも「ステータス」を乗せる。
+                  aria-label={`ステータス：${withdrawn ? "取り下げ" : item.status}`}
+                  className={`rounded px-2 py-0.5 text-xs ${STATUS_STYLE[item.status]}`}
+                >
                   {withdrawn ? "取り下げ" : item.status}
                 </span>
               </div>
@@ -125,7 +140,24 @@ export default async function ShoppingPage() {
               </p>
 
               {item.purpose && <p className="text-sm text-neutral-700">{item.purpose}</p>}
-              {item.sourceHint && <p className="text-xs text-neutral-500">入手先：{item.sourceHint}</p>}
+              {(item.shopName || item.shopUrl) && (
+                <p className="text-xs text-neutral-500">
+                  入手先：{item.shopName}
+                  {/*
+                    リンクにするのは開けるURLだけ（`shop-url.ts`）。
+                    保存時にも弾いているが、**この検証を入れる前に保存された行**が残るため
+                    描画側でも判定する。開けない値は文字として出す（黙って消さない）。
+                  */}
+                  {item.shopUrl &&
+                    (isOpenableShopUrl(item.shopUrl) ? (
+                      <a href={item.shopUrl} className="ml-1 underline" rel="noreferrer noopener" target="_blank">
+                        商品ページ
+                      </a>
+                    ) : (
+                      <span className="ml-1">{item.shopUrl}</span>
+                    ))}
+                </p>
+              )}
               {item.status === "見送り" && item.skipReason && (
                 <p className="text-xs text-neutral-600">見送り理由：{item.skipReason}</p>
               )}
@@ -208,6 +240,8 @@ export default async function ShoppingPage() {
                   )}
                 </div>
               )}
+
+              {editable && <ShoppingItemEditForm item={item} />}
             </li>
           );
         })}
