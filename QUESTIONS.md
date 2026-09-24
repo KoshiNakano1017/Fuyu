@@ -61,6 +61,36 @@
 
 ---
 
+## 🔴 [2026-09-24] WBS `1-2a`（Vercel プロジェクト連携とデプロイ環境変数の登録）を誰が実行するか — ループには Vercel の資格情報が無い（`WBS_Phase1.md` §S-0d 手順② ／ 決定ログ §20-2 ／ Issue #148）
+- ステータス: 未回答
+- 優先度: 高（**Issue #148 が着手できない**。完了条件5件のうち4件が Vercel CLI の認証を前提にしており、
+  残る1件も `docs/spec/` の編集を要するため、現状のループ構成では**1件も満たせない**）
+- 背景: Issue #148（WBS `1-2a`）の計画フェーズで判明。**仕様は揃っている**
+  （`CONSOLIDATED_DECISIONS.md` §20-2 と `WBS_Phase1.md` §S-0d 手順② は実在し、Issue の記述と一致する。
+  2026-09-22 に計画フェーズを止めた `v13 §20` の誤記も 2026-09-24 に訂正済み）。
+  止まっているのは**仕様ではなく実行手段**である。2026-09-24 に実機で確認した結果:
+  - `vercel` CLI は PATH にも `node_modules/.bin/` にも無い
+  - `auto-02-implement.yml` が実装エージェントへ渡すのは `AUTOMATION_PAT` と
+    `CLAUDE_CODE_OAUTH_TOKEN` のみで、**Vercel の資格情報は渡らない**
+  - `.github/workflows/` に Vercel へ deploy / env 操作をするワークフローは存在しない
+  - 完了条件5つ目「`WBS_Phase1.md` §S-0d に明文化」は `docs/spec/**` の編集であり、
+    `automation/settings/pm.json`・`code.json` の双方で拒否されている（設計 §8.2 の仕様書ガード）
+  - `WBS_Phase1.md` §S-0d 自身が「**アクセストークンを持たないエージェントからは実行できない**」と明記し、
+    本作業を **オーナー作業**として分類している
+- 選択肢:
+  - A. **オーナー作業として扱い、Issue #148 をループの対象外にする**（`auto` を外し、§S-0d 手順②の
+    チェックリストとして残す。実行後にオーナーが完了条件の確認結果を Issue へ貼る）
+  - B. **`VERCEL_TOKEN` を Repository Secret に登録し、ループへ渡す**（`auto-02` に env を追加し、
+    エージェントが `vercel env add` まで実行する）
+  - C. **Issue #148 を分割する** — 検証スクリプト（`scripts/` に `vercel env ls` の期待値チェックを置く）
+    までをループが実装し、**実際の登録と実行はオーナーが行う**
+- 推奨: A（理由: B は**プロジェクト全体の環境変数を読み書きできるトークンを無人ループへ渡す**ことになり、
+  `SUPABASE_SERVICE_ROLE_KEY`・`RESEND_API_KEY` を含む本番シークレットが操作範囲に入る。
+  CLAUDE.md §3.1・§6.3 が「読み出せない型で保持する意味がある」としているのと逆行する。
+  C は成果物が中途半端で、結局オーナーのブラウザ作業が残る。
+  §S-0d が既にオーナー作業として手順化しており、A は**運用実態に合わせるだけで新たな仕組みを増やさない**）
+- 関連ファイル: `docs/spec/WBS_Phase1.md` §S-0d 手順②、`docs/spec/CONSOLIDATED_DECISIONS.md` §20-2、Issue #148
+
 ## 🔴 [2026-09-22] CI が赤い：受入テストの期待値が Postgres の表示規則と食い違っている（`tests/db/shopping-list-schema.test.ts` ／ WBS `5-8`）
 - ステータス: **未回答・PR #149 のマージブロッカー**（CI が赤い PR はマージしない ／ `CLAUDE.md` §6.2）。
   **ループ側では直せない**（`tests/` は書き換え禁止 ／ 設計 §0・§11.6 ／ `automation/settings/code.json` の
@@ -238,8 +268,11 @@
   実装％／総合％／ステータスのみ）の範囲外でもある。**オーナーまたは対話セッションでの対応が要る。**
 - 関連ファイル: `docs/spec/WBS_Phase1.md` L510、v13 §5.12.1、Issue #147 ／ PR #149
 
-## [2026-09-22] Vercel Preview がどの Supabase プロジェクトを指すか（WBS `1-2a` ／ 決定ログ §20-2）
-- ステータス: 未回答
+## ✅ [2026-09-22] Vercel Preview がどの Supabase プロジェクトを指すか（WBS `1-2a` ／ 決定ログ §20-2）
+- ステータス: **回答済み（2026-09-24 オーナー決定＝選択肢A「Preview は dev Supabase を指す」）**。
+  決定はオーナーとの対話セッションで行われ、Issue #148 の完了条件4つ目に記載されている。
+  ⚠️ **`CONSOLIDATED_DECISIONS.md` と `WBS_Phase1.md` §S-0d への反映は未了**
+  （`docs/spec/` はループから編集できないため ／ 設計 §8.2）。Issue #148 の完了条件5つ目がこの反映にあたる
 - 優先度: 高（**WBS `1-2a`（Vercel プロジェクト連携とデプロイ環境変数の登録）が着手できない**。
   Preview 環境の接続先が決まらないと、環境変数の登録内容そのものが決まらない）
 - 背景: Issue #148（WBS `1-2a`）の起票時に判明。`WBS_Phase1.md` §S-0d 手順②-4 が
