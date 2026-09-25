@@ -21,9 +21,9 @@
     "review": 0
   },
   "tokens": {
-    "input": 658,
-    "output": 358800,
-    "costUsd": 39.704409999999996
+    "input": 762,
+    "output": 443177,
+    "costUsd": 48.185331999999995
   },
   "testHashes": {
     "e2e/TEST_PLAN.md": "9e1ff3682d6cdff6",
@@ -258,6 +258,6 @@
     }
   ],
   "acceptanceDerived": false,
-  "updatedAt": "2026-09-25T16:09:40.253Z",
+  "updatedAt": "2026-09-25T16:26:46.362Z",
   "provisional": []
 }
