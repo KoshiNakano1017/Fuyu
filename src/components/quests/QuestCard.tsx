@@ -1,5 +1,6 @@
 import type { ReactElement } from "react";
 
+import { QuestApplyButton, type QuestApplyAction } from "@/components/quests/QuestApplyButton";
 import type { QuestBoardItem } from "@/lib/quests/board";
 
 type QuestCardProps = {
@@ -9,6 +10,11 @@ type QuestCardProps = {
    * 施錠カードでないとき・登録導線が不要な相手（会員・運営）には渡らない。
    */
   onOpenRegistration?: () => void;
+  /**
+   * 受注申請（WBS 5-2）。渡されないときはボタンを非活性のまま描く
+   * （一覧を静的に描くだけの文脈では申請の受け皿が無い）。
+   */
+  apply?: QuestApplyAction;
 };
 
 /** 起案元の表示名。内部識別子（`morning_meeting_auto`）をそのまま画面へ出さない。 */
@@ -33,7 +39,7 @@ const ORIGIN_LABELS: Record<QuestBoardItem["originType"], string> = {
  * ここで `hidden` にしているのではないため、開発者ツールから読むこともできない
  * （DOM 非表示は認可ではない／v13 §5.9.3）。
  */
-export function QuestCard({ item, onOpenRegistration }: QuestCardProps): ReactElement {
+export function QuestCard({ item, onOpenRegistration, apply }: QuestCardProps): ReactElement {
   return (
     <li className="flex flex-col gap-2 rounded-lg border border-neutral-200 p-4">
       <div className="flex items-start justify-between gap-3">
@@ -55,13 +61,17 @@ export function QuestCard({ item, onOpenRegistration }: QuestCardProps): ReactEl
         <p className="text-sm">報酬 {item.rewardUii.toLocaleString("ja-JP")} Uii</p>
       )}
 
-      <button
-        type="button"
-        disabled={!item.canApply}
-        className="self-start rounded bg-neutral-900 px-4 py-2 text-sm text-white disabled:bg-neutral-300"
-      >
-        受注を申請する
-      </button>
+      {apply === undefined ? (
+        <button
+          type="button"
+          disabled
+          className="self-start rounded bg-neutral-900 px-4 py-2 text-sm text-white disabled:bg-neutral-300"
+        >
+          受注を申請する
+        </button>
+      ) : (
+        <QuestApplyButton questId={item.questId} canApply={item.canApply} apply={apply} />
+      )}
 
       {item.opensRegistrationModal &&
         (onOpenRegistration === undefined ? (

@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { RegistrationModal, type ApplyAction } from "@/components/membership/RegistrationModal";
+import type { QuestApplyAction } from "@/components/quests/QuestApplyButton";
 import { QuestCard } from "@/components/quests/QuestCard";
 import type { QuestBoardItem } from "@/lib/quests/board";
 
@@ -36,10 +37,14 @@ export function QuestBoardWithRegistration({
   items,
   offer,
   apply,
+  applyToQuest,
 }: {
   items: readonly QuestBoardItem[];
   offer: RegistrationOffer | null;
+  /** 街人登録の申請（WBS 12-1） */
   apply: ApplyAction;
+  /** 受注申請（WBS 5-2） */
+  applyToQuest: QuestApplyAction;
 }) {
   const [isModalOpen, setModalOpen] = useState(false);
 
@@ -53,6 +58,7 @@ export function QuestBoardWithRegistration({
             onOpenRegistration={
               offer !== null && item.opensRegistrationModal ? () => setModalOpen(true) : undefined
             }
+            apply={applyToQuest}
           />
         ))}
       </ul>

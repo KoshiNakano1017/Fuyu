@@ -91,14 +91,24 @@ describe("★ Step 1 の入力欄を送らない（決定 A ／ Issue #87）", (
 
 describe("申請の Server Action が受け取る入力が無い（他人名義の申請を作れない）", () => {
   const actions = readCode(ACTIONS);
+  // 同じファイルには受注申請（WBS 5-2 ／ `questId` を受け取る）も居るため、
+  // 街人登録の Action の本体だけを切り出して見る。
+  const membershipAction = actions.slice(
+    actions.indexOf("export async function applyForMembershipAction"),
+    actions.indexOf("export async function applyToQuestAction") === -1
+      ? undefined
+      : actions.indexOf("export async function applyToQuestAction"),
+  );
 
   test("フォームの値を読まない", () => {
-    expect(actions).not.toContain("formData.get");
+    expect(membershipAction).not.toContain("formData.get");
+    // 引数そのものを取らない形にしてある（受け取る口を用意しない）
+    expect(membershipAction).toContain("applyForMembershipAction(): Promise<SubmitState>");
   });
 
   test("申請者はセッションから引く", () => {
-    expect(actions).toContain("readViewer()");
-    expect(actions).toContain("insertMembershipApplication(viewer.memberId)");
+    expect(membershipAction).toContain("readViewer()");
+    expect(membershipAction).toContain("insertMembershipApplication(viewer.memberId)");
   });
 });
 
