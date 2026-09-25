@@ -118,7 +118,21 @@ GUARD_WORKFLOW = {
 }
 
 RETRY_COOLDOWN_MIN = 60
-REPORT_TITLE = "[report] 自律ループ 枯渇レポート"
+#: 2026-09-25: 「枯渇」以外に「長期滞留の検出」でも発火するようになったため改称。
+#: 同じ Issue へコメントを積み重ねる設計は維持し、時系列の効果測定に使えるようにする
+#: （停滞要因分析 ②③の「3日後にどう改善したか」の測定方法）。
+REPORT_TITLE = "[report] 自律ループ 状況レポート"
+
+#: 2026-09-25 新設。オーナー判断待ちが長期滞留したとき、完全枯渇を待たずに
+#: エスカレーションするための閾値（分）。3日。
+#: 根拠: 「枯渇レポートは着手可能な仕事が0件にならないと発火しない」ため、
+#: 他にready な作業が残る限り auto:blocked が何日放置されても誰にも通知されなかった
+#: （2026-09-25 の停滞要因分析 ④）。
+BLOCKED_ESCALATION_MIN = 3 * 24 * 60
+
+#: 2026-09-25 新設。②の運用対応（整合性チェック）で使う、クローズ済みマーカー。
+#: 誤クローズ（＝オーナーが再オープンした）を後から検出できるように埋め込む。
+RECONCILE_MARKER = "<!--auto-reconciled:{date}-->"
 
 #: **ループが原理的に完了できない**作業パッケージの印。
 #:
@@ -454,7 +468,99 @@ def dispense(issues: list[dict], cap: int, wbs: Path, dry: bool) -> tuple[list[s
     return acted, ready, owner_only
 
 
-# ── 4. 枯渇レポート ───────────────────────────────────────────
+# ── 4. Issue-WBS 整合性チェック（2026-09-25 新設）────────────────
+#
+# インタラクティブセッション（オーナー同席の対話セッション）が PR を直接マージすると、
+# auto-03-review-merge.yml の「マージ時に issue を close する」ステップを一度も
+# 通らない。結果、`docs/spec/WBS_Phase1.md` 側は✅なのに GitHub Issue が
+# auto:blocked／auto:review 等のまま open で残り続ける
+# （実例: #18・#85・#90。2026-09-24 に手動で発見・是正した。停滞要因分析 ②）。
+#
+# ここでは **仕様の判断はしない**。「WBS本文が✅と書いている」という機械的事実だけを見て、
+# 対応する Issue を閉じる。誤りが起きたら再オープンで訂正できるよう、
+# クローズ理由にマーカーを埋め込み、後から誤クローズ件数を追跡できるようにする
+# （3日後の効果測定・副作用検出に使う）。
+
+
+def reconcile_completed(issues: list[dict], index, dry: bool) -> list[str]:
+    acted: list[str] = []
+    for it in issues:
+        if L_DONE in it["labelNames"] or L_REJECTED in it["labelNames"]:
+            continue
+        body = it.get("body") or ""
+        if "<!--wbs:" not in body:
+            continue
+        pid = body.split("<!--wbs:", 1)[1].split("-->", 1)[0].strip()
+        pkg = index.get(pid)
+        if pkg is None or not pkg.is_done:
+            continue
+
+        print(f"  🧹 #{it['number']}（WBS {pid}）はWBS側で完了済みだが open のまま。整合性クローズします")
+        date = now().strftime("%Y-%m-%d")
+        relabel(
+            it["number"],
+            [L_BLOCKED, L_REVIEW, L_APPROVED, L_IMPLEMENTING, L_AUTO, L_PLANNING, L_WAITING_DEP],
+            L_DONE,
+            dry,
+        )
+        comment(
+            it["number"],
+            f"## 🧹 スイーパーが整合性チェックでクローズしました\n\n"
+            f"WBS `{pid}` は `docs/spec/WBS_Phase1.md` 側で完了（✅）と記録されています。"
+            f"インタラクティブセッションが直接マージした等の理由で自動クローズが行われて"
+            f"いなかったと判断し、機械的に閉じます。\n\n"
+            f"**誤りだと思ったら再オープンしてください。**\n\n"
+            f"{RECONCILE_MARKER.format(date=date)}\n",
+            dry,
+        )
+        if not dry:
+            sh(["gh", "issue", "close", str(it["number"]), "--repo", REPO, "--reason", "completed"], check=False)
+        acted.append(f"#{it['number']}（WBS {pid}）")
+    return acted
+
+
+# ── 5. CIキャンセルの自動リラン（2026-09-25 新設）────────────────
+#
+# `claude-review.yml` の `concurrency(cancel-in-progress: true)` が、
+# `pull_request` の `opened`/`synchronize` が短時間に連続すると先発 run を
+# 自己キャンセルする（TASKS.md「claude-review.yml が PR ごとに自己キャンセルして
+# 赤くなる」／停滞要因分析 ③）。2026-09-24 オーナー決定は運用回避
+# （選択肢C: 落ちたら `gh run rerun` する）だが、人が気づかない限り実行されないため、
+# 誰も見ていない自律ループ生成の PR は放置され続ける。ここで機械的に肩代わりする。
+#
+# **cancelled を failure と区別する。** 内容の問題で落ちた run を再実行しても
+# 直らないため無限ループになりうるが、`cancelled` は concurrency の追い出しでしか
+# 起きず、レビュー内容とは無関係（claude-review.yml 自身のコメント参照）。
+
+
+def rerun_cancelled_reviews(dry: bool) -> list[str]:
+    acted: list[str] = []
+    all_runs = gh_json(
+        ["run", "list", "--repo", REPO, "--workflow", "claude-review.yml",
+         "--limit", "100", "--json", "databaseId,headBranch,createdAt,status,conclusion"],
+        [],
+    )
+    if not all_runs:
+        return acted
+
+    # ブランチごとの最新 run。これより古い cancelled run は「既に上書き済み」なので触らない。
+    latest_by_branch: dict[str, dict] = {}
+    for r in all_runs:
+        b = r["headBranch"]
+        if b not in latest_by_branch or r["createdAt"] > latest_by_branch[b]["createdAt"]:
+            latest_by_branch[b] = r
+
+    for branch, r in latest_by_branch.items():
+        if r.get("conclusion") != "cancelled":
+            continue
+        print(f"  🔁 claude-review.yml run {r['databaseId']}（{branch}）が cancelled のまま最新。rerun します")
+        if not dry:
+            sh(["gh", "run", "rerun", str(r["databaseId"]), "--repo", REPO], check=False)
+        acted.append(f"claude-review run {r['databaseId']}（{branch}）")
+    return acted
+
+
+# ── 6. 枯渇レポート ───────────────────────────────────────────
 
 
 def unmet_deps(issue: dict, index) -> list[str]:
@@ -484,12 +590,12 @@ def build_report(issues: list[dict], ready: list[dict], owner_only: list[dict],
     inflight = [i for i in issues if i["labelNames"] & INFLIGHT]
 
     L = [
-        "# 自律ループ 枯渇レポート",
+        "# 自律ループ 状況レポート",
         "",
         f"生成: {now().strftime('%Y-%m-%d %H:%M')} UTC",
         "",
-        "着手可能な仕事が尽きたため、**保留していたオーナー判断をまとめて報告します。**",
-        "ここに挙がっているものだけが、人の判断を必要としています。",
+        "着手可能な仕事が尽きた、または長期滞留しているオーナー判断待ちがあるため報告します。",
+        "同じIssueへ時系列でコメントが積まれるので、日々の推移の確認にも使えます。",
         "",
         "| 区分 | 件数 |",
         "| --- | ---: |",
@@ -546,11 +652,24 @@ def build_report(issues: list[dict], ready: list[dict], owner_only: list[dict],
             L.append(f"- #{i['number']} {i['title']}")
         L.append("")
 
-    if acted.get("recovered") or acted.get("retried") or acted.get("dispensed"):
+    if any(acted.get(k) for k in ("recovered", "retried", "dispensed", "reconciled", "rerun_ci")):
         L += ["## 今回のスイープで動かしたもの", ""]
-        for k, label in (("recovered", "回収"), ("retried", "再試行"), ("dispensed", "払い出し")):
+        for k, label in (
+            ("recovered", "回収"), ("retried", "再試行"), ("dispensed", "払い出し"),
+            ("reconciled", "🧹 整合性クローズ"), ("rerun_ci", "🔁 CIキャンセルのrerun"),
+        ):
             for x in acted.get(k, []):
                 L.append(f"- {label}: {x}")
+        L.append("")
+
+    # 2026-09-25 新設: ④の対策。長期滞留する auto:blocked を、完全枯渇を待たずに可視化する。
+    stale_blocked = [i for i in blocked if age_minutes(i["updatedAt"]) >= BLOCKED_ESCALATION_MIN]
+    if stale_blocked:
+        days = BLOCKED_ESCALATION_MIN // (24 * 60)
+        L += [f"## ⏰ {days}日以上放置されているオーナー判断待ち", ""]
+        for i in stale_blocked:
+            d = age_minutes(i["updatedAt"]) / (24 * 60)
+            L.append(f"- #{i['number']} {i['title']}（{d:.1f}日経過）")
         L.append("")
 
     if not blocked and not ready and not inflight and not owner_only:
@@ -616,7 +735,17 @@ def main() -> int:
         print("\n[3] 払い出し（WBS の依存順）")
         dispensed, ready, owner_only = dispense(issues, args.max_inflight, args.wbs, args.dry_run)
 
-    acted = {"recovered": recovered, "retried": retried, "dispensed": dispensed}
+    print("\n[3.5] Issue-WBS 整合性チェック（マージ済みだが open のまま）")
+    index_for_reconcile = E.W.load_packages(args.wbs)
+    reconciled = reconcile_completed(issues, index_for_reconcile, args.dry_run)
+
+    print("\n[3.6] CIキャンセルの自動リラン（claude-review.yml）")
+    rerun_ci = rerun_cancelled_reviews(args.dry_run)
+
+    acted = {
+        "recovered": recovered, "retried": retried, "dispensed": dispensed,
+        "reconciled": reconciled, "rerun_ci": rerun_ci,
+    }
     moved = sum(len(v) for v in acted.values())
 
     inflight = [i for i in issues if i["labelNames"] & INFLIGHT]
@@ -631,13 +760,25 @@ def main() -> int:
     # ready の有無は条件に入れない。
     exhausted = moved == 0 and not inflight
 
-    print(f"\n動かした件数: {moved} / 作業中: {len(inflight)} / 着手可能: {len(ready)}")
-    if exhausted:
-        print("\n[4] 着手可能な仕事が尽きました。枯渇レポートを出します")
+    # 2026-09-25 新設（停滞要因分析 ④）: 「完全に尽きた」時だけ報告する設計だと、
+    # 他に着手可能な作業が1件でも残る限り、何日放置された auto:blocked があっても
+    # 誰にも通知されない（実測: 枯渇レポートが一度も発火していなかった）。
+    # 長期滞留の有無を別条件として持ち、どちらか一方が成立すれば報告する。
+    stale_blocked_now = [
+        i for i in issues
+        if L_BLOCKED in i["labelNames"] and age_minutes(i["updatedAt"]) >= BLOCKED_ESCALATION_MIN
+    ]
+    should_report = exhausted or bool(stale_blocked_now)
+
+    print(f"\n動かした件数: {moved} / 作業中: {len(inflight)} / 着手可能: {len(ready)} "
+          f"/ 長期滞留(auto:blocked): {len(stale_blocked_now)}")
+    if should_report:
+        reason = "着手可能な仕事が尽きました" if exhausted else f"{len(stale_blocked_now)}件の長期滞留を検出しました"
+        print(f"\n[4] {reason}。レポートを出します")
         index = E.W.load_packages(args.wbs)
         publish_report(build_report(issues, ready, owner_only, acted, index), args.dry_run)
     else:
-        print("\n[4] まだ進められる仕事があるため、レポートは出しません")
+        print("\n[4] まだ進められる仕事があり、長期滞留も無いため、レポートは出しません")
 
     if gh_out := os.environ.get("GITHUB_OUTPUT"):
         with open(gh_out, "a", encoding="utf-8") as fh:

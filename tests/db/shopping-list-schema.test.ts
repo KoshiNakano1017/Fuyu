@@ -178,8 +178,12 @@ describeDb("クエストとの紐付けは品目側の1列（完了条件7 ／ v
   });
 
   test("quest_id が quests を参照している", () => {
+    // ★ `regclass::text` と文字列を比べない。`public` が search_path にあるかどうかで
+    //    `quests` と `public.quests` のどちらが返るかが変わり、環境依存で落ちる
+    //    （実際に CI で `Expected: "public.quests" / Received: "quests"` で落ちた）。
+    //    OID 同士（`= 'public.quests'::regclass`）で比べれば表記に依存しない。
     const referenced = query(`
-      SELECT c.confrelid::regclass::text
+      SELECT c.confrelid = 'public.quests'::regclass
       FROM   pg_constraint c
       WHERE  c.conrelid = '${SHOPPING_TABLE}'::regclass
         AND  c.contype = 'f'
@@ -187,7 +191,7 @@ describeDb("クエストとの紐付けは品目側の1列（完了条件7 ／ v
                                WHERE a.attrelid = '${SHOPPING_TABLE}'::regclass
                                  AND a.attname = 'quest_id')]::smallint[];
     `);
-    expect(referenced).toBe("public.quests");
+    expect(referenced).toBe("t");
   });
 
   test("品目を参照する中間テーブルが1つも無い", () => {

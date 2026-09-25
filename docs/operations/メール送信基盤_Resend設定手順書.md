@@ -5,8 +5,8 @@ doc_type: 運用
 status: ドラフト
 owner: プロジェクトオーナー
 date: 2026-09-22
-updated: 2026-09-22
-version: 0.1.0
+updated: 2026-09-24
+version: 0.3.0
 tags:
   - 浮遊街アプリ
   - メール送信
@@ -130,45 +130,245 @@ https://resend.com/api-keys
 
 ## 3. DNS レコード投入（✋ 手作業）
 
-### 3-1. 作業場所
+> [!abstract] この節だけで完結させるための要約
+> **誰が**: お名前.com のアカウント保有者（§1-2 で確定させた DNS 管理者）
+> **どこで**: レンタルサーバー コントロールパネル <https://cp.onamae.ne.jp/>（**お名前.com Navi ではない**）
+> **何を**: レコードを **4件“追加”するだけ**。既存レコードの変更・削除は一切しない
+> **所要**: 入力10分 ＋ 反映待ち15分〜最大72時間
+> **戻せるか**: 追加した4件を消せば原状復帰。既存メール（`mail89.onamae.ne.jp`）には影響しない
 
-ネームサーバが `ns-rs*.gmoserver.jp` なので、**お名前.com Navi の「DNS設定」ではなく
-レンタルサーバー（RSプラン）のコントロールパネル**側です。
+### 3-1. 作業場所の判定 — Navi ではなくコントロールパネル
 
-- [DNSレコードを追加/編集したい（RSプラン）](https://help.onamae.com/answer/20311)
-- [DNSレコードの設定方法は？](https://help.onamae.com/answer/14353)
+お名前.com には DNS を編集できる画面が**2つ**あり、**権威DNSとして動いている側でしか設定が効きません**。
+判定は現在のネームサーバで行います。
 
-### 3-2. 入れるレコード
+```bash
+nslookup -type=NS fuyuugai.com 8.8.8.8
+```
 
-> [!warning] 以下は 2026-09-22 時点の発行値
+| 返ってきた NS | 設定すべき画面 |
+| --- | --- |
+| **`ns-rs1.gmoserver.jp` / `ns-rs2.gmoserver.jp`** | **← 本件。レンタルサーバー コントロールパネル** |
+| `01.dnsv.jp` / `02.dnsv.jp` など | お名前.com Navi の「DNSレコード設定」 |
+
+2026-09-22 時点の実測は `ns-rs*.gmoserver.jp` なので **コントロールパネル側**です。
+Navi の「DNS設定/転送設定」に入力しても**1件も反映されません**（最も多い時間の溶かし方）。
+
+**公式手順**
+
+- [DNSレコードを追加/編集したい（ベーシック・RSプラン）](https://help.onamae.com/answer/20311) ← **本件の正**
+- [コントロールパネルへのログインについて](https://help.onamae.com/answer/20199) ／ [ログインするアカウント名とは](https://help.onamae.com/answer/20194)
+- [ネームサーバー（DNS）の設定方法は？（RSプラン）](https://help.onamae.com/answer/20306)
+- [（参考）Navi 側の DNSレコード設定](https://help.onamae.com/answer/14353) ← 本件では**使いません**
+
+### 3-2. ログイン
+
+<https://cp.onamae.ne.jp/>
+
+- ログインIDは **お名前ID（会員ID）** か、コントロールパネル専用の**アカウント名**のどちらでも可
+  （[2021-04 の仕様変更](https://www.onamae.com/news/article/11046/)）
+- **ドメイン（Navi）のパスワードとサーバー（CP）のパスワードは別物**です。Navi に入れても CP には入れません
+
+### 3-3. 投入前スナップショットを取る（切り戻し用・必須）
+
+**触る前に現状を記録します。** §3-8 の切り戻しはこの出力が無いと成立しません。
+
+```bash
+for t in NS MX TXT A CNAME; do echo "=== $t ==="; nslookup -type=$t fuyuugai.com 8.8.8.8; done > dns-before.txt
+nslookup -type=A mail.fuyuugai.com 8.8.8.8 >> dns-before.txt
+cat dns-before.txt
+```
+
+CP 側も、**レコード一覧のスクリーンショットを1枚**残してください。
+
+2026-09-22 時点で **現用のため絶対に触らないもの**:
+
+| レコード | 値 | 用途 |
+| --- | --- | --- |
+| MX（ルート） | `mail89.onamae.ne.jp` | 既存メールの受信 |
+| TXT（ルート） | `v=spf1 include:_spf.onamae.ne.jp ~all` | 既存メールの SPF |
+| A `mail` | `160.251.71.112` | 既存メール |
+| TXT（ルート） | `google-site-verification=BpMVYMO14LjzCtba3KLaqvOcfH3WIfmnFF-Z3r0JvIE` | Search Console の所有確認 |
+
+> [!danger] SPF は「1ドメインに1本」
+> ルートの TXT に **2本目の `v=spf1 ...` を追加してはいけません**。RFC 7208 違反となり、
+> **既存の SPF ごと無効**になります（＝既存メールの到達性が落ちる）。
+> 今回投入する4件に SPF は含まれないため、**原則として追加は不要**です。
+> Resend の Records タブに `v=spf1` 行が表示されている場合は、新規追加ではなく
+> **既存行への `include:` 追記**になるため、**必ずここで手を止めてオーナーに確認**してください。
+
+### 3-4. レコード追加画面へ
+
+CP ログイン後 → 左メニュー **「ドメイン」** → 対象ドメイン **`fuyuugai.com`** → **「DNS」/「DNSレコード設定」** → レコード一覧 → **「追加」**
+
+入力欄はおおむね **ホスト名 / TYPE（レコードタイプ）/ VALUE（指定先）/ TTL / 優先** の5つです。
+
+- **TTL は既定の `3600` のままでよい**
+- **「優先」は MX 専用**。今回の4件では入力しません
+- 画面表記は改修で変わります。食い違ったら [公式手順 20311](https://help.onamae.com/answer/20311) を正としてください
+
+### 3-5. 投入する4件（コピペ用）
+
+> [!warning] 正はダッシュボード。以下は 2026-09-22 時点の写しです
 > ドメインを削除・再作成すると DKIM キーも CNAME も変わります。
-> **必ずダッシュボードの Records タブの値を正としてください。**
+> 作業時は <https://resend.com/domains> → `fuyuugai.com` → **Records** タブを開き、
+> **そちらの値と突き合わせてから**貼ってください。
 
-| # | Type | Name | Content | 必須 |
-| --- | --- | --- | --- | :---: |
-| 1 | TXT | `resend._domainkey` | `p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCfmTJwtyiRglbbfzggLcwPFhoaU1i26H5ffrJKPhp2kzLpeXazVPPsTLReetRHsLyG+aykIRBZfCczpFe60qnu+Bf6NwmQVHvYb1jhWcBU+vYxZogyQhAM1YbbEb/I+uAsTW7zxpyyoVL7rr7mXjXUUAnu3HScYzOXPNe3oiGcRQIDAQAB` | ✅ |
-| 2 | CNAME | `rsend` | `rsend-apne1.forge.rmta.net` | ✅ |
-| 3 | CNAME | `send` | `send.forge.rmta.net` | ✅ |
-| 4 | TXT | `_dmarc` | `v=DMARC1; p=none;` | 任意 |
+#### レコード 1/4 — DKIM（TXT）✅必須
+
+TYPE `TXT` ／ TTL `3600` ／ 優先 なし
+
+**ホスト名**
+
+```
+resend._domainkey
+```
+
+**VALUE**
+
+```
+p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCfmTJwtyiRglbbfzggLcwPFhoaU1i26H5ffrJKPhp2kzLpeXazVPPsTLReetRHsLyG+aykIRBZfCczpFe60qnu+Bf6NwmQVHvYb1jhWcBU+vYxZogyQhAM1YbbEb/I+uAsTW7zxpyyoVL7rr7mXjXUUAnu3HScYzOXPNe3oiGcRQIDAQAB
+```
+
+- 約218文字。TXT の1文字列上限255文字に収まるので **分割不要**
+- **引用符 `"` は付けない**（CP 側が自動で付けます）
+- 貼り付け後、**末尾が `IDAQAB` で終わっている**ことと、前後に空白・改行が混ざっていないことを確認
+
+#### レコード 2/4 — 送信MTA（CNAME）✅必須
+
+TYPE `CNAME` ／ TTL `3600`
+
+**ホスト名**
+
+```
+rsend
+```
+
+**VALUE**
+
+```
+rsend-apne1.forge.rmta.net
+```
+
+> [!danger] `rsend` に `e` は入りません
+> レコード1の `resend._domainkey` と1文字違いです。**手打ち禁止・コピペのみ。**
+> `partially_verified` で止まる原因の第1位がこれです。
+
+#### レコード 3/4 — 送信MTA（CNAME）✅必須
+
+TYPE `CNAME` ／ TTL `3600`
+
+**ホスト名**
+
+```
+send
+```
+
+**VALUE**
+
+```
+send.forge.rmta.net
+```
+
+#### レコード 4/4 — DMARC（TXT）任意
+
+TYPE `TXT` ／ TTL `3600`
+
+**ホスト名**
+
+```
+_dmarc
+```
+
+**VALUE**
+
+```
+v=DMARC1; p=none;
+```
 
 **認証に必要なのは 1〜3 です。** 4 は後から足しても構いません。
 
-> [!warning] レコード4はドメイン全体に効く
+> [!warning] レコード4はドメイン全体に効きます
 > `_dmarc` をルートに置くと、**`@fuyuugai.com` から出る既存のメールすべて**が DMARC の評価対象に
 > なります。`p=none` は監視のみで何も拒否しないため安全ですが、既存メール運用への変更である点は
 > 認識しておくこと。`p=quarantine` / `p=reject` へ上げるのは、配信が安定してから。
 
-### 3-3. 入力時の落とし穴
+#### ⚠️ ネット上の記事とレコードの形が違います
 
-1. **`rsend` に `e` は入らない** — レコード1の `resend._domainkey` と別物。手打ちせず必ずコピペ
-2. **ホスト名は相対指定** — `resend._domainkey` とだけ入れる。`.fuyuugai.com` を付けると
-   `resend._domainkey.fuyuugai.com.fuyuugai.com` になる。保存後に一覧で最終形を目視すること
-3. **CNAME の末尾ピリオド** — 値が `send.forge.rmta.net.fuyuugai.com` になる場合は
-   `send.forge.rmta.net.` と末尾ピリオド付きで入力
-4. **DKIM は分割不要** — 約218文字で TXT の1文字列上限255文字に収まる
-5. **既存レコードを触らない** — ルートの `MX mail89.onamae.ne.jp`、`TXT v=spf1 include:_spf.onamae.ne.jp ~all`、
-   `mail.fuyuugai.com` の A レコード（`160.251.71.112`）はすべて現用
-6. **「Enable Receiving」は押さない** — 本件は送信専用。押すとルートに MX が入り既存の受信と競合する
+検索で出てくる「Resend × お名前.com」記事の多くは**旧世代の構成**を載せています。
+
+| | ネット記事に多い旧構成 | **本件（ダッシュボード発行値）** |
+| --- | --- | --- |
+| SPF | `send` に `v=spf1 include:amazonses.com ~all` | **無し** |
+| DKIM | `resend._domainkey.send` の CNAME | **`resend._domainkey` の TXT** |
+| バウンス | `send` に MX `feedback-smtp.*.amazonses.com` | **無し** |
+| 送信MTA | — | **`rsend` / `send` の CNAME（`forge.rmta.net`）** |
+
+本件は **Tokyo リージョンの `forge.rmta.net` 系**で別物です。**記事に合わせないでください。**
+迷ったら常に Resend の **Records タブが正**です。
+
+### 3-6. 保存直後の目視チェック
+
+4件を保存したら、レコード一覧画面で以下を**目で**確認します（§9 の再発防止項目と対応）。
+
+- [ ] ホスト名が `resend._domainkey.fuyuugai.com.fuyuugai.com` のように**二重になっていない**
+- [ ] `rsend` と `resend._domainkey` を**取り違えていない**
+- [ ] CNAME の VALUE が `send.forge.rmta.net.fuyuugai.com` に**なっていない**
+      → なっていたら `send.forge.rmta.net.` と**末尾ピリオド付き**で入れ直す
+- [ ] DKIM の VALUE が**途中で切れていない**（末尾 `IDAQAB`）
+- [ ] 既存の MX / SPF TXT / A `mail` が **`dns-before.txt` と同じ**
+- [ ] 「Enable Receiving」等の**受信有効化を押していない**（押すとルートに MX が入り既存受信と競合）
+
+### 3-7. 反映の確認
+
+```bash
+nslookup -type=TXT   resend._domainkey.fuyuugai.com 8.8.8.8
+nslookup -type=CNAME rsend.fuyuugai.com             8.8.8.8
+nslookup -type=CNAME send.fuyuugai.com              8.8.8.8
+```
+
+期待される出力（抜粋）:
+
+```
+resend._domainkey.fuyuugai.com  text = "v=DKIM1; k=rsa; p=<公開鍵。Resend のダッシュボードが表示する値と一致すること>"
+rsend.fuyuugai.com  canonical name = rsend-apne1.forge.rmta.net
+send.fuyuugai.com   canonical name = send.forge.rmta.net
+```
+
+CLI を使わない担当者向け（ブラウザだけで確認できます）:
+
+- [Google Admin Toolbox Dig](https://toolbox.googleapps.com/apps/dig/)
+- [MXToolbox SuperTool](https://mxtoolbox.com/SuperTool.aspx)
+
+> [!note] 公開鍵の実値は本書に書かない
+> DKIM の公開鍵は秘密ではないが、**値を書くと鍵のローテーションで本書が必ず古くなる**。
+> さらに高エントロピーの文字列は `secret-scan`（gitleaks）が誤検知するため、CI が赤くなる。
+> 照合は「Resend のダッシュボードが表示する値と `nslookup` の出力が一致するか」で行う。
+
+反映は通常15分〜1時間、DNS 伝播の都合で最大72時間。**Verify を連打しても早くなりません。**
+3件そろったら **§4-2 の Verify** へ進みます。
+
+### 3-8. 切り戻し
+
+追加した4件を CP から**削除**するだけで原状復帰します。
+
+1. CP のレコード一覧から、`resend._domainkey` / `rsend` / `send` / `_dmarc` の4件を削除
+2. §3-3 の `dns-before.txt` と突き合わせ、**既存3件（MX / SPF TXT / A `mail`）が投入前と一致**することを確認
+3. Resend 側は `unverified` に戻るだけで、課金・アカウントへの影響はありません
+
+### 3-9. 入力時の落とし穴（まとめ）
+
+| # | 落とし穴 | 対策 |
+| --- | --- | --- |
+| 1 | `rsend` に `e` を入れて `resend` にしてしまう | 手打ち禁止。§3-5 のブロックからコピペ |
+| 2 | ホスト名に `.fuyuugai.com` を付けて二重になる | **相対指定**。保存後に一覧で最終形を目視（§3-6） |
+| 3 | CNAME の値に自ドメインが後置される | `send.forge.rmta.net.` と**末尾ピリオド付き**で入力 |
+| 4 | DKIM を分割してしまう | 約218文字。**255文字以内なので分割不要** |
+| 5 | 既存の MX / SPF / A を編集してしまう | §3-3 で現用レコードを確認してから着手 |
+| 6 | ルートに2本目の SPF を追加してしまう | **SPF は1ドメイン1本**。追記が必要ならオーナー確認（§3-3） |
+| 7 | 「Enable Receiving」を押す | 本件は**送信専用**。押さない |
+| 8 | Navi の「DNS設定」に入力して効かない | NS が `ns-rs*.gmoserver.jp` なら **CP 側**（§3-1） |
+| 9 | ネット記事の旧レコード構成を混入させる | Records タブが正（§3-5 の比較表） |
 
 ---
 
@@ -244,9 +444,9 @@ Sender name:  浮遊街
 
 ## 6. アプリの設定 ＝ 経路②（🤖）
 
-> [!warning] ブランチに注意
-> Resend の実装（`src/lib/mail/resend.ts`）は **`main` に未マージ**です。
-> 作業は `fix/reserve-nodejs-runtime` / `feature/2-1d-2-7-auth-impl` 等で行うこと。
+> [!note] 2026-09-24 追記: `main` にマージ済みです
+> 旧記載の「`main` に未マージ」は誤りでした。`src/lib/mail/resend.ts` は `main` に存在します
+> （確認: `git rev-parse --abbrev-ref HEAD` ＝ `main` で当該ファイルを検出）。ブランチを分ける必要はありません。
 
 ### 6-1. ローカル
 
@@ -257,7 +457,20 @@ cp .env.example .env
 ```
 RESEND_API_KEY=<§2-2 の app-reserve キー>
 RESEND_FROM_EMAIL=no-reply@fuyuugai.com
+MAIL_FROM_ADDRESS=浮遊街アプリ <no-reply@fuyuugai.com>
 ```
+
+> [!warning] 送信元の変数が2つあります（2026-09-24 調査）
+> `src/lib/mail/resend.ts` の**関数ごとに読む変数名が違います**。
+>
+> | 関数 | 用途 | 読む変数 | 未設定のとき |
+> | --- | --- | --- | --- |
+> | `sendReservationOtpMail()` | 公開予約OTP | **`RESEND_FROM_EMAIL`** | 既定値なし → `not_configured` で静かに失敗 |
+> | `sendPlainTextEmail()` | 招待の案内メール | `MAIL_FROM_ADDRESS` | 既定値へ落ちる |
+>
+> `RESEND_FROM_EMAIL` は `.env.example` に項目自体がありませんでした（同日追加済み）。
+> `sendPlainTextEmail()` 側も `MAIL_FROM_ADDRESS` → `RESEND_FROM_EMAIL` → 既定値の順に
+> 見るよう同日修正しましたが、**両方入れておくのが確実**です。
 
 ### 6-2. Vercel
 
@@ -292,9 +505,22 @@ Sensitive にすることだけ（2026-09-21 障害の原因）。
 
 ## 7. リポジトリ側の修正（🤖）
 
-### 7-1. `fuyugai.jp` → `fuyuugai.com`（6ファイル12箇所）
+### 7-1. `fuyugai.jp` → `fuyuugai.com` ✅ 2026-09-24 完了
 
 正本 `docs/spec/CONSOLIDATED_DECISIONS.md` §16-2 を直してから派生へ反映する。
+**実測は6ファイル15箇所**（当初見積り「12箇所」より3箇所多い）。加えて**コード2ファイル**も誤記していた。
+
+| ファイル | 箇所 | 状態 |
+| --- | --- | --- |
+| `docs/spec/CONSOLIDATED_DECISIONS.md`（正本） | 5 | ✅ 訂正注記つきで修正 |
+| `QUESTIONS.md` | 4 | ✅ |
+| `docs/spec/basic-design/infra/システムアーキテクチャ.md` | 2 | ✅ |
+| `docs/spec/detailed-design/API設計.md` | 2 | ✅ |
+| `docs/spec/detailed-design/非機能要件詳細.md` | 1 | ✅ |
+| `docs/spec/WBS_Phase1.md` | 1 | ✅ |
+| **`src/lib/mail/resend.ts`** | 2 | ✅ **送信元の既定値が未登録ドメインだった** |
+| **`.env.example`** | 1 | ✅ |
+| `docs/spec/OLD/2026-08-22_..._OLD.md` | 1 | ⏭️ OLD のため意図的に据え置き |
 
 ```
 docs/spec/CONSOLIDATED_DECISIONS.md            ← 正本
@@ -306,20 +532,35 @@ QUESTIONS.md
 docs/spec/OLD/2026-08-22_..._OLD.md            ← 誤記の出どころ。OLD なので修正しない
 ```
 
-### 7-2. `scripts/check-env.mjs` に RESEND 検査を追加
+### 7-2. `scripts/check-env.mjs` に RESEND 検査を追加 ✅ 2026-09-24 完了（**方式を変更**）
+
+> [!danger] 当初案（`errors.push`）は採用しませんでした
+> 本節は当初、`VERCEL_ENV === "production"` のとき `errors.push` でビルドを落とす案でした。
+> **これは `check-env.mjs` 冒頭の警告と正面から衝突します。**
+>
+> `RESEND_API_KEY` は §6-2 のとおり Vercel へ **Secret（Sensitive）型**で登録します。
+> Sensitive 型の値は**ビルドへ渡りません**。したがって「正しく設定されていてもビルド時には
+> `null` に見える」ため、必須にすると**設定が正しいのにビルドが落ちます**。
+> これは 2026-09-21 に本番を全滅させた事故と**同じ型**です
+> （`SUPABASE_SERVICE_ROLE_KEY` を必須にして起きた）。
+>
+> よって **`warnings.push` で実装**しました。
 
 ```js
-if (isVercelProduction) {
-  if (read("RESEND_API_KEY") === null) {
-    errors.push("RESEND_API_KEY が未設定です（公開予約の本人確認コードが送れません）");
-  }
-  if (read("RESEND_FROM_EMAIL") === null) {
-    errors.push("RESEND_FROM_EMAIL が未設定です");
-  }
+// ★ RESEND_* も実行時のみ使う。**エラーにしてはならない**（SUPABASE_SERVICE_ROLE_KEY と同じ理由）。
+if (read("RESEND_API_KEY") === null) {
+  warnings.push("RESEND_API_KEY がビルド時には見えません。Vercel の Secret 型なら正常なことがあります。…");
+}
+
+if (read("RESEND_FROM_EMAIL") === null) {
+  warnings.push("RESEND_FROM_EMAIL がビルド時には見えません。…");
 }
 ```
 
-`VERCEL_ENV === "production"` のときだけ必須にすれば CI は赤くならない。
+> [!caution] 警告では §6-3 の穴は塞ぎきれません
+> 警告はビルドログに変数名を残すだけで、**ビルドは通ります**。
+> 「未設定でも緑のまま通る」構造自体は残ります。完全に塞ぐには実行時のヘルスチェック
+> （例: 管理画面に送信基盤の疎通状態を出す）が必要です。**未対応**（§10 #5）。
 
 ---
 
@@ -346,6 +587,9 @@ if (isVercelProduction) {
 
 ## 9. 既知の落とし穴（再発防止）
 
+> [!note] DNS 入力まわりは §3-9 が正本
+> 下表の 1〜2 は要約です。実作業時は **§3-9 の9項目**を見てください。
+
 | # | 落とし穴 | 対策 |
 | --- | --- | --- |
 | 1 | `rsend` と `resend._domainkey` の取り違え | コピペのみ。手打ち禁止 |
@@ -362,10 +606,11 @@ if (isVercelProduction) {
 
 | # | 論点 | 状態 |
 | --- | --- | --- |
-| 1 | SPF/DKIM の DNS 設定担当者 | **未指名**（仕様書3ファイルに同じ注記） |
+| 1 | SPF/DKIM の DNS 設定担当者 | ✅ **解消**（2026-09-24 にオーナーが投入・認証完了） |
 | 2 | 送信元アドレスのローカル部（`no-reply@` で確定か） | 仮決め |
 | 3 | ルートドメイン運用か、サブドメインへ分離するか | ルートで着手。到達性が落ちたら再検討 |
 | 4 | レート制限 **F-7** の確定値 | §5-2 の実測待ち |
+| 5 | `RESEND_*` 未設定の実行時検知 | **未対応**。§7-2 は警告どまりで、ビルドは緑のまま通る |
 
 > [!note] ルート運用にした場合のリスク
 > `fuyuugai.com` は既存メール（`mail89.onamae.ne.jp`）と評判を共有します。予約OTPは打ち間違い
@@ -379,3 +624,5 @@ if (isVercelProduction) {
 | 版 | 日付 | 変更内容 |
 | --- | --- | --- |
 | 0.1.0 | 2026-09-22 | 新規作成。ドメイン誤記（`fuyugai.jp` → `fuyuugai.com`）の調査結果を反映 |
+| 0.3.0 | 2026-09-24 | DNS認証完了を反映。§7-1（6ファイル15箇所＋コード2ファイル）と §7-2 を実施。§7-2 はエラー案が 2026-09-21 の事故を再演するため警告方式へ変更。§6 の「main 未マージ」誤記を訂正し、送信元変数が `RESEND_FROM_EMAIL` / `MAIL_FROM_ADDRESS` に割れている問題を追記 |
+| 0.2.0 | 2026-09-24 | §3 を作業単位に再構成（3-1〜3-9）。コントロールパネルのログインURL・メニュー経路・入力欄名を追記、レコード4件をコピペ可能な形に分解、投入前スナップショットと切り戻し手順を新設、SPF重複と旧レコード構成混入の注意を追加 |
