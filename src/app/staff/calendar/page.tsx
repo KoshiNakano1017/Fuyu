@@ -67,10 +67,14 @@ export default async function StaffCalendarPage({
 
   const displayNameOf = new Map(types.map((type) => [type.roomType, type.displayName]));
   const days = stayCalendar.buildStaffCalendar({ view, anchorDate, stays, availability });
-  const attentionCount = days.reduce(
-    (total, day) => total + day.entries.filter((entry) => entry.needsAttention).length,
-    0,
+  // 連泊の予約は泊数ぶん日セルに現れるため、`checkinId` で一意化してから数える。
+  // 行数のまま数えると「3泊の要確認予約1件」が「3件」になり、見出しの「予約が N件」と食い違う。
+  const attentionCheckinIds = new Set(
+    days.flatMap((day) =>
+      day.entries.filter((entry) => entry.needsAttention).map((entry) => entry.checkinId),
+    ),
   );
+  const attentionCount = attentionCheckinIds.size;
 
   return (
     <main className="mx-auto flex max-w-5xl flex-col gap-4 p-6">
@@ -206,18 +210,40 @@ function normalizeView(candidate: string | undefined): StaffCalendarView {
  * 基準日。`date=YYYY-MM-DD` を優先し、無ければ従来の `month=YYYY-MM`（月初）を受ける。
  *
  * `month` も受け続けるのは、この画面のブックマーク・既存リンクを切らないためである。
+ *
+ * 書式だけでなく**日付として存在するか**まで見る。`?date=2026-02-30` や `?month=2026-13` は
+ * 書式は通るが、そのまま渡すと `datesOfWeek()`／`shiftAnchor()` の `toISOString()` が
+ * RangeError を投げ、画面が 500 になる。不正な指定は今日へ倒す。
  */
 function normalizeAnchorDate(
   candidateDate: string | undefined,
   candidateMonth: string | undefined,
 ): string {
-  if (candidateDate !== undefined && /^\d{4}-\d{2}-\d{2}$/.test(candidateDate)) {
+  if (candidateDate !== undefined && isRealDate(candidateDate)) {
     return candidateDate;
   }
-  if (candidateMonth !== undefined && /^\d{4}-\d{2}$/.test(candidateMonth)) {
+  if (
+    candidateMonth !== undefined &&
+    /^\d{4}-\d{2}$/.test(candidateMonth) &&
+    isRealDate(`${candidateMonth}-01`)
+  ) {
     return `${candidateMonth}-01`;
   }
   return new Date().toISOString().slice(0, 10);
+}
+
+/**
+ * `YYYY-MM-DD` が実在する日付か。
+ *
+ * `Number.isNaN` だけでは足りない環境差を避けるため、UTC で組み直した値が入力と一致するかまで見る
+ * （繰り上がりを起こす指定を「妥当」と判定しないため）。
+ */
+function isRealDate(candidate: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(candidate)) {
+    return false;
+  }
+  const parsed = new Date(`${candidate}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === candidate;
 }
 
 /** 取得する期間。カレンダーに並べる日付の端から端まで。 */
