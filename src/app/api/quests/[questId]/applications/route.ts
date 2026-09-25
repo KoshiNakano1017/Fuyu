@@ -9,6 +9,12 @@ type RouteContext = {
 };
 
 /**
+ * 受け付けられなかったときの文言。**理由で書き分けない**（v13 §5.10.6 末尾）。
+ * 事前のゲート拒否と、DB 側の上限ガード（0041）に当たった場合の両方でこれを返す。
+ */
+const REJECTED_MESSAGE = "このクエストは受注できません";
+
+/**
  * `POST /api/quests/{questId}/applications` — 受注申請（API設計 §138）。
  *
  * ## 本ファイルの範囲は**認可ゲートだけ**である（2026-09-19 オーナー決定 B）
@@ -42,7 +48,7 @@ export async function POST(_request: Request, context: RouteContext): Promise<Ne
   if (!canApplyToQuest(viewer, quest)) {
     // 拒否の理由（施錠なのか締切済みなのか）は返さない。返すと、詳細を伏せている
     // 施錠クエストの状態を推測する手がかりになる（v13 §5.10.6 末尾）。
-    return NextResponse.json({ error: "このクエストは受注できません" }, { status: 403 });
+    return NextResponse.json({ error: REJECTED_MESSAGE }, { status: 403 });
   }
 
   const result = await createQuestApplication({ questId, memberId: viewer.memberId });
@@ -52,6 +58,10 @@ export async function POST(_request: Request, context: RouteContext): Promise<Ne
       // 二重申請は「もう申請済み」であることを伝えてよい。本人の自分の状態であり、
       // 施錠クエストの内情を漏らすことにはならない。
       return NextResponse.json({ error: "すでに申請済みです" }, { status: 409 });
+    }
+    if (result.reason === "unavailable") {
+      // 枠が無い場合。ゲート拒否と同じ文言・同じステータスで返す（理由を区別しない）。
+      return NextResponse.json({ error: REJECTED_MESSAGE }, { status: 403 });
     }
     return NextResponse.json({ error: "受注申請を登録できませんでした" }, { status: 500 });
   }

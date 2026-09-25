@@ -27,10 +27,13 @@ type QuestBoardRow = {
   required_certification: string[] | null;
   reward_uii: number | null;
   description: string | null;
+  recruit_count: number;
+  /** 枠を占有している受注申請の件数（0041 の `quest_occupied_application_count()`） */
+  application_count: number | null;
 };
 
 const QUEST_BOARD_COLUMNS =
-  "quest_id, title, category_id, origin_type, status, guest_allowed, core_only_reward, required_certification, reward_uii, description";
+  "quest_id, title, category_id, origin_type, status, guest_allowed, core_only_reward, required_certification, reward_uii, description, recruit_count, application_count";
 
 function toQuest(row: QuestBoardRow): Quest {
   return {
@@ -44,6 +47,10 @@ function toQuest(row: QuestBoardRow): Quest {
     requiredCertification: row.required_certification ?? [],
     rewardUii: row.reward_uii,
     description: row.description,
+    recruitCount: row.recruit_count,
+    // 読めなかった場合は「満了」に倒す。上限は厳しい側が既定でなければならない
+    // （DB 側の 0041 のガードが最後の砦だが、画面のボタンだけが開くのを避ける）。
+    applicationCount: row.application_count ?? row.recruit_count,
   };
 }
 

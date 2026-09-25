@@ -9,6 +9,7 @@
 
 import {
   isLockedForViewer,
+  isRecruitmentFull,
   lacksRequiredCertification,
   type Quest,
   type QuestBoardViewer,
@@ -40,6 +41,12 @@ export function canApplyToQuest(viewer: QuestBoardViewer, quest: Quest): boolean
     return false;
   }
   if (isLockedForViewer(quest, viewer)) {
+    return false;
+  }
+  // 募集人数の範囲でしか受注できない（v13 §5.3 note L844）。DB 側にも同じ上限がある
+  // （0041 の `quest_applications_guard_capacity()`）が、一般会員のセッションは他人の
+  // 申請行を読めないため、件数は `v_quest_board.application_count` 経由で受け取る。
+  if (isRecruitmentFull(quest)) {
     return false;
   }
   // 資格の要る作業を未保有者が受注すると、事故は取り返しがつかない（重機・チェーンソー）。

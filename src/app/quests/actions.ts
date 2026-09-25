@@ -14,7 +14,7 @@ import {
   membershipApplyDenialMessage,
 } from "@/lib/membership/registration";
 import { canApplyToQuest } from "@/lib/quests/application-gate";
-import { createQuestApplication } from "@/lib/quests/applications";
+import { createQuestApplication, type CreateApplicationResult } from "@/lib/quests/applications";
 import { fetchQuestById, readQuestBoardViewer } from "@/lib/quests/fetch-board";
 
 /**
@@ -115,16 +115,29 @@ export async function applyToQuestAction(
 
   const result = await createQuestApplication({ questId, memberId: viewer.memberId });
   if (!result.ok) {
-    return {
-      status: "error",
-      message:
-        result.reason === "duplicate"
-          ? "このクエストにはすでに申請済みです。運営の指示をお待ちください。"
-          : "申請できませんでした。時間をおいて再試行してください。",
-    };
+    return { status: "error", message: applyDenialMessage(result.reason) };
   }
 
   revalidatePath("/quests");
   revalidatePath("/reports");
   return { status: "done", message: "受注を申請しました。運営の指示をお待ちください。" };
+}
+
+/**
+ * 登録が通らなかった理由を文言に写す（`applyToQuestAction` の下位問題）。
+ *
+ * 二重申請だけは別の文言でよい。本人が自分の状態を知るだけで、クエストの内情は漏れない。
+ * それ以外（`unavailable` ＝ 0041 の上限ガードに当たった場合を含む）は、
+ * ゲート拒否と**同じ一律の文言**にする（v13 §5.10.6 末尾）。
+ */
+function applyDenialMessage(
+  reason: Exclude<CreateApplicationResult, { ok: true }>["reason"],
+): string {
+  if (reason === "duplicate") {
+    return "このクエストにはすでに申請済みです。運営の指示をお待ちください。";
+  }
+  if (reason === "unavailable") {
+    return "このクエストは受注できません。";
+  }
+  return "申請できませんでした。時間をおいて再試行してください。";
 }

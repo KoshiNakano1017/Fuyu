@@ -37,6 +37,17 @@ export type Quest = {
    * （既定の施錠クエストはゲストにのみ返さない。§areDetailsHiddenForViewer 参照）。
    */
   coreOnlyReward: boolean;
+  /** 募集人数（`quests.recruit_count`）。ここまでしか受注できない（v13 §5.3 note L844） */
+  recruitCount: number;
+  /**
+   * 募集枠を占有している受注申請の件数（`v_quest_board.application_count`）。
+   * 取り下げ（`キャンセル`）・`差戻し` は数えない（数え方の正本は 0041 の
+   * `quest_occupied_application_count()`）。
+   *
+   * ⚠️ クライアントへ渡さない。カードに載せてよいのは「タイトル・カテゴリ・施錠状態まで」
+   *    であり（v13 §5.10.6 末尾）、`board.ts` はこの列を `QuestBoardItem` へ写さない。
+   */
+  applicationCount: number;
   /** 報酬額。返さない条件は `areDetailsHiddenForViewer()` を参照 */
   rewardUii?: number | null;
   /** 指示内容。同上 */
@@ -103,6 +114,17 @@ export function lacksRequiredCertification(quest: Quest, viewer: QuestBoardViewe
   return quest.requiredCertification.some(
     (certification) => !viewer.certifications.includes(certification),
   );
+}
+
+/**
+ * 募集人数が埋まっているか（v13 §5.3 note L844「募集人数の**範囲で**受注可」）。
+ *
+ * `>=` で比べる。`===` だと、既に溢れているクエスト（運用ミス・`recruit_count` の
+ * 引き下げで起こりうる）にだけ枠が開く。DB 側の上限ガード（0041 の
+ * `quest_applications_guard_capacity()`）も同じ不等号で書いてある。
+ */
+export function isRecruitmentFull(quest: Quest): boolean {
+  return quest.applicationCount >= quest.recruitCount;
 }
 
 /**
