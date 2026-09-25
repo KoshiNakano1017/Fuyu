@@ -10,6 +10,7 @@ import { AccessDeniedError, requireAdmin } from "@/lib/auth/guard";
 import { sumUnsettled } from "@/lib/billing/unsettled";
 import { fetchCustomerDetail } from "@/lib/customers/fetch-customers";
 import { fetchStayHistory } from "@/lib/customers/fetch-stay-history";
+import { STAY_TICKET_ADJUST_MAX_NIGHTS } from "@/lib/lodging/stay-ticket-adjust";
 import {
   fetchStayTicketBalance,
   fetchStayTicketHistory,
@@ -187,6 +188,7 @@ export default async function CustomerDetailPage({
         balance={stayTicketBalance}
         history={stayTicketHistory}
         txLabels={STAY_TICKET_TX_LABELS}
+        maxNights={STAY_TICKET_ADJUST_MAX_NIGHTS}
         adjust={adjustStayTicketsAction}
       />
 

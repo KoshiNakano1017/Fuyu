@@ -3,7 +3,6 @@
 import { useActionState } from "react";
 
 import { SUBMIT_IDLE, type SubmitState } from "@/lib/forms/submit-state";
-import { STAY_TICKET_ADJUST_MAX_NIGHTS } from "@/lib/lodging/stay-ticket-adjust";
 import type { StayTicketEntry, StayTicketTxType } from "@/lib/lodging/stay-tickets";
 
 export type AdjustAction = (prev: SubmitState, formData: FormData) => Promise<SubmitState>;
@@ -33,6 +32,7 @@ export function StayTicketAdjuster({
   balance,
   history,
   txLabels,
+  maxNights,
   adjust,
 }: {
   memberId: string;
@@ -40,6 +40,14 @@ export function StayTicketAdjuster({
   history: readonly StayTicketEntry[];
   /** 種別の表示名。サーバ専用モジュールを client から import しないため props で受け取る */
   txLabels: Record<StayTicketTxType, string>;
+  /**
+   * 1回で動かせる幅（泊）。
+   *
+   * ★ 定数を client から import しない。出どころ（`stay-ticket-adjust.ts`）は
+   * 認可判定のため `@/lib/auth/session` を読み、それが `next/headers` へ連なる
+   * （client バンドルへ入るとビルドが落ちる）。**判定も定数もサーバ側に置いたまま値だけを渡す。**
+   */
+  maxNights: number;
   adjust: AdjustAction;
 }) {
   const [state, submit, isPending] = useActionState(adjust, SUBMIT_IDLE);
@@ -62,8 +70,8 @@ export function StayTicketAdjuster({
             name="nights"
             required
             step={1}
-            min={-STAY_TICKET_ADJUST_MAX_NIGHTS}
-            max={STAY_TICKET_ADJUST_MAX_NIGHTS}
+            min={-maxNights}
+            max={maxNights}
             placeholder="+4 / -1"
             className="w-24 rounded border border-neutral-300 px-2 py-1 text-sm"
           />
