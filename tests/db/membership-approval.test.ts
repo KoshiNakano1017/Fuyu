@@ -12,18 +12,18 @@ import { FIXTURE_SQL, TEST_MEMBERS } from "./helpers/fixtures";
 import { describeDb, query, sqlstateOf } from "./helpers/psql";
 
 const APPLICATION_ID = "00000000-0000-0000-0000-0000000000e1";
-const GUEST_ID = TEST_MEMBERS.preRegistered.memberId;
+
+/** ★ `role = 'guest'` の役。共通フィクスチャへ追加した（昇格の検証に要る） */
+const GUEST_ID = TEST_MEMBERS.guest.memberId;
 
 /**
- * ゲスト役を1名作り、その申請を「入金の記録まで済んだ状態」で置く。
+ * ゲストの申請を「入金の記録まで済んだ状態」で置く。
  *
- * `preRegistered` は `role = 'member'` なので、昇格を検証するために `guest` へ落としてから使う
- * （フィクスチャ側を変えると他の試験へ影響するため、ここで局所的に整える）。
- * ★ 申請の INSERT は運営の代理として行う（`0037` のガードが操作者の申告を要求する）。
+ * ★ 申請の INSERT は運営の代理として行う（`0037` のガードが操作者の申告を要求する。
+ * `postgres` で流すと `current_actor_role()` が NULL になり「本人以外の申請」として弾かれる）。
  */
 const APPLIED = `
 ${FIXTURE_SQL}
-UPDATE public.members SET role = 'guest', account_status = 'active' WHERE member_id = '${GUEST_ID}';
 DO $$ BEGIN PERFORM set_config('app.operator_id', '${TEST_MEMBERS.admin.memberId}', true); END $$;
 INSERT INTO public.membership_applications
   (application_id, member_id, billed_amount_yen, granted_nights, payment_method, paid_at)
@@ -147,7 +147,7 @@ describeDb("決済の記録が承認の前提である（v13 §5.10.4）", () =>
     expect(
       sqlstateOf(`
         ${FIXTURE_SQL}
-        DO $$ BEGIN PERFORM set_config('app.operator_id', '${TEST_MEMBERS.admin.memberId}', true); END $$;
+                DO $$ BEGIN PERFORM set_config('app.operator_id', '${TEST_MEMBERS.admin.memberId}', true); END $$;
         INSERT INTO public.membership_applications
           (application_id, member_id, billed_amount_yen, granted_nights)
         VALUES ('${APPLICATION_ID}', '${GUEST_ID}', 0, 0);
