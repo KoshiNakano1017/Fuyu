@@ -18,6 +18,8 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 
 import { normalizeMatchValue, type MatchCandidate, type MatchKind } from "./matching";
 
+export type { MatchKind };
+
 /**
  * 照合キーから候補を探す（v13 §5.8.3「`contact_info` を第1優先」）。
  *

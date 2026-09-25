@@ -132,6 +132,14 @@ export default async function AdminDashboardPage() {
         街人登録 申請一覧へ（決済QRの送付・入金確認・承認）
       </Link>
 
+      {/*
+        名寄せ 運営承認キュー（WBS 10-2 ／ v13 §5.8.3 ①）。
+        候補が複数見つかった名寄せはここへ回る（自動連携しない）。
+      */}
+      <Link href="/admin/members/link-requests" className="text-sm underline">
+        名寄せ 運営承認キューへ（候補が複数の連携を判断する）
+      </Link>
+
       <section className="flex flex-col gap-2">
         <h2 className="text-lg font-bold">本日の残枠</h2>
         {availability.length === 0 ? (

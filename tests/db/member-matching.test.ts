@@ -228,3 +228,55 @@ describeDb("キューと監査ログは staff だけが読める（PII-A を含�
     ).toBe("42501");
   });
 });
+
+describeDb("★ 承認は申請の決着まで1トランザクションで行う（`0040` の ⑤）", () => {
+  const ENQUEUED = `
+${WITH_IDENTIFIER}
+INSERT INTO public.member_link_requests
+  (request_id, auth_user_id, matched_kind, matched_value, candidate_count, reason)
+VALUES ('00000000-0000-0000-0000-0000000000d9', '${SPARE_AUTH}', 'email', '${CONTACT}', 2,
+        'メールに2件が一致したため運営の確認へ回した');
+`;
+
+  const APPROVE_VIA_REQUEST = `
+SELECT public.link_member_by_matching(
+  '${PRE_ID}', '${SPARE_AUTH}', '${TEST_MEMBERS.admin.memberId}',
+  '運営承認（メールアドレスの一致 2件から選択）',
+  '00000000-0000-0000-0000-0000000000d9', '${TEST_MEMBERS.admin.memberId}', 'email', '${CONTACT}'
+);
+`;
+
+  test("申請が承認へ進み、決定者と結合先が入る", () => {
+    const row = query(`
+      ${ENQUEUED}
+      ${APPROVE_VIA_REQUEST}
+      SELECT status || '/' || (resolved_member_id = '${PRE_ID}')::text || '/'
+             || (resolved_by = '${TEST_MEMBERS.admin.memberId}')::text
+      FROM   public.member_link_requests WHERE request_id = '00000000-0000-0000-0000-0000000000d9';
+    `);
+    expect(row).toBe("承認/true/true");
+  });
+
+  test("監査ログに「運営が決めた」ことが残る（`decided_by` が入る）", () => {
+    const row = query(`
+      ${ENQUEUED}
+      ${APPROVE_VIA_REQUEST}
+      SELECT (decided_by = '${TEST_MEMBERS.admin.memberId}')::text || '/' || match_basis
+      FROM   public.member_link_events WHERE member_id = '${PRE_ID}';
+    `);
+    expect(row).toBe("true/運営承認（メールアドレスの一致 2件から選択）");
+  });
+
+  test("★ 既に決着した申請では成立させられない（二重承認を通さない）", () => {
+    expect(
+      sqlstateOf(`
+        ${ENQUEUED}
+        UPDATE public.member_link_requests
+        SET    status = '却下', reject_reason = '別人と判断した',
+               resolved_by = '${TEST_MEMBERS.admin.memberId}', resolved_at = now()
+        WHERE  request_id = '00000000-0000-0000-0000-0000000000d9';
+        ${APPROVE_VIA_REQUEST}
+      `),
+    ).toBe("42501");
+  });
+});

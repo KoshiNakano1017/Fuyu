@@ -111,6 +111,27 @@ BEGIN
       AND  value_normalized = lower(btrim(p_identifier_value))
       AND  is_verified      = false;
   END IF;
+
+  -- ── 5. 承認キュー経由なら、その申請を同じトランザクションで閉じる ────────
+  --
+  --   ★ **結合とキューの決着を分けない。** 分けると「結合済みなのにキューは保留のまま」が残り、
+  --   運営が同じ申請をもう一度承認しようとする。2回目は `members.auth_user_id` の一意制約で
+  --   落ちるので事故にはならないが、**運営には理由の分からない失敗として見える**。
+  IF p_request_id IS NOT NULL THEN
+    UPDATE public.member_link_requests
+    SET    status             = '承認',
+           resolved_member_id = p_member_id,
+           resolved_by        = coalesce(p_decided_by, p_operator_id),
+           resolved_at        = now(),
+           updated_at         = now()
+    WHERE  request_id = p_request_id
+      AND  status     = '保留';
+
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'この申請は既に決着している（保留ではない）: %', p_request_id
+        USING ERRCODE = '42501';
+    END IF;
+  END IF;
 END;
 $$;
 
