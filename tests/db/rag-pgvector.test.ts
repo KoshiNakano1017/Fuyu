@@ -59,13 +59,25 @@ describeDb("0100 の適用結果（オブジェクトの実在）", () => {
     expect(query(`SELECT to_regclass('rag.v_cohort_stats') IS NOT NULL;`)).toBe("t");
   });
 
-  test("PII ガード関数2本とトリガー関数が作られている", () => {
+  test("PII ガード関数とトリガー関数が作られている", () => {
     const names = queryRows(`
       SELECT p.proname FROM pg_proc p
       JOIN pg_namespace n ON n.oid = p.pronamespace
       WHERE n.nspname = 'rag' ORDER BY 1;
     `);
-    expect(names).toEqual(["contains_known_names", "redact_known_names", "touch_updated_at"]);
+    // 2026-09-25（WBS 1-6 の決定 A ／ `0102`）で3本増えた：
+    //   `redact_contact_info`（連絡先の伏字化）／`scan_for_index`（氏名＋連絡先をまとめて通す）／
+    //   `search_knowledge`（検索スコープを DB 層へ固定）。
+    // ★ この一覧を「増えたら足す」形で持つのは、**rag スキーマへ関数が増えたこと自体に
+    //   気づけるようにする**ためである（PII を読む関数が黙って増えるのがいちばん危ない）。
+    expect(names).toEqual([
+      "contains_known_names",
+      "redact_contact_info",
+      "redact_known_names",
+      "scan_for_index",
+      "search_knowledge",
+      "touch_updated_at",
+    ]);
   });
 
   test("updated_at のトリガーが knowledge_chunks に張られている", () => {
