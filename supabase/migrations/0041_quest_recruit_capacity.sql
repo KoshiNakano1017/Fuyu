@@ -21,8 +21,17 @@
 --
 -- ── 同時申請の競合を止める ──────────────────────────────────────────
 --
--- 数える前に対象の `quests` 行を `FOR UPDATE` で押さえる。押さえないと、2人が同時に
+-- 数える前に対象の `quests` 行を `FOR NO KEY UPDATE` で押さえる。押さえないと、2人が同時に
 -- 最後の1枠へ入ったとき双方のトリガーが「まだ空きがある」と読んで両方通る。
+--
+-- ロックの強さは `FOR UPDATE` ではなく `FOR NO KEY UPDATE` にする。
+-- `quest_applications` への INSERT は FK（`quest_id` → `quests`）の検査として
+-- 親行に `FOR KEY SHARE` を取る。`FOR UPDATE` はこれと競合するため、
+-- 「A が INSERT（KEY SHARE 取得）→ B が INSERT（KEY SHARE 取得）→ 双方の AFTER
+-- トリガーが FOR UPDATE を待つ」順で **デッドロック（40P01）** になり、
+-- 枠切れとして返すべき 23514 が返らなくなる。
+-- `FOR NO KEY UPDATE` は `FOR KEY SHARE` と競合せず、かつ自分自身とは競合するため、
+-- 「同時申請を直列化する」という本来の目的だけを満たす。
 -- =============================================================================
 
 
@@ -163,7 +172,7 @@ BEGIN
   SELECT q.recruit_count INTO recruit_limit
   FROM   public.quests q
   WHERE  q.quest_id = NEW.quest_id
-  FOR UPDATE;
+  FOR NO KEY UPDATE;   -- FK 検査の FOR KEY SHARE と競合させない（冒頭コメント参照）
 
   occupied_count := public.quest_occupied_application_count(NEW.quest_id);
 
@@ -181,7 +190,7 @@ END;
 $$;
 
 COMMENT ON FUNCTION public.quest_applications_guard_capacity() IS
-  '受注申請の上限ガード（v13 §5.3 note L844）。quests 行を FOR UPDATE で押さえてから数えるため、'
+  '受注申請の上限ガード（v13 §5.3 note L844）。quests 行を FOR NO KEY UPDATE で押さえてから数えるため、'
   '同時申請でも募集人数を超えない。AFTER INSERT なのは、一意制約（23505）と RLS（42501）の'
   '拒否を枠切れで上書きしないため。UPDATE も見るのは、キャンセル → 申請中 の戻しと'
   'quest_id の付け替えが、INSERT を通らずに枠を取る経路になるためである。';
