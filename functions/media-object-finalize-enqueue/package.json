@@ -1,0 +1,14 @@
+{
+  "name": "media-object-finalize-enqueue",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "GCS Object Finalize（Eventarc）を受けて Cloud Tasks へ積む起動経路の中継（WBS 14-1 ／ v13 §5.11.2 ③④）",
+  "main": "index.mjs",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@google-cloud/tasks": "^5.4.0"
+  }
+}

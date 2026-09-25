@@ -97,6 +97,11 @@ gcloud storage buckets update "gs://${BUCKET}" \
 # 許可するオリジンは環境ごとに違う。既定は開発用のローカルだけで、Vercel の URL は
 # MEDIA_CORS_ORIGINS へカンマ区切りで渡す。
 #   例: export MEDIA_CORS_ORIGINS="http://localhost:3000,https://fuyu.vercel.app"
+#
+# ⚠️ `media-bucket-cors.json` は `--lifecycle-file` と違い、**トップレベルがそのまま配列**である
+#    必要がある（`{"cors": [...]}` のようにオブジェクトで包むと `gcloud storage buckets update
+#    --cors-file` が `'str' object has no attribute 'items'` で落ちる。2026-09-24 に実際に踏んだ）。
+#    lifecycle と同じ理由でコメントキー（`_comment` 等）も入れてはならない。
 CORS_ORIGINS="${MEDIA_CORS_ORIGINS:-http://localhost:3000}"
 CORS_FILE="$(mktemp)"
 sed "s|__ORIGINS__|$(printf '%s' "${CORS_ORIGINS}" | sed 's/,/","/g')|" "${SCRIPT_DIR}/media-bucket-cors.json" > "${CORS_FILE}"
