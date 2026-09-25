@@ -18,7 +18,7 @@ import { fetchCurrentSignupPlan, fetchMyActiveApplication } from "@/lib/membersh
 import { buildQuestBoard } from "@/lib/quests/board";
 import { fetchQuestBoardRows, readQuestBoardViewer } from "@/lib/quests/fetch-board";
 
-import { applyForMembershipAction } from "./actions";
+import { applyForMembershipAction, applyToQuestAction } from "./actions";
 
 /**
  * クエストボード（v13 §5.3-1 ／ WBS 5-1）。
@@ -63,6 +63,7 @@ export default async function QuestsPage() {
         items={items}
         offer={offer}
         apply={applyForMembershipAction}
+        applyToQuest={applyToQuestAction}
       />
     </main>
   );

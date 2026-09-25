@@ -13,6 +13,9 @@ import {
   decideMembershipApplication,
   membershipApplyDenialMessage,
 } from "@/lib/membership/registration";
+import { canApplyToQuest } from "@/lib/quests/application-gate";
+import { createQuestApplication } from "@/lib/quests/applications";
+import { fetchQuestById, readQuestBoardViewer } from "@/lib/quests/fetch-board";
 
 /**
  * 街人登録の申請（WBS 12-1 の Step 2 ／ v13 §5.10.3）。
@@ -76,4 +79,52 @@ export async function applyForMembershipAction(): Promise<SubmitState> {
     status: "done",
     message: "申請を受け付けました。運営からのご案内をお待ちください。",
   };
+}
+
+/**
+ * 受注申請（WBS 5-2 ／ v13 §5.3-2）。
+ *
+ * ## 判定は `canApplyToQuest()` ただ1箇所である
+ *
+ * 画面の申請ボタンの活性（`board.ts`）・`POST /api/quests/{id}/applications`・この Action が
+ * **同じ関数**を根拠にする。別の場所へ資格判定を書くと、片方だけ緩い状態が生まれる（v13 §5.9.3）。
+ *
+ * ## 拒否の理由を返さない
+ *
+ * 施錠なのか締切なのか資格なのかを返すと、**詳細を伏せている施錠クエストの状態を推測する
+ * 手がかり**になる（§5.10.6 末尾）。API ルートと同じ一律の文言にする。
+ */
+export async function applyToQuestAction(
+  _prev: SubmitState,
+  formData: FormData,
+): Promise<SubmitState> {
+  const viewer = await readQuestBoardViewer();
+  if (viewer === null) {
+    return { status: "error", message: "ログインが必要です。" };
+  }
+
+  const questId = String(formData.get("questId") ?? "").trim();
+  const quest = await fetchQuestById(questId);
+  if (quest === null) {
+    return { status: "error", message: "クエストが見つかりません。" };
+  }
+
+  if (!canApplyToQuest(viewer, quest)) {
+    return { status: "error", message: "このクエストは受注できません。" };
+  }
+
+  const result = await createQuestApplication({ questId, memberId: viewer.memberId });
+  if (!result.ok) {
+    return {
+      status: "error",
+      message:
+        result.reason === "duplicate"
+          ? "このクエストにはすでに申請済みです。運営の指示をお待ちください。"
+          : "申請できませんでした。時間をおいて再試行してください。",
+    };
+  }
+
+  revalidatePath("/quests");
+  revalidatePath("/reports");
+  return { status: "done", message: "受注を申請しました。運営の指示をお待ちください。" };
 }
