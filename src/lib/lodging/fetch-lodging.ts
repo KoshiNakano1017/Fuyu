@@ -7,7 +7,7 @@
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 import type { AllocationMode } from "./availability";
-import type { AccommodationRate } from "./rates";
+import { memberCategoryOf, type AccommodationRate } from "./rates";
 
 /** 宿泊形態（`accommodation_types`）。並び順は `display_order`。 */
 export type AccommodationType = {
@@ -29,9 +29,10 @@ export type DailyAvailability = {
 /**
  * 会員区分の表示語（v13 §5.2.3「表示内容」＝ …大人/子供人数・**会員区分**）。
  *
- * 料金表の区分（`accommodation_rates.member_category` の `member` / `non_member`）とは別物で、
- * こちらは**運営が画面で読むためのラベル**である。料金の判定に使わない（`rates.ts` の
- * `memberCategoryOf()` が正本）。
+ * ★ **料金区分（`accommodation_rates.member_category`）と同じ2値を日本語にしただけ**である。
+ *   正本が定める会員区分はこの料金の2値しか無く（v13 §5.4.2②・§7）、判定は
+ *   「自己申告を使わずログイン状態から行う」（v13 §5.2.3 の warning）。
+ *   別系統の判定（`member_type` からの導出など）をここに作らない。
  */
 export type MemberCategoryLabel = "会員" | "非会員";
 
@@ -169,15 +170,15 @@ export async function fetchStaysOverlapping(params: {
     note: string | null;
   }[];
 
-  const [publicProfiles, assignedRoomNames] = await Promise.all([
-    fetchMemberPublicProfiles(rows.map((row) => row.member_id)),
+  const [displayNames, assignedRoomNames] = await Promise.all([
+    fetchMemberDisplayNames(rows.map((row) => row.member_id)),
     fetchAssignedRoomNames(rows.map((row) => row.checkin_id)),
   ]);
 
   return rows.map((row) => ({
     checkinId: row.checkin_id,
     memberId: row.member_id,
-    memberLabel: publicProfiles.get(row.member_id)?.displayName ?? "（表示名なし）",
+    memberLabel: displayNames.get(row.member_id) ?? "（表示名なし）",
     roomType: row.room_type,
     checkInDate: row.check_in_date,
     checkOutDate: row.check_out_date,
@@ -186,7 +187,7 @@ export async function fetchStaysOverlapping(params: {
     status: row.status,
     note: row.note,
     assignedRoomName: assignedRoomNames.get(row.checkin_id) ?? null,
-    memberCategory: publicProfiles.get(row.member_id)?.memberCategory ?? null,
+    memberCategory: memberCategoryLabelOfReservation(),
   }));
 }
 
@@ -288,21 +289,16 @@ export async function fetchMyStay(params: {
   };
 }
 
-/** 他者向けに出してよい会員情報（`v_member_public` の3列）。 */
-type MemberPublicProfile = {
-  displayName: string | null;
-  memberCategory: MemberCategoryLabel | null;
-};
-
 /**
- * 表示名と会員区分をまとめて引く。他者向けの表示規則（v13 §5.9.5）はビュー側が持っている。
+ * 表示名をまとめて引く。他者向けの表示規則（v13 §5.9.5）はビュー側が持っている。
  *
- * `member_type` を読むのは**画面に出すバッジのため**であり（`0029` のビューの COMMENT）、
- * 認可の判定には使わない（v13 §2 ／ CLAUDE.md §4.1）。
+ * ⚠️ **`member_type`（立場）をここで読まない。** 画面へ出す会員区分は料金区分から導く
+ * （`memberCategoryLabelOfReservation()`）。認可に使わないとしても、`member_type` から
+ * 別系統の区分を作ると料金と食い違う（下記の理由）。
  */
-async function fetchMemberPublicProfiles(
+async function fetchMemberDisplayNames(
   memberIds: readonly string[],
-): Promise<Map<string, MemberPublicProfile>> {
+): Promise<Map<string, string>> {
   const unique = [...new Set(memberIds)];
   if (unique.length === 0) {
     return new Map();
@@ -311,37 +307,38 @@ async function fetchMemberPublicProfiles(
   const supabase = await createServerSupabaseClient();
   const { data } = await supabase
     .from("v_member_public")
-    .select("member_id, display_name, member_type")
+    .select("member_id, display_name")
     .in("member_id", unique);
 
-  const profiles = new Map<string, MemberPublicProfile>();
-  for (const row of (data ?? []) as {
-    member_id: string;
-    display_name: string | null;
-    member_type: string | null;
-  }[]) {
-    profiles.set(row.member_id, {
-      displayName: row.display_name,
-      memberCategory: memberCategoryLabelOf(row.member_type),
-    });
+  const names = new Map<string, string>();
+  for (const row of (data ?? []) as { member_id: string; display_name: string | null }[]) {
+    if (row.display_name !== null) {
+      names.set(row.member_id, row.display_name);
+    }
   }
-  return profiles;
+  return names;
 }
 
 /**
- * 会員種別（街人・親方・ゲスト）を会員区分の表示語へ移す。
+ * 予約1件の会員区分（C10 の表示 ／ v13 §5.2.3「表示内容」）。
  *
- * ゲストは会員ではないため「非会員」。未知の値は**会員側へ倒さず `null`** にする。
- * 会員区分は料金の目安として読まれるため、分からないものを「会員」と書くと安い側へ誤らせる。
+ * ## なぜ `member_type` から導かないのか
+ *
+ * 正本が定める会員区分は**料金の2値**（会員／非会員 ／ v13 §5.4.2②）だけで、
+ * その判定は「**自己申告を使わずログイン状態から行う**」（v13 §5.2.3 の warning）。
+ * これを実装したのが `rates.ts` の `memberCategoryOf(signedIn)` であり、**課金に使う唯一の規則**である。
+ * `member_type`（親方／街人（コア）／街人（一般）／ゲスト ＝ `0001` の CHECK）から別に導くと、
+ * ゲストロールの会員に「非会員」と表示しながら**会員料金を請求する**食い違いが生まれる。
+ *
+ * `check_ins.member_id` は NOT NULL（`0014`）＝カレンダーに並ぶ予約は必ず `members` の行を持つ。
+ * したがってこの規則の下では常に「会員」になる。
+ *
+ * ⚠️ アカウントを持たない非会員予約の表し方は正本に無い。
+ *    `QUESTIONS.md`「[2026-09-25] C10 の会員区分を何から導くか」に仮決定として起票済み。
  */
-function memberCategoryLabelOf(memberType: string | null): MemberCategoryLabel | null {
-  if (memberType === "街人" || memberType === "親方") {
-    return "会員";
-  }
-  if (memberType === "ゲスト") {
-    return "非会員";
-  }
-  return null;
+function memberCategoryLabelOfReservation(): MemberCategoryLabel {
+  const hasMemberAccount = true;
+  return memberCategoryOf(hasMemberAccount) === "member" ? "会員" : "非会員";
 }
 
 /**
