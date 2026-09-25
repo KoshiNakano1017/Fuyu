@@ -4,6 +4,11 @@ import type { QuestBoardItem } from "@/lib/quests/board";
 
 type QuestCardProps = {
   item: QuestBoardItem;
+  /**
+   * 街人登録モーダルを開く（WBS 12-1 ／ v13 §5.10.6「施錠カードをタップすると Step 1 を起動」）。
+   * 施錠カードでないとき・登録導線が不要な相手（会員・運営）には渡らない。
+   */
+  onOpenRegistration?: () => void;
 };
 
 /** 起案元の表示名。内部識別子（`morning_meeting_auto`）をそのまま画面へ出さない。 */
@@ -28,7 +33,7 @@ const ORIGIN_LABELS: Record<QuestBoardItem["originType"], string> = {
  * ここで `hidden` にしているのではないため、開発者ツールから読むこともできない
  * （DOM 非表示は認可ではない／v13 §5.9.3）。
  */
-export function QuestCard({ item }: QuestCardProps): ReactElement {
+export function QuestCard({ item, onOpenRegistration }: QuestCardProps): ReactElement {
   return (
     <li className="flex flex-col gap-2 rounded-lg border border-neutral-200 p-4">
       <div className="flex items-start justify-between gap-3">
@@ -58,10 +63,21 @@ export function QuestCard({ item }: QuestCardProps): ReactElement {
         受注を申請する
       </button>
 
-      {item.opensRegistrationModal && (
-        // 街人登録モーダル（§5.10.1 Step 1）本体は WBS 12-1 の成果物であり、ここでは導線だけを置く。
-        <p className="text-xs text-neutral-600">街人登録をすると、このクエストを受注できます。</p>
-      )}
+      {item.opensRegistrationModal &&
+        (onOpenRegistration === undefined ? (
+          // 導線の受け皿が無い文脈（一覧を静的に描くだけの場合）では、案内文だけを残す。
+          <p className="text-xs text-neutral-600">街人登録をすると、このクエストを受注できます。</p>
+        ) : (
+          // ★ 施錠カードだけがモーダルを起動する（§5.10.6）。
+          //    どのカードから開いても内容は同じなので、状態は一覧側が1つだけ持つ。
+          <button
+            type="button"
+            onClick={onOpenRegistration}
+            className="self-start text-xs font-medium text-amber-900 underline underline-offset-4"
+          >
+            街人登録をすると、このクエストを受注できます（登録の案内を見る）
+          </button>
+        ))}
     </li>
   );
 }
