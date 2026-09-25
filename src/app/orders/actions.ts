@@ -6,6 +6,7 @@ import { readViewer } from "@/lib/auth/session";
 import { fetchMyStayingCheckIn } from "@/lib/orders/fetch-orders";
 import { placeOrder } from "@/lib/orders/place-order";
 import type { SubmitState } from "@/lib/forms/submit-state";
+import { toServingStatusDisplayLabel } from "@/lib/serving-status";
 
 /** 失敗理由の利用者向け文言。内部の識別子をそのまま見せない。 */
 const MESSAGE: Record<string, string> = {
@@ -52,7 +53,13 @@ export async function placeSelfOrderAction(
     // 注文直後に自分の伝票が一覧へ反映されるようにする。
     revalidatePath("/orders");
     revalidatePath("/me");
-    return { status: "done", message: "注文を受け付けました。" };
+    // ★ 文言を書かない。新しい注文の提供ステータスは必ず保存値 `未提供` であり、
+    //   本人向けの語（「調理中」）は `toServingStatusDisplayLabel()` が唯一の出どころである
+    //   （v13 §5.4.1 ／ Issue #4）。ここに「準備中」等を直書きすると表記が2つに割れる。
+    return {
+      status: "done",
+      message: `注文を受け付けました。${toServingStatusDisplayLabel("未提供")}です。`,
+    };
   }
   return { status: "error", message: MESSAGE[result.reason] ?? MESSAGE.failed };
 }
