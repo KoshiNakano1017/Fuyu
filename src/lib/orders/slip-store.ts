@@ -345,3 +345,58 @@ export async function markOrderUnsettled(params: {
     .is("voided_at", null);
   return true;
 }
+
+/**
+ * 差額を消し込む（v13 §5.6.6 ／ WBS 8-3）。
+ *
+ * ★ `精算済み` と `免除` で**残す列が違う**。
+ *   - 精算済み: `settled_at` / `settled_by`（誰がいつ受け渡したか）
+ *   - 免除: `waived_at` / `waived_by`（誰がいつ免除したか）
+ *   同じ列に寄せると「受け取った」と「諦めた」が区別できなくなる（回収率も読めない）。
+ *
+ * ★ **`未処理` の行だけを更新する。** 二重の消し込みを WHERE で塞ぐ
+ * （判定はアプリ側にもあるが、同時押しはそこをすり抜ける）。
+ */
+export async function resolveAdjustment(params: {
+  adjustmentId: string;
+  resolution: "settle" | "waive";
+  operatorId: string;
+}): Promise<boolean> {
+  const supabase = await createServerSupabaseClient();
+  const now = new Date().toISOString();
+  const patch =
+    params.resolution === "settle"
+      ? { status: "精算済み", settled_at: now, settled_by: params.operatorId }
+      : { status: "免除", waived_at: now, waived_by: params.operatorId };
+
+  const { data, error } = await supabase
+    .from("settlement_adjustments")
+    .update(patch)
+    .eq("adjustment_id", params.adjustmentId)
+    .eq("status", "未処理")
+    .select("adjustment_id");
+
+  return error === null && data !== null && data.length > 0;
+}
+
+/** 差額1件の現況（消し込みの事前判定に使う最小限）。読めなければ `null`。 */
+export async function fetchAdjustmentState(adjustmentId: string): Promise<{
+  status: "未処理" | "精算済み" | "免除";
+  isStale: boolean;
+} | null> {
+  const supabase = await createServerSupabaseClient();
+  const { data } = await supabase
+    .from("settlement_adjustments")
+    .select("status, is_stale")
+    .eq("adjustment_id", adjustmentId)
+    .maybeSingle();
+
+  if (data === null) {
+    return null;
+  }
+  const row = data as unknown as Record<string, unknown>;
+  return {
+    status: row.status as "未処理" | "精算済み" | "免除",
+    isStale: row.is_stale === true,
+  };
+}
