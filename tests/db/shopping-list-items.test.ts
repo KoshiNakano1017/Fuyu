@@ -11,10 +11,8 @@
 //   - 非スタッフ … USING で落ちる → 例外は上がらず 0 行更新で正常終了
 
 import {
-  authUserInsertSql,
   FIXTURE_SQL,
   loginAsSql,
-  memberInsertSql,
   TEST_AUTH_USERS,
   TEST_MEMBERS,
 } from "./helpers/fixtures";
@@ -23,24 +21,17 @@ import { describeDb, query, sqlstateOf } from "./helpers/psql";
 const ITEM_ID = "00000000-0000-0000-0000-0000000000d1";
 
 /**
- * ゲスト役は共通フィクスチャに居ないため、この試験の中だけで作る。
+ * ゲスト役は**共通フィクスチャ（`TEST_MEMBERS.guest`）**を使う。
  * 「ゲストは登録できない」は 2026-09-22 のオーナー確定であり、
  * **反証役が居ないと検証そのものが成立しない**（v13 §5.12.1・§9 #65②）。
+ *
+ * ⚠️ 以前はこのファイルの中で独自のゲストを作っていたが、2026-09-25 に共通フィクスチャへ
+ * `guest` 役が入り、**同じメールアドレスで二重に `auth.users` を作ろうとして 23505 で落ちた**。
+ * 役が要るなら共通フィクスチャへ足す（テストごとに作ると必ずこうなる）。
  */
-const GUEST_AUTH = { id: "00000000-0000-0000-0000-0000000000bf", email: "fuyu-guest@example.invalid" };
-const GUEST_MEMBER = {
-  memberId: "00000000-0000-0000-0000-0000000000af",
-  authUserId: GUEST_AUTH.id,
-  nickname: "テストゲスト",
-  memberType: "ゲスト",
-  role: "guest",
-  accountStatus: "active",
-};
 
 const SHOPPING_FIXTURE = `
 ${FIXTURE_SQL}
-${authUserInsertSql(GUEST_AUTH)}
-${memberInsertSql(GUEST_MEMBER)}
 INSERT INTO public.shopping_list_items (item_id, item_name, registered_by)
 VALUES ('${ITEM_ID}', '食器用洗剤', '${TEST_MEMBERS.self.memberId}');
 `;
@@ -53,7 +44,7 @@ const asAdmin = loggedInAs(TEST_AUTH_USERS.admin.id);
 const asCore = loggedInAs(TEST_AUTH_USERS.core.id);
 const asMember = loggedInAs(TEST_AUTH_USERS.self.id);
 const asOyakata = loggedInAs(TEST_AUTH_USERS.oyakata.id);
-const asGuest = loggedInAs(GUEST_AUTH.id);
+const asGuest = loggedInAs(TEST_AUTH_USERS.guest.id);
 
 const INSERT_OWN = (memberId: string) =>
   `INSERT INTO public.shopping_list_items (item_name, registered_by) VALUES ('軍手', '${memberId}');`;
@@ -86,7 +77,7 @@ describeDb("ゲストは買い物リストへ登録できない（v13 §5.12.1 �
   });
 
   test("ゲストの登録はトリガーが拒否する（42501）", () => {
-    expect(sqlstateOf(`${asGuest}\n${INSERT_OWN(GUEST_MEMBER.memberId)}`)).toBe("42501");
+    expect(sqlstateOf(`${asGuest}\n${INSERT_OWN(TEST_MEMBERS.guest.memberId)}`)).toBe("42501");
   });
 
   test("他人名義では登録できない（RLS の WITH CHECK）", () => {

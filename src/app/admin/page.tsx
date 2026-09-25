@@ -123,6 +123,15 @@ export default async function AdminDashboardPage() {
         />
       </div>
 
+      {/*
+        街人登録 申請一覧（C7 ／ WBS 12-2）への到達経路。
+        §5.9.5 が「管理者に12タブを平置きしない」ことを要件にしているため、
+        ナビへタブを足さずここからリンクする（`/admin/customers` と同じ扱い）。
+      */}
+      <Link href="/admin/membership" className="text-sm underline">
+        街人登録 申請一覧へ（決済QRの送付・入金確認・承認）
+      </Link>
+
       <section className="flex flex-col gap-2">
         <h2 className="text-lg font-bold">本日の残枠</h2>
         {availability.length === 0 ? (

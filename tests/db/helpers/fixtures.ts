@@ -30,6 +30,8 @@ export const TEST_AUTH_USERS = {
   oyakata: { id: "00000000-0000-0000-0000-0000000000b4", email: "fuyu-oyakata@example.invalid" },
   /** まだどの会員にも紐づいていないアカウント。名寄せ成立・付け替えの試験に使う */
   spare: { id: "00000000-0000-0000-0000-0000000000b9", email: "fuyu-spare@example.invalid" },
+  /** ★ `role = 'guest'` の利用者。街人登録（§5.10）とメディアの全ロール開放（§5.11.7）で要る */
+  guest: { id: "00000000-0000-0000-0000-0000000000b8", email: "fuyu-guest@example.invalid" },
 };
 
 export const TEST_MEMBERS = {
@@ -74,6 +76,23 @@ export const TEST_MEMBERS = {
     nickname: "テスト親方",
     memberType: "親方",
     role: "member",
+    accountStatus: "active",
+  },
+  /**
+   * ★ **ゲスト**（`role = 'guest'`）。
+   *
+   * 街人登録の導線（v13 §5.10）は「ゲストだけが通る」ことが要件であり、
+   * 昇格（`guest` → `member`）を検証するには最初から `guest` の会員が要る。
+   * **既存の会員を `guest` へ UPDATE して用意することはできない** — `0003` のガードが
+   * 権限列の変更に操作者と理由の申告を要求するため、フィクスチャの準備そのものが 42501 で落ちる
+   * （CI で実際に踏んだ）。INSERT はガードの対象ではないので、最初からこの役を置く。
+   */
+  guest: {
+    memberId: "00000000-0000-0000-0000-0000000000a9",
+    authUserId: TEST_AUTH_USERS.guest.id,
+    nickname: "テストゲスト",
+    memberType: "ゲスト",
+    role: "guest",
     accountStatus: "active",
   },
   /** 取込直後の空枠。`auth_user_id` は NULL（会員データモデル §5.2a） */

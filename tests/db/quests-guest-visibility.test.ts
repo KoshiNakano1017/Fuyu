@@ -18,20 +18,13 @@
 import { authUserInsertSql, loginAsSql, memberInsertSql, TEST_AUTH_USERS, TEST_MEMBERS } from "./helpers/fixtures";
 import { describeDb, query, sqlstateOf } from "./helpers/psql";
 
-/** ゲスト役。共有フィクスチャには `role = 'guest'` の会員が居ないため、本ファイルで用意する。 */
-const GUEST_AUTH_USER = {
-  id: "00000000-0000-0000-0000-0000000000b3",
-  email: "fuyu-guest@example.invalid",
-};
-
-const GUEST_MEMBER = {
-  memberId: "00000000-0000-0000-0000-0000000000a4",
-  authUserId: GUEST_AUTH_USER.id,
-  nickname: "テストゲスト",
-  memberType: "ゲスト",
-  role: "guest",
-  accountStatus: "active",
-};
+/**
+ * ゲスト役は**共通フィクスチャ（`TEST_MEMBERS.guest`）**を使う（2026-09-25 に追加された）。
+ *
+ * ⚠️ 以前はこのファイルで独自に用意しており、**`core` 役と同じ ID（`…b3` / `…a4`）を
+ * 使い回していた**。共通フィクスチャと同時に投入した時点で一意制約に当たる作りだったため、
+ * 共有の役へ寄せた。役が要るなら共通フィクスチャへ足す。
+ */
 
 const LOCKED_QUEST_ID = "11111111-1111-4111-8111-1111111111f1";
 const OPEN_QUEST_ID = "11111111-1111-4111-8111-1111111111f2";
@@ -49,10 +42,10 @@ const QUESTS_SQL = [
 ].join("\n");
 
 const asGuest = [
-  authUserInsertSql(GUEST_AUTH_USER),
-  memberInsertSql(GUEST_MEMBER),
+  authUserInsertSql(TEST_AUTH_USERS.guest),
+  memberInsertSql(TEST_MEMBERS.guest),
   QUESTS_SQL,
-  loginAsSql(GUEST_AUTH_USER.id),
+  loginAsSql(TEST_AUTH_USERS.guest.id),
   "SET ROLE authenticated;",
 ].join("\n");
 
