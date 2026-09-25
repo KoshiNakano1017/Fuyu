@@ -31,16 +31,28 @@ import { toServingStatusDisplayLabel } from "@/lib/serving-status";
  * 仕様（v13 §5.3）に無い構造を足すことになるため採らない。
  */
 /**
+ * `timestamptz` を**日本時間**の日付（`YYYY-MM-DD`）にする。
+ *
+ * `slice(0, 10)` で切ると UTC の日付になり、**JST 00:00〜09:00 の作業が前日へずれる**。
+ * 滞在初日の朝の作業が窓から外れて表示されない、という形で現れる。
+ * 滞在日（`check_in_date` / `check_out_date`）は日本時間の `date` なので、
+ * 突き合わせる側も日本時間に揃える（`src/app/staff/checkins/page.tsx` の `todayInJapan()` と同じ作法）。
+ */
+function toJapanDate(timestamptz: string): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo" }).format(new Date(timestamptz));
+}
+
+/**
  * 受注1件が「いつの仕事か」を表す日付（`YYYY-MM-DD`）を集める。
  *
  * 申請日（`applied_at`）は入れない。申請は滞在のずっと前に出せるため、
  * それで拾うと滞在と関係のないクエストが詳細に並ぶ。
  */
 function questDatesOf(application: MyApplication): string[] {
-  const workedDates = application.workLogs.map((log) => log.workedAt.slice(0, 10));
+  const workedDates = application.workLogs.map((log) => toJapanDate(log.workedAt));
   return application.scheduledStartAt === null
     ? workedDates
-    : [application.scheduledStartAt.slice(0, 10), ...workedDates];
+    : [toJapanDate(application.scheduledStartAt), ...workedDates];
 }
 
 export default async function MyStayDetailPage({
@@ -192,7 +204,7 @@ export default async function MyStayDetailPage({
                 {/* 報告の中身（写真・差戻し理由）は作業報告（A4）の関心。ここは日付だけに留める */}
                 {application.workLogs.length > 0 && (
                   <span className="text-sm text-neutral-600">
-                    報告日: {application.workLogs.map((log) => log.workedAt.slice(0, 10)).join("・")}
+                    報告日: {application.workLogs.map((log) => toJapanDate(log.workedAt)).join("・")}
                   </span>
                 )}
                 <Link className="text-sm underline" href="/reports">
