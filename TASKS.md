@@ -31,6 +31,27 @@ WBS が挙げる残作業「投影（各マスタ → `knowledge_chunks`）」�
 
 推奨は **A（本 Issue を重複としてクローズし、`1-6` を 100%・✅ にする）**。
 詳細は Issue #173 のコメントと `QUESTIONS.md`「[2026-09-25] WBS `1-6`…は決定 A 反映後に何が残っているか」。
+## [2026-09-25 17:20] 予約キャンセル・ノーショー処理（Issue #174 ／ WBS `3-3` 予約キャンセル・ノーショー処理） — IN PROGRESS
+
+リスク区分: **高**（キャンセル操作の認可・ロール判定。v13 §5.2.2「操作場所」・§6 権限マトリクス L2344）。
+ゲート1・2・3（承認3回）を通る。
+スキーマとサーバ層は `0014_check_ins_and_accommodation_types.sql`（`check_ins` のスキーマ・制約・RLS・GRANT）と
+`src/lib/lodging/cancellation.ts` で既に実装済み。残りは顧客管理画面「宿泊」タブの取り消し導線と取消線表示、
+本人向け宿泊履歴での「運営によりキャンセル」＋日時＋理由の表示、および受入テスト。
+
+**段取り（2026-09-25 ／ ゲート2 承認対象）**: Issue #174 のコメントに記載。要点は次の3つ。
+
+- **DDL は追加しない。** 完了条件4・5・6・7 は `0014_check_ins_and_accommodation_types.sql`
+  （キャンセル4列・`chk_check_ins_cancel_complete`・UPDATE は `is_staff()` のみ・DELETE ポリシー無し）が
+  既に満たしている見込みであり、今回は**受入テストによる検証**に留める。
+- **画面2箇所を足す。** 顧客管理画面「宿泊」タブ（`StayHistorySection.tsx` ＋
+  `src/app/admin/customers/[memberId]/actions.ts` の `cancelStayAction`）に取り消し導線と取消線表示、
+  本人向け（`src/app/reservations/page.tsx`）に「運営によりキャンセル」＋日時＋理由。
+  読み出し側（`fetch-stay-history.ts` / `fetch-lodging.ts`）の select にキャンセル3列を足す。
+- **入館前の判定を1か所へ寄せる。** `canCancelStay(status)` を `checkin-ops.ts` に置き、
+  顧客管理画面と `/staff/checkins` の両方から使う。`/staff/checkins` の既存操作は撤去しない
+  （スコープ外宣言のとおり。撤去の要否はオーナー判断として残る）。
+- 受入テスト16件。認可は「できる」（`admin` / `core_member`）と「できない」（`member` / `guest`）を対で置く。
 
 ## [2026-09-25 11:50] 受注申請・運営審査・実行指示の残作業（Issue #167 ／ WBS `5-2` 受注申請・運営審査・実行指示 ／ 決定 B） — IN PROGRESS
 

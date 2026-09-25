@@ -909,6 +909,13 @@ Phase 1 の外部リンク先を指すキーが無い。
   v13 §6 権限マトリクス（L2179）、`docs/spec/detailed-design/API設計.md` §2-2・§3-4、
   `docs/spec/detailed-design/DB物理設計.md` §3-11・§3-12、
   `supabase/migrations/0006_rooms_and_assignments.sql`、`docs/spec/WBS_Phase1.md` L241、Issue #93
+- **追記（2026-09-25 ／ Issue #174 のタスク定義時）**: 本論点の**前提は解消している**。
+  `supabase/migrations/0014_check_ins_and_accommodation_types.sql`（`check_ins` のスキーマ・制約・RLS・GRANT）が
+  `check_ins` を作成し、キャンセル4列（`cancelled_at` / `cancel_reason_type` / `cancel_reason` / `cancelled_by`）、
+  `chk_check_ins_cancel_complete`（理由なし取消を DDL で禁止）、UPDATE を staff に限る RLS、
+  DELETE ポリシー無し（＝全拒否）まで含んでいる。推奨 A（先に `3-2` で `check_ins` を作る）の内容が
+  事実として実現された状態であり、**本項目は WBS `3-3`（予約キャンセル・ノーショー処理）を
+  もうブロックしない**。ステータスは選択肢の採否がオーナーの判断領域であるため書き換えていない。
 
 ## [2026-09-20] WBS `1-6`（pgvector有効化・RAG基盤）の残作業の範囲と、`9-1`（アプリ内の横断セマンティック検索）との切れ目（v13 §9 #31 ／ `CONSOLIDATED_DECISIONS.md` §17-6）
 - ステータス: **回答済み（2026-09-25 ／ 選択肢 A を採用）**。`WBS_Phase1.md` の `1-6` 行に
