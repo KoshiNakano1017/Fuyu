@@ -5,11 +5,17 @@ import { AccessDenied } from "@/components/auth/AccessDenied";
 import { CashbackPanel } from "@/components/customers/CashbackPanel";
 import { SlipEditor } from "@/components/customers/SlipEditor";
 import { StayHistorySection } from "@/components/customers/StayHistorySection";
+import { StayTicketAdjuster } from "@/components/customers/StayTicketAdjuster";
 import { AccessDeniedError, requireAdmin } from "@/lib/auth/guard";
 import { sumUnsettled } from "@/lib/billing/unsettled";
 import { fetchCustomerDetail } from "@/lib/customers/fetch-customers";
 import { fetchStayHistory } from "@/lib/customers/fetch-stay-history";
-import { fetchStayTicketBalance } from "@/lib/lodging/stay-tickets";
+import { STAY_TICKET_ADJUST_MAX_NIGHTS } from "@/lib/lodging/stay-ticket-adjust";
+import {
+  fetchStayTicketBalance,
+  fetchStayTicketHistory,
+  STAY_TICKET_TX_LABELS,
+} from "@/lib/lodging/stay-tickets";
 import { judgeFirstVisitCashback } from "@/lib/eumo/grants";
 import {
   countVisits,
@@ -20,6 +26,7 @@ import {
 import { fetchStayingCheckIns } from "@/lib/orders/fetch-orders";
 
 import {
+  adjustStayTicketsAction,
   cancelOrderAction,
   editSlipAction,
   issueFirstVisitCashbackAction,
@@ -70,6 +77,7 @@ export default async function CustomerDetailPage({
     planCashbackUii,
     stayHistory,
     stayTicketBalance,
+    stayTicketHistory,
   ] = await Promise.all([
       fetchCustomerDetail(memberId),
       fetchStayingCheckIns(),
@@ -82,6 +90,8 @@ export default async function CustomerDetailPage({
       fetchStayHistory(memberId),
       // 保持宿泊券（v13 §5.6.1① ／ 残高は取引明細の積み上げ）
       fetchStayTicketBalance(memberId),
+      // 調整ログ（v13 §5.8.5「誰が・いつ・いくつからいくつへ・なぜ」）
+      fetchStayTicketHistory(memberId),
     ]);
   if (customer === null) {
     notFound();
@@ -166,6 +176,20 @@ export default async function CustomerDetailPage({
         visitCount={visitCount}
         judgement={cashbackJudgement}
         issue={issueFirstVisitCashbackAction}
+      />
+
+      {/*
+        宿泊券の増減と調整ログ（画面ID C8 ／ WBS 10-4）。
+        操作の直下に履歴を置くのは、**二重に調整したかどうかをその場で確かめられる**ようにするため。
+        残高は取引の積み上げなので、積んだ行は取り消せない（反対向きの調整で戻す）。
+      */}
+      <StayTicketAdjuster
+        memberId={customer.memberId}
+        balance={stayTicketBalance}
+        history={stayTicketHistory}
+        txLabels={STAY_TICKET_TX_LABELS}
+        maxNights={STAY_TICKET_ADJUST_MAX_NIGHTS}
+        adjust={adjustStayTicketsAction}
       />
 
       <StayHistorySection history={stayHistory} />

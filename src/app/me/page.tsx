@@ -3,6 +3,7 @@ import { Money } from "@/components/ui/Money";
 import { requireSignedIn } from "@/lib/auth/guard";
 import { fetchMyPendingAdjustments } from "@/lib/billing/fetch-my-ledger";
 import { fetchMyPendingGrants } from "@/lib/eumo/store";
+import { formatBalanceTransition } from "@/lib/lodging/stay-ticket-adjust";
 import {
   fetchStayTicketBalance,
   fetchStayTicketHistory,
@@ -104,12 +105,19 @@ export default async function MyPage() {
             {stayTicketHistory.map((entry) => (
               <li key={entry.txId} className="flex justify-between gap-3">
                 <span>
-                  {new Date(entry.createdAt).toLocaleDateString("ja-JP")}{" "}
+                  {new Date(entry.occurredAt).toLocaleDateString("ja-JP")}{" "}
                   {STAY_TICKET_TX_LABELS[entry.txType]}
-                  {entry.note === null ? "" : `（${entry.note}）`}
+                  {/*
+                    ★ 運営が調整したことを本人が読める形にする（v13 §5.8.5「本人への反映」）。
+                    理由を出さないと「知らないうちに減っている」状態になり、相互確認ができない。
+                  */}
+                  {entry.reason === null ? "" : `（${entry.reason}）`}
                 </span>
                 <span className="font-medium">
                   {entry.nights > 0 ? `+${entry.nights}` : entry.nights} 泊
+                  <span className="ml-1 text-[0.85em] text-neutral-500">
+                    （{formatBalanceTransition(entry.balanceBefore, entry.nights)}）
+                  </span>
                 </span>
               </li>
             ))}
