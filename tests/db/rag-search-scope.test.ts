@@ -86,12 +86,15 @@ describeDb("スキャンと削除の追随（`0100` の不変条件を検索側�
   });
 
   test("★ 走査を通っていないチャンクは返さない", () => {
-    // `pending` は `ck_chunk_embedding_requires_scan` により embedding を持てないため、
-    // ここでは `blocked`（人間の確認待ち）を作って確かめる。
+    // `pending` / `blocked` は `ck_chunk_embedding_requires_scan` により embedding を持てず、
+    // `ck_chunk_export_tier1_only` により LINE へも出せない。
+    // したがって**走査状態を戻すときは埋め込みと書き出し許可も一緒に落とす**
+    // （3つの制約が噛み合っていることの確認でもある）。
     expect(
       query(`
         ${CHUNKS}
-        UPDATE public.knowledge_chunks SET embedding = NULL, embedding_model = NULL;
+        UPDATE public.knowledge_chunks
+        SET    embedding = NULL, embedding_model = NULL, exportable_to_line = false;
         UPDATE public.knowledge_chunks SET pii_scan_status = 'blocked';
         ${SEARCH("app")}
       `),
