@@ -4,7 +4,7 @@ doc_type: 設計
 status: "詳細設計ドラフト（要オーナーレビュー）"
 owner: プロジェクトオーナー
 date: "2026-08-16"
-updated: 2026-09-22
+updated: 2026-09-25
 tags: ["浮遊街アプリ"]
 up: "[[浮遊街アプリ 総合要件定義・設計書_v13]]"
 ---
@@ -350,13 +350,36 @@ CREATE INDEX ix_morning_meeting_date ON morning_meetings (held_on);
 
 ### 3-5. 街人登録申込（WBS §12）
 
+> [!important] 実装済み（2026-09-25 ／ `0037_membership_applications.sql` ／ Issue #110）
+> 本節の DDL は**正本 v13 §7 の6項目を落としていた**ため、実装は正本に合わせて次を追加した
+> （`CLAUDE.md` §1.1 ／ 下記 DDL にも反映済み）。
+>
+> | 追加 | 根拠 | 落ちていると何が起きるか |
+> | --- | --- | --- |
+> | `payment_method` ／ `paid_at` ／ `received_by` | v13 §5.10.7・§9 #52（2026-08-25 決定） | **現金で受け取ったときの記録先が無い**（承認を押すだけで、何で払われたかが残らない）。§5.10.7 はまさにこの欠落を理由に起票された改訂である |
+> | `rejection_reason` | v13 §5.10.4「却下する場合は理由を入力し」 | 却下の理由が残らない |
+> | `stay_tickets_granted_at` | v13 §7 の項目一覧 | 宿泊券を付与したかどうかが追えない |
+> | `plan_id`（`membership_plans` への FK） | v13 §7「付与数は `membership_plans` マスタから取得し、コードに直書きしない」 | 本節の旧 DDL は `billed_amount_yen integer DEFAULT 30000` と**金額を直書き**しており、正本の直書き禁止と食い違っていた |
+>
+> **金額・付与泊数は申込側から指定させない。** `0037` の `membership_applications_guard()` が
+> プラン（本人経路では `is_current_signup_plan = true` の1行）から写して上書きする。
+> RLS は列を絞れないため、**本人 INSERT を開けた時点で `billed_amount_yen` と `status` が
+> 射程に入る**（「0円で申し込んで自分で承認済みにする」を止めているのはトリガーだけである）。
+>
+> 「登録種別」は独立した列にしていない。Phase 1 の値は `街人` 1種のみ（§5.10.3 の確認画面が
+> 固定表示する）であり、実務上の種別は `plan_id` が表している。Phase 2 で増えたら列を足す。
+
 ```sql
 CREATE TABLE membership_applications (
   application_id      uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   member_id           uuid NOT NULL REFERENCES members(member_id),
+  -- ★ 金額・付与泊数・キャッシュバック額の出どころ（正本 §7「直書き禁止」）。
+  --    NULL で INSERT するとトリガーが is_current_signup_plan = true のプランを入れる。
+  plan_id              uuid NOT NULL REFERENCES membership_plans(plan_id),
   applied_at           timestamptz NOT NULL DEFAULT now(),
-  billed_amount_yen    integer NOT NULL DEFAULT 30000,
-  granted_nights       integer,             -- membership_plansを参照して決定。直書き禁止
+  -- ▼ ~~DEFAULT 30000~~ → プランから写した値で凍結する（トリガーが上書きするため申込側は指定不可）
+  billed_amount_yen    integer NOT NULL,
+  granted_nights       integer NOT NULL,    -- membership_plansを参照して決定。直書き禁止
   status               text NOT NULL DEFAULT '申込中'
                           CHECK (status IN ('申込中','QR送付済み','承認済み','却下','保留')),
   -- ▼ 入金QRトークン（2026-09-10 確定 ／ 非機能 F-1・§2-7。旧 `qr_token text` を置換）
@@ -366,14 +389,24 @@ CREATE TABLE membership_applications (
   qr_issued_at         timestamptz,
   qr_delivery_channel  text CHECK (qr_delivery_channel IN ('line','in_app','in_person')),
   qr_expires_at        timestamptz,   -- 既定: 発行から7日（入金を挟むため精算QRより長い。運用で調整可）
-  qr_consumed_at       timestamptz,   -- 承認確定で失効（単回使用）
+  qr_consumed_at       timestamptz,   -- 承認確定・現金への切替で失効（単回使用）
+  -- ▼ 決済手段（正本 v13 §5.10.7 ／ §9 #52）。`credit_card` は Phase 2 のため CHECK に入れない
+  payment_method       text CHECK (payment_method IN ('settlement_qr','cash','uii_qr')),
+  paid_at              timestamptz,
+  received_by          uuid REFERENCES members(member_id),  -- 現金受領者（cash で受領済みなら必須）
   payment_confirmed_by uuid REFERENCES members(member_id),
   approved_at          timestamptz,
   role_upgraded_at      timestamptz,
-  created_at            timestamptz NOT NULL DEFAULT now()
+  stay_tickets_granted_at timestamptz,
+  rejection_reason      text,                                -- 却下は理由必須（§5.10.4）
+  created_at            timestamptz NOT NULL DEFAULT now(),
+  updated_at            timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX ix_membership_app_member ON membership_applications (member_id);
 CREATE INDEX ix_membership_app_status ON membership_applications (status);
+-- ★ 二重申請の防止（§5.10.3）。アプリ側の存在チェックだけでは同時タップをすり抜ける
+CREATE UNIQUE INDEX ux_membership_app_active_per_member ON membership_applications (member_id)
+  WHERE status IN ('申込中','QR送付済み','保留');
 COMMENT ON TABLE membership_applications IS
   '決済はアプリ外（QR経由）で完結するため、決済トランザクションそのものは保持しない（正本 §7）';
 ```
@@ -2341,7 +2374,7 @@ test('ニックネーム未設定の会員の display_name に本名が含まれ
 | 8. 顧客管理画面・会計調整 | `settlement_adjustments` | **本書で新規提案**（未着手。免除権限はQUESTIONS.md未回答でブロック） |
 | 9. FAQ・ナレッジ・RAG | なし（浮遊街アプリ側のテーブル・API実装なし） | **2026-08-16再確定：line-rag-bot（Firestore）へ統合、新規テーブル・API連携ともになし**（管理画面への外部リンクのみ。§3-3参照） |
 | 10. 既存街人データ移行・名寄せ | `members`等（既存） | 既存（Vault側で実データ検証済み。370名の最終承認はQUESTIONS.md未回答） |
-| 12. ゲスト→街人アップグレード導線 | `membership_applications` | **本書で新規提案**（未着手） |
+| 12. ゲスト→街人アップグレード導線 | `membership_applications` | ~~**本書で新規提案**（未着手）~~ → ✅ **実装済み（2026-09-25 ／ `0037_membership_applications.sql`）**。正本 §7 の6項目（`payment_method`・`paid_at`・`received_by`・`rejection_reason`・`stay_tickets_granted_at`・`plan_id`）を追加して §3-5 へ反映済み |
 | 13. 管理者ダッシュボード | 専用テーブル不要（既存テーブルの集計ビュー） | ― |
 | 14. メディア（画像・動画）アップロード（v13 §5.11.7、2026-08-20 再確定） | `media_assets` | **本書で新規提案**（未着手）。**Phase 1 はアップロードのみ**（全ロール開放・用途タグ必須・論理削除）。**検索とAI推薦は Phase 2** のため `ai_*` 系カラムは用意するが値を入れない。§3-7参照 |
 | 15. Eumo給付の送付・受領追跡（v13 §5.3.1、2026-08-20 新設） | `eumo_grants` | **本書で新規提案**（未着手）。最終承認と同時に起票。`送付済` と `受領確認済` を別状態で保持。§3-8参照 |
@@ -2492,3 +2525,4 @@ CREATE INDEX ix_escalation_unresolved ON unanswered_escalations (escalated_at)
 §7突合表を14番として追加、§8オーナー確認事項に#7・#8を新設（削除方針・AIコスト等）。 |
 | **2026-08-23** | **Googleフォーム廃止・公開予約ページ化に伴うスキーマ改訂（v13 §9 #46〜#49）**。①**§3-6 を全面改訂**：中間テーブル `reservation_form_submissions` の構想を**撤回**（外部フォームの生回答が存在しなくなったため）。代わりに **`meal_reservations`**（カフェ事前予約注文。提供時に `orders` へ変換し、予約時点では伝票を作らない）と **`reservation_otps`**（公開予約ページの本人確認。平文コードを保存せずハッシュのみ）を新設。②**§3-11 `reservation_source` に `web_public` を追加**し既定値を変更。`google_form` は過去データ用に残す。③**§3-12 残枠ビューを全面改訂**：算出元を `room_assignments` → **`check_ins`（宿泊形態単位）**へ変更し、**`accommodation_types.allocation_mode`（`per_person` / `per_unit`）による2モード算出**を導入（コテージを人数で数えると1名予約3件で実質満室なのに「残り3名」と表示される問題を解消）。④**`menu_items` に `is_pre_orderable` / `meal_slot` を追加**し、カテゴリに「送迎・オプション」を追加（送迎 1,900円＝1,520Uii・片道は専用マスタを作らず本テーブルで扱う）。 |
 | **2026-08-20（v13 v1.15.0 反映）** | **8/13レビュー未反映分の一括反映（v13 §9 #33〜#43）に伴うスキーマ改訂**。①**§3-1 二段階承認**：`work_logs.approval_status` を `報告済み/コアメンバー確認済/承認完了/差戻し` へ変更し、`reviewed_by`（確認者）と `approved_by`（最終承認者＝admin）を**別カラムで保持**。`review_skipped`・差戻し理由の CHECK 制約・`work_log_reviews`（2人目以降の確認ログ）を追加。②**§3-2 提供ステータス**：`orders.serving_status`（未提供／提供済み）・`served_at`・`served_by` を追加し、決済ステータスと独立した2軸に。「精算済みだが未提供」検出用の部分インデックスも新設。③**§3-7 メディア**：`visibility`（公開／運営のみ）・`deleted_at`（論理削除・運営措置）・`place_id`・`taken_at`・`geo_location` を追加。**用途タグ最低1つ必須**の CHECK 制約を新設（Phase 2 の検索精度を担保）。`ai_*` 系は Phase 2 用にカラムのみ用意。④**§3-8 `eumo_grants` を新設**：`未送付→送付済→受領確認済` を追跡。送付と受領を別状態で保持。⑤**§3-9 `menu_items` / §3-10 `accommodation_rates` を新設**：Uii価格は保存せず都度算出。宿泊料金は `EXCLUDE USING gist` で適用期間の重複を防止し、過去予約を当時の料金で再計算可能に。⑥**§3-11 `check_ins.reservation_source` を追加**：アプリ内予約とフォーム経由を同一テーブルで扱い経路のみ区別。⑦**§3-12 `v_room_availability` ビューを新設**：残枠を**保存せず都度算出**（ダブルブッキング防止）。§7突合表に15〜20番を追加。 |
+| **2026-09-25** | **§3-5 街人登録申込を実装に合わせて改訂**（`0037_membership_applications.sql` ／ WBS 12-2 ／ Issue #110）。本節の DDL が**正本 v13 §7 の6項目を落としていた**ため、正本に合わせて追加した（`CLAUDE.md` §1.1）。①**`payment_method` / `paid_at` / `received_by`**（§5.10.7・§9 #52。これが無いと**現金で受け取ったときの記録先が無い**＝承認を押すだけで何で払われたかが残らない）②**`rejection_reason`**（§5.10.4 の却下理由）③**`stay_tickets_granted_at`**（§7 の項目一覧）④**`plan_id`**（`membership_plans` への FK。旧 DDL は `billed_amount_yen integer DEFAULT 30000` と**金額を直書き**しており、正本の「直書き禁止」と食い違っていた）。あわせて**金額・付与泊数をトリガーがプランから写す**形にし（本人 INSERT を開ける表であるため、RLS では列を絞れず「0円で申し込んで自分で承認済みにする」を止められない）、**二重申請を部分一意索引で防ぐ**（アプリ側の存在チェックは同時タップをすり抜ける）。「登録種別」は Phase 1 の値が `街人` 1種のみのため独立した列にせず `plan_id` で表す。§7突合表の12番を実装済みへ更新。 |

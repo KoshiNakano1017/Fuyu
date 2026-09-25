@@ -16,6 +16,36 @@
 
 ## バックログ
 
+## [2026-09-25] 街人登録申込 `membership_applications` の DDL ＋ RLS（Issue #110 ／ WBS `12-2` 申請〜決済〜承認フロー） — DONE
+
+Phase 1 で設計済みかつ未作成だった最後のテーブルを実装した（`0037_membership_applications.sql`）。
+これで `supabase/migrations/` と `DB物理設計.md` の差分は **0件**になった。
+
+**入れたもの**: DDL・CHECK 制約8本・索引3本（うち二重申請防止の部分一意索引1本）・
+遷移ガードトリガー1本・RLS ポリシー5本・GRANT ／ 受入テスト `tests/db/membership-applications.test.ts`。
+
+**設計上の要点**:
+
+- ★ **金額・付与泊数は申込側から指定させない。** トリガーが `membership_plans` から写して上書きする
+  （本人経路では `is_current_signup_plan = true` の1行に固定）。本表は Phase 1 で唯一
+  **本人が INSERT できる** PII-B 表であり（`DB物理設計.md` §6-1 #16）、RLS は列を絞れないため、
+  「0円で申し込んで自分で承認済みにする」を止められるのはトリガーだけである
+- **申請一覧は `admin` のみ**（v13 §6）。PII-B テンプレートの staff 版を `is_admin()` へ置換した
+  （`core_member` には1行も見せない）
+- **現金と QR の二重受領を構造で防ぐ**（v13 §5.10.7）。現金へ切り替えた時点でトリガーが
+  発行済み QR を失効させ、CHECK 制約が「現金 ＋ 生きた QR」を禁じる
+- `DB物理設計.md` §3-5 が**正本 v13 §7 の6項目を落としていた**ため、同じ作業の中で追随させた
+  （CLAUDE.md §7.0.1）。`payment_method` / `paid_at` / `received_by` / `rejection_reason` /
+  `stay_tickets_granted_at` / `plan_id`
+
+**検証**: dev DB 上で `BEGIN ... ROLLBACK` に包んで9項目（プランからの写し・二重申請 23505・
+本人の承認済み申込 42501・core_member に不可視・承認でQR失効・巻き戻し拒否・現金切替でQR失効・
+却下理由なし 23514・DELETE 42501）を実測し、すべて期待どおり。dev DB には何も残していない。
+
+**含まない**: 承認時の `role` 昇格・宿泊券4枚の付与・登録キャッシュバックの自動起票（いずれも WBS `12-3`）／
+14日経過で `保留` へ自動遷移（運用ジョブ）／画面（A8 は `12-1`・C7 は `12-2` の残り）。
+
+
 ## [2026-09-24 05:40] Vercel プロジェクト連携とデプロイ環境変数の登録（Issue #148 ／ WBS `1-2a`） — BLOCKED
 
 リスク区分: **高**（外部連携（Vercel・Supabase）＋ セキュリティ ＋ 個人情報 ／ 設計 §4.1）。ゲート1・2・3（承認3回）。
