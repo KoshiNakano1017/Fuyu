@@ -21,9 +21,9 @@
     "review": 0
   },
   "tokens": {
-    "input": 1246,
-    "output": 736452,
-    "costUsd": 83.44037000000002
+    "input": 1334,
+    "output": 803395,
+    "costUsd": 91.8373475
   },
   "testHashes": {
     "e2e/TEST_PLAN.md": "9e1ff3682d6cdff6",
@@ -333,7 +333,7 @@
     }
   ],
   "acceptanceDerived": false,
-  "updatedAt": "2026-09-25T21:32:19.136Z",
+  "updatedAt": "2026-09-25T21:44:14.267Z",
   "provisional": [
     {
       "question": "本人向けカレンダー（画面ID A12）を、正本どおり A6 マイログ（`/me`）内へ移すか、現状の `/reservations`（画面ID A11 宿泊予約）内に置いたままにするか",
