@@ -227,6 +227,8 @@ tags:
 | --- | --- | --- |
 | [現場運用マニュアル（運営スタッフ向け）](https://github.com/KoshiNakano1017/Fuyu/blob/main/docs/operations/現場運用マニュアル_運営スタッフ向け.md) | `admin` / `core_member` が朝会・宿泊・注文・クエスト・会計・会員管理・コンシェルジュをどう回すか。事故防止集と権限早見表つき | ⚠️ ドラフト v0.1.0 |
 | [コンシェルジュ登録ナレッジ台帳（運営向け）](https://github.com/KoshiNakano1017/Fuyu/blob/main/docs/operations/コンシェルジュ登録用ナレッジ原稿_運営向け.md) | 上記マニュアルから登録した50件（`ops-01`〜`ops-50`）の台帳、登録禁止事項、マニュアル改訂時の同期手順 | ✅ **2026-08-23 本番投入済み** |
+| [リリース前環境設定 オーナー作業手順書](https://github.com/KoshiNakano1017/Fuyu/blob/main/docs/operations/%E3%83%AA%E3%83%AA%E3%83%BC%E3%82%B9%E5%89%8D%E7%92%B0%E5%A2%83%E8%A8%AD%E5%AE%9A_%E3%82%AA%E3%83%BC%E3%83%8A%E3%83%BC%E4%BD%9C%E6%A5%AD%E6%89%8B%E9%A0%86%E6%9B%B8.md) | リリース前に必要な外部サービス設定のうち、**オーナーしか実行できない作業**を作業順に並べたもの。「Supabase の課金はリリース直前まで行わない」（決定ログ §23-1）を前提に、無料でできる Step 1〜7 と課金後にやることを分離 | 🟢 実行待ち（2026-09-25 新設） |
+| [メール送信基盤（Resend）設定手順書](https://github.com/KoshiNakano1017/Fuyu/blob/main/docs/operations/%E3%83%A1%E3%83%BC%E3%83%AB%E9%80%81%E4%BF%A1%E5%9F%BA%E7%9B%A4_Resend%E8%A8%AD%E5%AE%9A%E6%89%8B%E9%A0%86%E6%9B%B8.md) | 送信ドメインの DNS 認証から Supabase カスタム SMTP・アプリの環境変数まで。送信経路が2系統ある点を前提に構成 | 🟨 DNS 認証は 2026-09-24 完了・SMTP が残り |
 | 利用者（街人・ゲスト）向けマニュアル | 未着手。WBS 17-1 はこの2本セット | 未作成 |
 
 ---
