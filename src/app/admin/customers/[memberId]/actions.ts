@@ -14,12 +14,18 @@ import {
 import {
   applySlipEdit,
   cancelOrder,
+  fetchAdjustmentState,
   fetchOrderForEdit,
   issueSettlementQr,
   markOrderSettled,
   markOrderUnsettled,
   reassignPurchaser,
+  resolveAdjustment,
 } from "@/lib/orders/slip-store";
+import {
+  adjustmentResolveDenialMessage,
+  decideAdjustmentResolution,
+} from "@/lib/billing/adjustment";
 import { canIssueSettlementQr } from "@/lib/billing/settlement-qr";
 import { judgeFirstVisitCashback } from "@/lib/eumo/grants";
 import {
@@ -477,5 +483,70 @@ export async function adjustStayTicketsAction(
   return {
     status: "done",
     message: `宿泊券を ${formatBalanceTransition(currentBalance, nights)} に調整しました。`,
+  };
+}
+
+/**
+ * 差額の消し込み（WBS 8-3 ／ v13 §5.6.6）。
+ *
+ * ## 「精算済み」と「免除」を1つの操作にまとめない
+ *
+ * 前者は**受け取った**（現金・QR・返金のいずれかで現地で渡した）、後者は**諦めた**である。
+ * 同じボタンにすると、後から回収率も未収の実態も読めなくなる。
+ * DB 側も残す列が違う（`settled_*` / `waived_*` ／ `0019`）。
+ *
+ * ## 免除はコアメンバーにも許す
+ *
+ * 2026-08-16 回答。`admin` 限定に戻すと、少人数運営で現場の免除判断が止まる
+ * （判定は `canWaive()` に置いてある）。
+ */
+export async function resolveAdjustmentAction(
+  _prev: SubmitState,
+  formData: FormData,
+): Promise<SubmitState> {
+  const viewer = await readStaffViewer();
+  if (viewer === null) {
+    return fail("not_staff");
+  }
+
+  const adjustmentId = String(formData.get("adjustmentId") ?? "").trim();
+  const memberId = String(formData.get("memberId") ?? "").trim();
+  const resolution = String(formData.get("resolution") ?? "");
+  if (resolution !== "settle" && resolution !== "waive") {
+    return { status: "error", message: "操作を特定できませんでした。" };
+  }
+
+  const current = await fetchAdjustmentState(adjustmentId);
+  if (current === null) {
+    return { status: "error", message: "対象の差額が見つかりません。" };
+  }
+
+  const decision = decideAdjustmentResolution({
+    actorRole: viewer.role,
+    resolution,
+    status: current.status,
+    isStale: current.isStale,
+  });
+  if (!decision.allowed) {
+    return { status: "error", message: adjustmentResolveDenialMessage(decision.reason) };
+  }
+
+  const saved = await resolveAdjustment({
+    adjustmentId,
+    resolution,
+    operatorId: viewer.memberId,
+  });
+  if (!saved) {
+    // WHERE で `未処理` を条件にしているため、同時押しの2件目はここへ来る。
+    return { status: "error", message: adjustmentResolveDenialMessage("already_resolved") };
+  }
+
+  revalidatePath(`/admin/customers/${memberId}`);
+  revalidatePath("/admin");
+  // 本人のマイログの未処理差額も変わる（v13 §5.6.6「本人への表示」）。
+  revalidatePath("/me");
+  return {
+    status: "done",
+    message: resolution === "settle" ? "精算済みにしました。" : "免除しました。",
   };
 }

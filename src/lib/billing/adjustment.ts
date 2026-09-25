@@ -100,3 +100,58 @@ export function outstandingAdjustmentYen(adjustments: readonly Adjustment[]): nu
     .filter((adjustment) => adjustment.status === "未処理")
     .reduce((total, adjustment) => total + adjustment.amountYen, 0);
 }
+
+/** 差額の消し込み方（v13 §5.6.6「現金受領／QR決済／返金のいずれかで消し込む」）。 */
+export type AdjustmentResolution = "settle" | "waive";
+
+export type AdjustmentResolveDenialReason = "not_permitted" | "already_resolved" | "stale";
+
+export type AdjustmentResolveDecision =
+  | { allowed: true }
+  | { allowed: false; reason: AdjustmentResolveDenialReason };
+
+/**
+ * 差額を消し込めるか（運営の操作 ／ v13 §5.6.6）。
+ *
+ * - **精算済みにする**のは staff（現地で現金・QR・返金のいずれかで受け渡した後の記録）
+ * - **免除する**のも staff（`canWaive()`。Phase 1 はコアメンバーにも許す／2026-08-16 回答）
+ * - 既に `精算済み` / `免除` の行はもう動かさない（二重の消し込みを作らない）
+ * - `is_stale`（後続の修正で意味を失った行）は消し込みの対象にしない。
+ *   ★ ここを許すと、**無効になった請求を「精算済み」として記録**してしまい、
+ *   後から「実際に受け取ったのか」が読めなくなる。旗が立った行は放置でよい（v13 §5.6.6 の滞留アラート）
+ */
+export function decideAdjustmentResolution(params: {
+  actorRole: Role;
+  resolution: AdjustmentResolution;
+  status: AdjustmentStatus;
+  isStale: boolean;
+}): AdjustmentResolveDecision {
+  const permitted =
+    params.resolution === "waive" ? canWaive(params.actorRole) : isStaffActor(params.actorRole);
+  if (!permitted) {
+    return { allowed: false, reason: "not_permitted" };
+  }
+  if (params.status !== "未処理") {
+    return { allowed: false, reason: "already_resolved" };
+  }
+  if (params.isStale) {
+    return { allowed: false, reason: "stale" };
+  }
+  return { allowed: true };
+}
+
+export function adjustmentResolveDenialMessage(reason: AdjustmentResolveDenialReason): string {
+  switch (reason) {
+    case "not_permitted":
+      return "差額の消し込みは運営（管理者・コアメンバー）のみが行えます。";
+    case "already_resolved":
+      return "この差額は既に精算済み、または免除されています。";
+    case "stale":
+      return "この差額は後続の修正で無効になっています（消し込みの対象外です）。";
+  }
+}
+
+/** 運営（`admin` / `core_member`）か。`canWaive()` と同じ判定だが、意図が違うので名前を分ける。 */
+function isStaffActor(role: Role): boolean {
+  return role === "admin" || role === "core_member";
+}

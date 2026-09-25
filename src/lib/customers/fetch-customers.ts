@@ -40,6 +40,13 @@ export type PendingAdjustment = {
   category: "追加請求" | "返金";
   reason: string;
   occurredAt: string;
+  /**
+   * 後続の修正で意味を失った行（`is_stale`）。
+   *
+   * ★ **消し込みの対象外**である（無効になった請求を「精算済み」として記録すると、
+   * 後から「実際に受け取ったのか」が読めなくなる）。画面には旗として出す（v13 §5.6.6 の滞留アラート）。
+   */
+  isStale: boolean;
 };
 
 export type CustomerDetail = {
@@ -158,7 +165,9 @@ export async function fetchCustomerDetail(memberId: string): Promise<CustomerDet
       .order("created_at", { ascending: false }),
     supabase
       .from("settlement_adjustments")
-      .select("adjustment_id, order_id, amount_yen, amount_uii, category, reason, occurred_at, orders!inner(purchaser_id)")
+      .select(
+        "adjustment_id, order_id, amount_yen, amount_uii, category, reason, occurred_at, is_stale, orders!inner(purchaser_id)",
+      )
       .eq("status", "未処理")
       .eq("orders.purchaser_id", memberId),
   ]);
@@ -183,6 +192,7 @@ export async function fetchCustomerDetail(memberId: string): Promise<CustomerDet
       category: row.category as "追加請求" | "返金",
       reason: String(row.reason),
       occurredAt: String(row.occurred_at),
+      isStale: row.is_stale === true,
     })),
   };
 }

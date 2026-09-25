@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AccessDenied } from "@/components/auth/AccessDenied";
+import { AdjustmentResolver } from "@/components/customers/AdjustmentResolver";
 import { CashbackPanel } from "@/components/customers/CashbackPanel";
 import { SlipEditor } from "@/components/customers/SlipEditor";
 import { StayHistorySection } from "@/components/customers/StayHistorySection";
@@ -32,6 +33,7 @@ import {
   issueFirstVisitCashbackAction,
   issueSettlementQrAction,
   reassignPurchaserAction,
+  resolveAdjustmentAction,
   toggleSettlementStatusAction,
 } from "./actions";
 
@@ -155,16 +157,21 @@ export default async function CustomerDetailPage({
         {customer.pendingAdjustments.length === 0 ? null : (
           <div className="rounded bg-amber-50 px-3 py-2 text-sm text-amber-900">
             <p className="font-semibold">未処理の差額が {customer.pendingAdjustments.length} 件あります</p>
-            <ul className="mt-1 flex flex-col gap-1 text-xs">
-              {customer.pendingAdjustments.map((adjustment) => (
-                <li key={adjustment.adjustmentId}>
-                  {adjustment.category}: ¥{Math.abs(adjustment.amountYen).toLocaleString("ja-JP")}
-                  （{adjustment.reason}）
-                </li>
-              ))}
-            </ul>
+            {/*
+              消し込み（精算済み／免除）は運営の操作である（WBS 8-3 ／ v13 §5.6.6）。
+              ★ 「繰越」ボタンは置かない — 繰越は消込ではなく先送りであり、
+              差額は未処理のまま残り続ける（同節の [!important]）。
+            */}
+            <div className="mt-2">
+              <AdjustmentResolver
+                memberId={customer.memberId}
+                adjustments={customer.pendingAdjustments}
+                resolve={resolveAdjustmentAction}
+              />
+            </div>
             <p className="mt-1 text-xs">
               次回来訪時に現地で精算します（v13 §5.6.6）。繰越しても未処理のまま残ります。
+              現地で受け取ったら「精算済みにする」、回収しないと判断したら「免除する」を押してください。
             </p>
           </div>
         )}
