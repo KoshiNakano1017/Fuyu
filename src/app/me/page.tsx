@@ -1,8 +1,13 @@
+import Link from "next/link";
+
 import { MyGrantList } from "@/components/eumo/MyGrantList";
+import { StayCalendar } from "@/components/lodging/StayCalendar";
 import { Money } from "@/components/ui/Money";
 import { requireSignedIn } from "@/lib/auth/guard";
 import { fetchMyPendingAdjustments } from "@/lib/billing/fetch-my-ledger";
 import { fetchMyPendingGrants } from "@/lib/eumo/store";
+import { buildMyStayCalendar } from "@/lib/lodging/calendar";
+import { fetchMyStays } from "@/lib/lodging/fetch-lodging";
 import { formatBalanceTransition } from "@/lib/lodging/stay-ticket-adjust";
 import {
   fetchStayTicketBalance,
@@ -34,10 +39,18 @@ import { reportGrantReceiptAction } from "./actions";
  * 保存値 `未提供` は本人向けには「調理中」と出す（v13 §5.4.1）。
  * 変換は `toServingStatusDisplayLabel()` に一本化してある。
  */
-export default async function MyPage() {
+export default async function MyPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ stayMonth?: string }>;
+}) {
   const viewer = await requireSignedIn();
 
-  const [orders, adjustments, pendingGrants, stayTicketBalance, stayTicketHistory] =
+  const { stayMonth: requestedStayMonth } = await searchParams;
+  const today = new Date().toISOString().slice(0, 10);
+  const stayMonth = normalizeMonth(requestedStayMonth, today);
+
+  const [orders, adjustments, pendingGrants, stayTicketBalance, stayTicketHistory, myStays] =
     await Promise.all([
     fetchMyOrders(viewer.memberId),
     fetchMyPendingAdjustments(viewer.memberId),
@@ -46,9 +59,17 @@ export default async function MyPage() {
     // 宿泊券の残高と明細（v13 §5.8.5「本人への反映」／ WBS 3-4）
     fetchStayTicketBalance(viewer.memberId),
     fetchStayTicketHistory(viewer.memberId),
+    // 本人の宿泊予定・履歴（画面ID A12 ／ WBS 3-8）。RLS も `member_id` で絞る
+    fetchMyStays(viewer.memberId),
   ]);
 
   const unsettled = sumUnsettled(orders);
+  const stayDays = buildMyStayCalendar({
+    month: stayMonth,
+    today,
+    memberId: viewer.memberId,
+    stays: myStays,
+  });
 
   return (
     <main className="mx-auto flex max-w-2xl flex-col gap-6 p-6">
@@ -126,6 +147,29 @@ export default async function MyPage() {
       </section>
 
       <section className="flex flex-col gap-2">
+        {/*
+          宿泊予定・履歴カレンダー（画面ID A12 ／ v13 §5.2.5② 本人向け ／ `画面設計.md` §4 A12）。
+          正本が「A6 マイログ内タブ」と定めているため、ここに置く（`/reservations` からはここへ送る）。
+        */}
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-lg font-bold">宿泊予定・履歴</h2>
+          <nav className="flex items-center gap-2 text-sm">
+            <Link className="underline" href={`/me?stayMonth=${shiftMonth(stayMonth, -1)}`}>
+              前の月
+            </Link>
+            <span>{stayMonth}</span>
+            <Link className="underline" href={`/me?stayMonth=${shiftMonth(stayMonth, 1)}`}>
+              次の月
+            </Link>
+          </nav>
+        </div>
+        <p className="text-xs text-neutral-600">
+          日付を選ぶと滞在の詳細（部屋・同伴人数・注文）へ移動します。
+        </p>
+        <StayCalendar month={stayMonth} days={stayDays} />
+      </section>
+
+      <section className="flex flex-col gap-2">
         <h2 className="text-lg font-bold">注文履歴</h2>
         {orders.length === 0 ? (
           <p className="text-sm text-neutral-600">まだ注文はありません。</p>
@@ -164,4 +208,19 @@ export default async function MyPage() {
       </section>
     </main>
   );
+}
+
+/** `YYYY-MM` の形でなければ今月に倒す。URL から任意の文字列が来るため。 */
+function normalizeMonth(candidate: string | undefined, today: string): string {
+  if (candidate !== undefined && /^\d{4}-\d{2}$/.test(candidate)) {
+    return candidate;
+  }
+  return today.slice(0, 7);
+}
+
+/** 月を前後に動かす。年またぎは `Date` に任せる（自前の繰り上がりを書かない）。 */
+function shiftMonth(month: string, delta: number): string {
+  const [year, monthIndex] = month.split("-").map((part) => Number.parseInt(part, 10));
+  const shifted = new Date(Date.UTC(year, monthIndex - 1 + delta, 1));
+  return shifted.toISOString().slice(0, 7);
 }

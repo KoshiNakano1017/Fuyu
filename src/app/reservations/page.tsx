@@ -1,15 +1,16 @@
+import Link from "next/link";
+
 import { ReservationForm } from "@/components/lodging/ReservationForm";
 import { requireSignedIn } from "@/lib/auth/guard";
-import {
-  fetchAccommodationTypes,
-  fetchAvailability,
-  fetchMyStays,
-} from "@/lib/lodging/fetch-lodging";
+import { fetchAccommodationTypes, fetchAvailability } from "@/lib/lodging/fetch-lodging";
 
 import { createReservationAction } from "./actions";
 
 /**
- * 宿泊予約（画面ID A11 ／ WBS 3-7）＋ 本人の宿泊予定・履歴（画面ID A12 ／ WBS 3-8）。
+ * 宿泊予約（画面ID A11 ／ WBS 3-7）。
+ *
+ * 本人の宿泊予定・履歴（画面ID A12）は **A6 マイログ（`/me`）内のタブ**にある
+ * （v13 §5.2.5② ／ `画面設計.md` §4 A12）。ここからはそこへ送るだけにする。
  *
  * ## 未ログインの入口はここではない（`/reserve`）
  *
@@ -34,16 +35,14 @@ import { createReservationAction } from "./actions";
  * （`createReservationAction`）。画面に在庫を持たせない。
  */
 export default async function ReservationsPage() {
-  const viewer = await requireSignedIn();
+  // 戻り値は使わないが、未ログインを弾くために必ず通す（v13 §5.9.3）。
+  await requireSignedIn();
 
   const today = new Date().toISOString().slice(0, 10);
-  const [types, todayAvailability, myStays] = await Promise.all([
+  const [types, todayAvailability] = await Promise.all([
     fetchAccommodationTypes(),
     fetchAvailability({ fromDate: today, toDate: today }),
-    fetchMyStays(viewer.memberId),
   ]);
-
-  const displayNameOf = new Map(types.map((type) => [type.roomType, type.displayName]));
 
   return (
     <main className="mx-auto flex max-w-2xl flex-col gap-8 p-6">
@@ -57,28 +56,18 @@ export default async function ReservationsPage() {
       </section>
 
       <section className="flex flex-col gap-2">
+        {/*
+          予定・履歴の一覧はここに持たない。正本は本人向けカレンダー（画面ID A12）を
+          **A6 マイログ内のタブ**と定めており（v13 §5.2.5② ／ `画面設計.md` §4 A12）、
+          同じ内容を2画面に置くと片方だけ直る。ここからは A6 へ送る。
+        */}
         <h2 className="text-lg font-bold">予定・履歴</h2>
-        {myStays.length === 0 ? (
-          <p className="text-sm text-neutral-600">予約はありません。</p>
-        ) : (
-          <ul className="flex flex-col gap-2">
-            {myStays.map((stay) => (
-              <li
-                key={stay.checkinId}
-                className="flex flex-wrap items-baseline justify-between gap-2 rounded border border-neutral-200 bg-white p-3"
-              >
-                <span className="font-medium">
-                  {stay.checkInDate} 〜 {stay.checkOutDate}
-                </span>
-                <span className="text-sm text-neutral-600">
-                  {displayNameOf.get(stay.roomType) ?? stay.roomType} ／{" "}
-                  {stay.adultsCount + stay.childrenCount}名
-                </span>
-                <span className="rounded bg-neutral-100 px-2 py-0.5 text-xs">{stay.status}</span>
-              </li>
-            ))}
-          </ul>
-        )}
+        <p className="text-sm text-neutral-600">
+          宿泊の予定と履歴は、マイページの「宿泊予定・履歴」カレンダーでご確認いただけます。
+        </p>
+        <Link className="text-sm underline" href="/me">
+          マイページの宿泊予定・履歴へ
+        </Link>
       </section>
     </main>
   );
