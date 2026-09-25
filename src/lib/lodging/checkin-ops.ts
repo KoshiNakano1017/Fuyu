@@ -131,11 +131,25 @@ export const CANCELLED_BY_OPERATOR_LABEL = "運営によりキャンセル";
 /**
  * キャンセル日時の表示。顧客管理画面と本人のマイページで**同じ書式**にするために関数へ寄せる。
  * 解釈できない値はそのまま返す（表示のために事実を捨てない）。
+ *
+ * ★ **タイムゾーンを `Asia/Tokyo` に固定する。** この関数はサーバ側（Vercel ＝ UTC）で
+ *   レンダリングされるため、実行環境の既定時刻に任せると表示が JST−9時間になり、
+ *   **夜間のキャンセルは日付まで前日へずれる**。「いつ取り消されたか」は本人への説明と
+ *   監査の材料であり（v13 §5.2.2「本人への表示」）、9時間ずれた日時は事実として誤りである。
  */
+const CANCELLED_AT_FORMAT = new Intl.DateTimeFormat("ja-JP", {
+  timeZone: "Asia/Tokyo",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
 export function formatCancelledAt(cancelledAt: string): string {
   const parsed = new Date(cancelledAt);
   if (Number.isNaN(parsed.getTime())) {
     return cancelledAt;
   }
-  return parsed.toLocaleString("ja-JP");
+  return CANCELLED_AT_FORMAT.format(parsed);
 }
