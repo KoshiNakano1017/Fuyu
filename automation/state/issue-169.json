@@ -6,7 +6,7 @@
   "phase": "review",
   "risk": "high",
   "attempts": {
-    "infra": 53,
+    "infra": 56,
     "verify": 0,
     "review": 0
   },
@@ -16,7 +16,7 @@
     "review": null
   },
   "repeatedFingerprint": {
-    "infra": 51,
+    "infra": 54,
     "verify": 0,
     "review": 0
   },
@@ -333,7 +333,7 @@
     }
   ],
   "acceptanceDerived": false,
-  "updatedAt": "2026-09-25T14:16:50.392Z",
+  "updatedAt": "2026-09-25T14:20:11.832Z",
   "provisional": [
     {
       "question": "本人向けカレンダー（画面ID A12）を、正本どおり A6 マイログ（`/me`）内へ移すか、現状の `/reservations`（画面ID A11 宿泊予約）内に置いたままにするか",
