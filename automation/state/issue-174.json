@@ -21,9 +21,9 @@
     "review": 0
   },
   "tokens": {
-    "input": 118,
-    "output": 69106,
-    "costUsd": 6.1690565
+    "input": 286,
+    "output": 129624,
+    "costUsd": 12.855218
   },
   "testHashes": {},
   "specRefs": [
@@ -128,6 +128,6 @@
     }
   ],
   "acceptanceDerived": false,
-  "updatedAt": "2026-09-25T21:09:10.875Z",
+  "updatedAt": "2026-09-25T21:25:03.695Z",
   "provisional": []
 }

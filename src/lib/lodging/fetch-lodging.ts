@@ -37,6 +37,10 @@ export type StayEntry = {
   adultsCount: number;
   childrenCount: number;
   status: string;
+  /** 取り消した日時。`null` なら取り消されていない（v13 §5.2.2「削除方式」） */
+  cancelledAt?: string | null;
+  /** 取り消しの自由記述理由。本人にもそのまま見せる（v13 §5.2.2「本人への表示」） */
+  cancelReason?: string | null;
 };
 
 export async function fetchAccommodationTypes(): Promise<AccommodationType[]> {
@@ -163,8 +167,10 @@ export async function fetchMyStays(memberId: string): Promise<StayEntry[]> {
 
   const { data, error } = await supabase
     .from("check_ins")
+    // ★ キャンセルの日時と理由も読む。本人は「運営によりキャンセルされた」ことと
+    //   その日時・理由を自分の履歴で読めなければならない（v13 §5.2.2「本人への表示」）。
     .select(
-      "checkin_id, member_id, room_type, check_in_date, check_out_date, adults_count, children_count, status",
+      "checkin_id, member_id, room_type, check_in_date, check_out_date, adults_count, children_count, status, cancelled_at, cancel_reason",
     )
     .eq("member_id", memberId)
     .order("check_in_date", { ascending: false });
@@ -183,6 +189,8 @@ export async function fetchMyStays(memberId: string): Promise<StayEntry[]> {
       adults_count: number;
       children_count: number;
       status: string;
+      cancelled_at: string | null;
+      cancel_reason: string | null;
     }[]
   ).map((row) => ({
     checkinId: row.checkin_id,
@@ -194,6 +202,8 @@ export async function fetchMyStays(memberId: string): Promise<StayEntry[]> {
     adultsCount: row.adults_count,
     childrenCount: row.children_count,
     status: row.status,
+    cancelledAt: row.cancelled_at ?? null,
+    cancelReason: row.cancel_reason ?? null,
   }));
 }
 

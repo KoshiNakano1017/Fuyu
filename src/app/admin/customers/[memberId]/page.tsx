@@ -29,6 +29,7 @@ import { fetchStayingCheckIns } from "@/lib/orders/fetch-orders";
 import {
   adjustStayTicketsAction,
   cancelOrderAction,
+  cancelStayAction,
   editSlipAction,
   issueFirstVisitCashbackAction,
   issueSettlementQrAction,
@@ -199,7 +200,11 @@ export default async function CustomerDetailPage({
         adjust={adjustStayTicketsAction}
       />
 
-      <StayHistorySection history={stayHistory} />
+      {/*
+        宿泊履歴（v13 §5.6.8）＋ 予約のキャンセル・ノーショー（WBS 3-3 ／ v13 §5.2.2）。
+        正本が定める**操作場所は顧客管理画面**である（§5.2.2「操作場所」／ §6 L2344）。
+      */}
+      <StayHistorySection history={stayHistory} cancelStay={cancelStayAction} />
 
       <section className="flex flex-col gap-3">
         <h2 className="text-xl font-bold">注文履歴</h2>

@@ -28,6 +28,8 @@ import {
 } from "@/lib/billing/adjustment";
 import { canIssueSettlementQr } from "@/lib/billing/settlement-qr";
 import { judgeFirstVisitCashback } from "@/lib/eumo/grants";
+import { cancelStay } from "@/lib/lodging/cancellation";
+import { fetchCheckInStatus } from "@/lib/lodging/fetch-checkin-board";
 import {
   decideStayTicketAdjustment,
   formatBalanceTransition,
@@ -70,6 +72,11 @@ const MESSAGE: Record<string, string> = {
   invalid_price: "単価は0以上の整数で入力してください。",
   same_purchaser: "付け替え先を選んでください。",
   not_found: "伝票が見つかりません。",
+  stay_not_found: "予約が見つかりません。",
+  stay_already_arrived: "入館済みの滞在は取り消せません。途中退去はチェックアウトで記録してください。",
+  invalid_reason_type: "キャンセル種別を選んでください。",
+  already_cancelled: "この予約は既にキャンセル済みです。",
+  denied: "この操作を行う権限がありません。",
   not_unsettled: "未会計の伝票にだけ精算QRを発行できます。",
   failed: "処理できませんでした。時間をおいて再試行してください。",
 };
@@ -548,5 +555,64 @@ export async function resolveAdjustmentAction(
   return {
     status: "done",
     message: resolution === "settle" ? "精算済みにしました。" : "免除しました。",
+  };
+}
+
+/**
+ * 予約のキャンセル／ノーショー（画面ID C11 の「宿泊」タブ ／ WBS 3-3 ／ v13 §5.2.2）。
+ *
+ * 正本は操作場所を**顧客管理画面**と定めており（§5.2.2「操作場所」／ §6 L2344 の権限行も
+ * 顧客管理画面の機能として与えている）、チェックイン板（`/staff/checkins`）の同じ操作は
+ * 当日の板の中でしか届かない。処理の本体は `cancelStay()`（`check_ins` の論理削除 ＋
+ * 部屋の解放を必ず一緒にやる）で、板と**同じ関数**を通す。条件を2箇所に書かない。
+ *
+ * ⚠️ **入館済み（`staying` / `checked_out`）は対象にしない。** 途中退去は「退館」であって
+ * キャンセルではなく、キャンセルにすると滞在の記録が通算来訪回数・宿泊履歴（§5.6.8）から
+ * 抜け落ちる。
+ */
+export async function cancelStayAction(
+  _prev: SubmitState,
+  formData: FormData,
+): Promise<SubmitState> {
+  // 街人・ゲストは実行できない（v13 §6 L2344 の権限行が `−`）。
+  // 画面の `requireAdmin()` とは別にここでも判定する — Server Action は URL を持つ
+  // 公開エンドポイントであり、画面を経由せずに呼べる（v13 §5.9.3）。
+  const viewer = await readStaffViewer();
+  if (viewer === null) {
+    return fail("not_staff");
+  }
+
+  const checkinId = String(formData.get("checkinId") ?? "").trim();
+  const current = await fetchCheckInStatus(checkinId);
+  if (current === null) {
+    return fail("stay_not_found");
+  }
+  if (current.status === "staying" || current.status === "checked_out") {
+    return fail("stay_already_arrived");
+  }
+
+  const result = await cancelStay({
+    checkinId,
+    reasonType: String(formData.get("reasonType") ?? ""),
+    reason: String(formData.get("reason") ?? ""),
+    cancelledByMemberId: viewer.memberId,
+  });
+
+  if (!result.ok) {
+    // `blank_reason` は伝票編集の理由（§5.6.4）と語が同じで意味が違う。
+    // ここだけキャンセルの文言へ差し替える。
+    return result.reason === "blank_reason"
+      ? { status: "error", message: "キャンセルの理由を入力してください（v13 §5.2.2）。" }
+      : fail(result.reason);
+  }
+
+  revalidatePath(`/admin/customers/${current.memberId}`);
+  // 板・カレンダー・残枠、そして本人のマイページ（v13 §5.2.2「本人への表示」）も変わる。
+  revalidatePath("/staff/checkins");
+  revalidatePath("/staff/calendar");
+  revalidatePath("/reservations");
+  return {
+    status: "done",
+    message: `キャンセルしました（部屋の解放 ${result.releasedRoomAssignmentCount} 件）。`,
   };
 }

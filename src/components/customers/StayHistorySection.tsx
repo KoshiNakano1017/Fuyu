@@ -1,4 +1,12 @@
-import type { StayHistory } from "@/lib/customers/stay-history";
+import type { StayHistory, StayHistoryRow } from "@/lib/customers/stay-history";
+import { formatCancelledAt } from "@/lib/lodging/checkin-ops";
+
+import { StayCancelForm, type StayCancelAction } from "./StayCancelForm";
+
+/** 取り消し（キャンセル・ノーショー）の対象になる状態＝**入館前の予約だけ**（v13 §5.2.2「対象」）。 */
+function canCancel(row: StayHistoryRow): boolean {
+  return row.status === "pre_registered" || row.status === "confirmed";
+}
 
 /**
  * 宿泊履歴（泊まった部屋）（画面ID C11 の「宿泊」タブ ／ WBS 8-6 ／ v13 §5.6.8）。
@@ -12,8 +20,21 @@ import type { StayHistory } from "@/lib/customers/stay-history";
  *
  * 移動のあった滞在は、その滞在の下に割当履歴を時系列で展開する。
  * 忘れ物・クレームの追跡は、日付と部屋の対応が正確でなければ役に立たない。
+ *
+ * ## 取り消した予約は消さず、取消線で残す
+ *
+ * v13 §7 L2541「キャンセル済みの予約は一覧で取消線表示とし、履歴として残す」。
+ * 行ごと消すと「予約したが来なかった」という顧客の履歴が読めなくなり、
+ * ノーショーの繰り返しに気づけない。
  */
-export function StayHistorySection({ history }: { history: StayHistory }) {
+export function StayHistorySection({
+  history,
+  cancelStay,
+}: {
+  history: StayHistory;
+  /** 予約の取り消し（WBS 3-3 ／ v13 §5.2.2）。認可は Action 側が持つ */
+  cancelStay: StayCancelAction;
+}) {
   return (
     <section className="flex flex-col gap-3">
       <h2 className="text-xl font-bold">宿泊</h2>
@@ -32,10 +53,13 @@ export function StayHistorySection({ history }: { history: StayHistory }) {
           {history.rows.map((row) => (
             <li key={row.checkinId} className="rounded border border-neutral-200 p-3 text-sm">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="font-medium">
+                <span className={row.isCancelled ? "font-medium text-neutral-500 line-through" : "font-medium"}>
                   {row.checkInDate} 〜 {row.checkOutDate}（{row.nights}泊）
                 </span>
                 <span className="flex items-center gap-2 text-xs">
+                  {row.isCancelled ? (
+                    <span className="rounded bg-red-100 px-2 py-0.5 text-red-800">キャンセル済み</span>
+                  ) : null}
                   {row.isStaying ? (
                     <span className="rounded bg-green-100 px-2 py-0.5 text-green-800">滞在中</span>
                   ) : null}
@@ -46,6 +70,25 @@ export function StayHistorySection({ history }: { history: StayHistory }) {
                   </span>
                 </span>
               </div>
+
+              {row.isCancelled ? (
+                <p className="mt-1 text-xs text-red-800">
+                  キャンセル
+                  {row.cancelReasonType === null || row.cancelReasonType === undefined
+                    ? ""
+                    : `（${row.cancelReasonType}）`}
+                  {row.cancelledAt === null || row.cancelledAt === undefined
+                    ? ""
+                    : ` ／ ${formatCancelledAt(row.cancelledAt)}`}
+                  {row.cancelReason === null || row.cancelReason === undefined || row.cancelReason === ""
+                    ? ""
+                    : ` ／ 理由：${row.cancelReason}`}
+                </p>
+              ) : null}
+
+              {canCancel(row) ? (
+                <StayCancelForm checkinId={row.checkinId} cancelStay={cancelStay} />
+              ) : null}
 
               {row.rooms.length === 0 ? (
                 <p className="mt-1 text-xs text-neutral-600">部屋未割当</p>

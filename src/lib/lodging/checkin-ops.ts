@@ -118,3 +118,24 @@ export const CANCEL_REASON_TYPES: readonly CancelReasonType[] = [
   "ノーショー",
   "運営都合",
 ];
+
+/**
+ * 本人向けの表示文言（WBS 3-3 ／ v13 §5.2.2「本人への表示」）。
+ *
+ * ★ **「運営によりキャンセル」と書く。** 本人が自分で取り消せる導線は Phase 1 に無く、
+ *   この取り消しは必ず運営の操作である。状態名（`cancelled`）をそのまま出すと、
+ *   本人には**自分が取り消したのか運営が取り消したのかが区別できない**。
+ */
+export const CANCELLED_BY_OPERATOR_LABEL = "運営によりキャンセル";
+
+/**
+ * キャンセル日時の表示。顧客管理画面と本人のマイページで**同じ書式**にするために関数へ寄せる。
+ * 解釈できない値はそのまま返す（表示のために事実を捨てない）。
+ */
+export function formatCancelledAt(cancelledAt: string): string {
+  const parsed = new Date(cancelledAt);
+  if (Number.isNaN(parsed.getTime())) {
+    return cancelledAt;
+  }
+  return parsed.toLocaleString("ja-JP");
+}

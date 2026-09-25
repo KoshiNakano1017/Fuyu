@@ -1,5 +1,6 @@
 import { ReservationForm } from "@/components/lodging/ReservationForm";
 import { requireSignedIn } from "@/lib/auth/guard";
+import { CANCELLED_BY_OPERATOR_LABEL, formatCancelledAt } from "@/lib/lodging/checkin-ops";
 import {
   fetchAccommodationTypes,
   fetchAvailability,
@@ -7,6 +8,18 @@ import {
 } from "@/lib/lodging/fetch-lodging";
 
 import { createReservationAction } from "./actions";
+
+/**
+ * 状態の表示名。**生の `status` をそのまま出さない** —— `cancelled` と書かれても、
+ * 本人には自分が取り消したのか運営が取り消したのかが分からない（v13 §5.2.2「本人への表示」）。
+ */
+const STATUS_LABELS: Record<string, string> = {
+  pre_registered: "予約受付",
+  confirmed: "予約確定",
+  staying: "滞在中",
+  checked_out: "退館済み",
+  cancelled: CANCELLED_BY_OPERATOR_LABEL,
+};
 
 /**
  * 宿泊予約（画面ID A11 ／ WBS 3-7）＋ 本人の宿泊予定・履歴（画面ID A12 ／ WBS 3-8）。
@@ -74,7 +87,33 @@ export default async function ReservationsPage() {
                   {displayNameOf.get(stay.roomType) ?? stay.roomType} ／{" "}
                   {stay.adultsCount + stay.childrenCount}名
                 </span>
-                <span className="rounded bg-neutral-100 px-2 py-0.5 text-xs">{stay.status}</span>
+                <span
+                  className={
+                    stay.status === "cancelled"
+                      ? "rounded bg-red-100 px-2 py-0.5 text-xs text-red-800"
+                      : "rounded bg-neutral-100 px-2 py-0.5 text-xs"
+                  }
+                >
+                  {STATUS_LABELS[stay.status] ?? stay.status}
+                </span>
+
+                {/*
+                  取り消された予約は、日時と理由まで本人に見せる（v13 §5.2.2「本人への表示」）。
+                  「いつ・なぜ取り消されたか」が読めないと、本人は運営へ問い合わせるしかない。
+                */}
+                {stay.status === "cancelled" ? (
+                  <p className="w-full text-xs text-red-800">
+                    {CANCELLED_BY_OPERATOR_LABEL}
+                    {stay.cancelledAt === null || stay.cancelledAt === undefined
+                      ? ""
+                      : ` ／ ${formatCancelledAt(stay.cancelledAt)}`}
+                    {stay.cancelReason === null ||
+                    stay.cancelReason === undefined ||
+                    stay.cancelReason === ""
+                      ? ""
+                      : ` ／ 理由：${stay.cancelReason}`}
+                  </p>
+                ) : null}
               </li>
             ))}
           </ul>

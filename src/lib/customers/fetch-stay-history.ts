@@ -13,7 +13,11 @@ export async function fetchStayHistory(memberId: string): Promise<StayHistory> {
 
   const { data: stayRows } = await supabase
     .from("check_ins")
-    .select("checkin_id, room_type, check_in_date, check_out_date, adults_count, children_count, status")
+    // ★ キャンセル4列も読む。読まないと、取り消された滞在が有効な滞在と同じ見た目で並び、
+    //   **取消の事実が画面から読めない**（v13 §7 L2541「キャンセル済みの予約は一覧で取消線表示」）。
+    .select(
+      "checkin_id, room_type, check_in_date, check_out_date, adults_count, children_count, status, cancelled_at, cancel_reason_type, cancel_reason",
+    )
     .eq("member_id", memberId);
 
   const stays = ((stayRows ?? []) as Record<string, unknown>[]).map((row) => ({
@@ -24,6 +28,13 @@ export async function fetchStayHistory(memberId: string): Promise<StayHistory> {
     adultsCount: Number(row.adults_count),
     childrenCount: Number(row.children_count),
     status: String(row.status),
+    cancelledAt: row.cancelled_at === null || row.cancelled_at === undefined ? null : String(row.cancelled_at),
+    cancelReasonType:
+      row.cancel_reason_type === null || row.cancel_reason_type === undefined
+        ? null
+        : String(row.cancel_reason_type),
+    cancelReason:
+      row.cancel_reason === null || row.cancel_reason === undefined ? null : String(row.cancel_reason),
   }));
 
   if (stays.length === 0) {
