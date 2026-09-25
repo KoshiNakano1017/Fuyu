@@ -6,7 +6,7 @@
   "phase": "review",
   "risk": "high",
   "attempts": {
-    "infra": 53,
+    "infra": 56,
     "verify": 0,
     "review": 0
   },
@@ -16,7 +16,7 @@
     "review": null
   },
   "repeatedFingerprint": {
-    "infra": 51,
+    "infra": 54,
     "verify": 0,
     "review": 0
   },
@@ -258,6 +258,6 @@
     }
   ],
   "acceptanceDerived": false,
-  "updatedAt": "2026-09-25T14:16:21.752Z",
+  "updatedAt": "2026-09-25T14:20:20.008Z",
   "provisional": []
 }
