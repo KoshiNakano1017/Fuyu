@@ -7,7 +7,7 @@
 --          `0007_quests_schema.sql` L73-74（`recruit_count`）、
 --          `0017_quest_applications_and_work_logs.sql` L46-48（`member_id` 列コメント
 --          「1クエストに複数行を許容する（上限は `quests.recruit_count`）」）
---   含む : 枠の数え方を1箇所に置く関数 ／ BEFORE INSERT の上限ガード ／
+--   含む : 枠の数え方を1箇所に置く関数 ／ INSERT・UPDATE の上限ガード ／
 --          `v_quest_board` への判定材料2列の追加
 --   含まない: 画面・API（同パッケージのアプリ層）／完了報告以降の遷移（5-3・5-4・5-6）
 --
@@ -29,11 +29,47 @@
 -- =============================================================================
 -- ① 枠を占有する受注申請の数え方（ビューとトリガーが同じ規則を見るための1箇所）
 --
---   占有するのは `申請中` / `指示済み` / `承認` / `完了`。
---   `差戻し` / `キャンセル` は受注が成立していないため数えない（`0017` L79 の
---   「取り下げは status = 'キャンセル'」。取り下げた人の枠を抱えたまま閉じると、
---   募集人数の範囲で受注可という §5.3 note の運用そのものが止まる）。
+--   占有するのは **`キャンセル` 以外の全ステータス**
+--   （`申請中` / `指示済み` / `承認` / `差戻し` / `完了`）。
+--
+-- ── なぜ `差戻し` を占有側に数えるのか ─────────────────────────────
+--
+--   `差戻し` は v13 §5.3.2 の遷移図では「差戻し → 再提出」であり、**受注そのものは
+--   成立したまま**である（`0017` L64-65 の「差戻し後の再提出は `work_logs` を積み直す
+--   のであって、申請行を増やさない」も同じ前提に立っている）。枠から外すと、
+--   `recruit_count = 1` のクエストで差戻し中の受注者がいる間に別人を受け入れてしまい、
+--   しかも `uq_quest_app_per_member`（`0017` L80）により**元の受注者は再申請できない**。
+--
+--   `キャンセル` だけを外すのは `0017` L79 の「取り下げは status = 'キャンセル'」に従う。
+--   取り下げた人の枠を抱えたまま閉じると、募集人数の範囲で受注可という §5.3 note の
+--   運用そのものが止まる。
+--
+--   ⚠️ 「どのステータスが枠を占有するか」は正本 v13 にも `CONSOLIDATED_DECISIONS.md` にも
+--      明文が無い。ここでは**溢れさせない側へ倒して**実装し、定義そのものは
+--      `QUESTIONS.md`「[2026-09-25] 募集枠を占有する受注申請ステータスの定義」で
+--      オーナーの判断を仰いでいる（CLAUDE.md §7）。回答が出たら
+--      `quest_application_occupies_slot()` 1本を直せばビューもトリガーも追随する。
 -- =============================================================================
+
+CREATE OR REPLACE FUNCTION public.quest_application_occupies_slot(p_status text)
+RETURNS boolean
+LANGUAGE sql
+IMMUTABLE
+SET search_path = ''
+AS $$
+  SELECT p_status IS DISTINCT FROM 'キャンセル';
+$$;
+
+COMMENT ON FUNCTION public.quest_application_occupies_slot(text) IS
+  'その受注申請ステータスが募集枠を占有するか（v13 §5.3 note L844）。取り下げ（キャンセル）だけが'
+  '占有しない。差戻しは「受注は成立したまま再提出を待つ」状態なので占有する（v13 §5.3.2）。'
+  '占有の定義はここ1箇所に置き、ビューとトリガーの両方がこれを見る。';
+
+-- ステータス文字列だけを受け取り、DB の中身を一切読まない純関数なので authenticated に開いてよい。
+-- ⚠️ 開く必要がある。**関数の EXECUTE 権限は、security_invoker = false のビュー越しでも
+--    呼び出し元のロールで判定される**（ビューの所有者へ委ねられるのはテーブル・列の権限だけ）。
+--    ③のビューはこの述語を通るため、剥がすと一覧の SELECT 自体が権限エラーになる。
+GRANT EXECUTE ON FUNCTION public.quest_application_occupies_slot(text) TO authenticated;
 
 CREATE OR REPLACE FUNCTION public.quest_occupied_application_count(p_quest_id uuid)
 RETURNS integer
@@ -45,19 +81,37 @@ AS $$
   SELECT count(*)::integer
   FROM   public.quest_applications a
   WHERE  a.quest_id = p_quest_id
-    AND  a.status IN ('申請中', '指示済み', '承認', '完了');
+    AND  public.quest_application_occupies_slot(a.status);
 $$;
 
 COMMENT ON FUNCTION public.quest_occupied_application_count(uuid) IS
-  '募集枠を占有している受注申請の件数（v13 §5.3 note L844）。差戻し・キャンセルは数えない。'
-  '件数だけを返し、誰が申請したか（PII-B）は返さない。上限判定はこの関数を唯一の根拠にする。';
+  '募集枠を占有している受注申請の件数（v13 §5.3 note L844）。キャンセルだけを数えない。'
+  '件数だけを返し、誰が申請したか（PII-B）は返さない。上限判定はこの関数を唯一の根拠にする。'
+  'authenticated へ EXECUTE を与えない（PostgREST の RPC として任意の quest_id で引かれるため）。';
 
+-- ⚠️ authenticated へ GRANT しない。
+--   与えると `POST /rest/v1/rpc/quest_occupied_application_count` で任意のクエストの
+--   申請件数を直接引ける（③で件数そのものを返さないようにした意味が消える）。
+--   呼ぶのは②のトリガー関数（SECURITY DEFINER なので所有者として走り、EXECUTE も所有者で通る）だけ。
+--   ③のビューはこの関数を**呼ばない**。関数の EXECUTE 権限はビュー越しでも呼び出し元の
+--   ロールで判定されるため、ビューに置くと authenticated へ開かざるを得なくなるからである。
 REVOKE EXECUTE ON FUNCTION public.quest_occupied_application_count(uuid) FROM PUBLIC;
-GRANT  EXECUTE ON FUNCTION public.quest_occupied_application_count(uuid) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.quest_occupied_application_count(uuid) FROM anon, authenticated;
 
 
 -- =============================================================================
--- ② 上限ガード（AFTER INSERT）
+-- ② 上限ガード（AFTER INSERT ＋ AFTER UPDATE）
+--
+-- ── なぜ UPDATE も見るのか ─────────────────────────────────────────
+--
+-- INSERT だけを見ていると、次の経路で募集人数を超えられる:
+--   (a) 本人が `キャンセル` → `申請中` へ PATCH で戻す。`quest_applications_update_self`
+--       （`0017` L386）が本人の UPDATE を開けており、`quest_applications_guard_review()` は
+--       `申請中` / `キャンセル` を本人に許している。`uq_quest_app_per_member` で
+--       再 INSERT が塞がっている以上、**再申請の経路は UPDATE しか無い**＝必ず通る道である。
+--   (b) 自分の申請行の `quest_id` を満枠の別クエストへ書き換える。`_update_self` の
+--       WITH CHECK は `member_id` しか見ていない。
+-- どちらも「占有しない状態 → 占有する状態」への遷移として同じ判定に落ちる。
 --
 -- ── なぜ BEFORE ではなく AFTER なのか ──────────────────────────────────
 --
@@ -80,6 +134,22 @@ DECLARE
   recruit_limit  integer;
   occupied_count integer;
 BEGIN
+  -- 枠を新たに取る操作だけを見る。
+  --   - 占有しない状態（キャンセル）で作られた・残る行は枠を取らない
+  --   - 既に占有していた行の状態遷移（申請中 → 指示済み 等）は枠を取り直さない。
+  --     ここで数え直すと、`recruit_count` を後から引き下げて既に溢れているクエストで
+  --     運営の審査・実行指示まで止まる（本来の論点は枠ではなく運用ミスの是正である）
+  -- 逆に、別クエストへ付け替える UPDATE は移動先の枠を新たに取るため、見る。
+  IF NOT public.quest_application_occupies_slot(NEW.status) THEN
+    RETURN NULL;
+  END IF;
+
+  IF TG_OP = 'UPDATE'
+     AND public.quest_application_occupies_slot(OLD.status)
+     AND OLD.quest_id = NEW.quest_id THEN
+    RETURN NULL;
+  END IF;
+
   -- 数える前に枠の持ち主を押さえる。この順序でなければ競合を止められない。
   -- READ COMMITTED では、ロックを待たされた側が待機解除後に最新の行を読み直すため、
   -- 続く count は先行トランザクションの申請を数に入れる。
@@ -106,10 +176,11 @@ $$;
 COMMENT ON FUNCTION public.quest_applications_guard_capacity() IS
   '受注申請の上限ガード（v13 §5.3 note L844）。quests 行を FOR UPDATE で押さえてから数えるため、'
   '同時申請でも募集人数を超えない。AFTER INSERT なのは、一意制約（23505）と RLS（42501）の'
-  '拒否を枠切れで上書きしないため。';
+  '拒否を枠切れで上書きしないため。UPDATE も見るのは、キャンセル → 申請中 の戻しと'
+  'quest_id の付け替えが、INSERT を通らずに枠を取る経路になるためである。';
 
 CREATE TRIGGER trg_quest_applications_guard_capacity
-  AFTER INSERT ON public.quest_applications
+  AFTER INSERT OR UPDATE ON public.quest_applications
   FOR EACH ROW EXECUTE FUNCTION public.quest_applications_guard_capacity();
 
 COMMENT ON COLUMN public.quest_applications.member_id IS
@@ -127,9 +198,14 @@ COMMENT ON COLUMN public.quest_applications.member_id IS
 --   ⚠️ 新設列は**必ず末尾に置く**。`CREATE OR REPLACE VIEW` は既存列の名前・順序を
 --      変えられず、途中へ挿すと 42P16 で落ちる（`0012` ③の記録どおり）。
 --
---   ⚠️ ここで返すのは**件数**であって、誰が申請したか（PII-B）ではない。
---      カードへ載せる項目は「タイトル・カテゴリ・施錠状態まで」（v13 §5.10.6 末尾）であり、
---      この2列はクライアントへ渡さない（`src/lib/quests/board.ts` が落とす）。
+--   ⚠️ **件数そのものを返さない。** 返すのは「埋まっているか」の真偽値だけである。
+--      当初は `application_count`（生の件数）を載せていたが、`v_quest_board` への
+--      SELECT は authenticated 全員（ゲストを含む）に開いており（`0008` L121）、
+--      `GET /rest/v1/v_quest_board?select=application_count` で全クエストの申請件数を
+--      直接読めてしまう。「`board.ts` が落とすから安全」は**画面を経由した場合だけの話**であり、
+--      0012 が「DOM 非表示は認可ではない・列は DB 側で落とす」として退けた論法そのものだった。
+--      判定に要るのは充足の有無だけなので、DB 側で真偽値まで縮めて渡す。
+--      件数が要る運営画面は `quest_applications` を直接読む（`_select_staff` が開いている）。
 -- =============================================================================
 
 CREATE OR REPLACE VIEW public.v_quest_board
@@ -156,12 +232,23 @@ SELECT
   q.core_only_reward,
 
   -- ▼ 0041 追加（末尾）。受注申請の可否判定の材料。
+  --   `recruit_count` は 0012 の列単位 GRANT で既に authenticated へ開いている列であり、
+  --   ここで新たに見せるものは無い。増えるのは「埋まっているか」の1ビットだけである。
   q.recruit_count,
-  public.quest_occupied_application_count(q.quest_id) AS application_count
+  -- 件数はここで真偽値へ畳む。`quest_occupied_application_count()` は呼ばない
+  -- （関数の EXECUTE 権限はビュー越しでも呼び出し元のロールで判定されるため、
+  --   ビューに置くと件数を返す関数を authenticated へ開くことになる）。
+  -- `quest_applications` の**テーブル**権限と RLS は security_invoker = false により
+  -- ビューの所有者で判定される。件数を数えられるのはそのためである（①と同じ理屈）。
+  ((SELECT count(*)
+    FROM   public.quest_applications a
+    WHERE  a.quest_id = q.quest_id
+      AND  public.quest_application_occupies_slot(a.status)) >= q.recruit_count)
+    AS is_recruitment_full
 FROM public.quests q;
 
 COMMENT ON VIEW public.v_quest_board IS
   'クエストボード用。報酬額・指示内容は (a) ゲスト×施錠中、(b) core_only_reward×非スタッフ、'
   'のいずれかで NULL を返す（v13 §5.10.6）。行は隠さない。security_invoker=false は意図的'
-  '（0012 で0008から反転）。recruit_count / application_count は受注申請の可否判定の材料であり'
-  '（0041 ／ v13 §5.3 note）、件数のみで申請者は返さない。担当者の列を足すときも同じ CASE を通すこと。';
+  '（0012 で0008から反転）。recruit_count / is_recruitment_full は受注申請の可否判定の材料であり'
+  '（0041 ／ v13 §5.3 note）、申請件数も申請者も返さない。担当者の列を足すときも同じ CASE を通すこと。';

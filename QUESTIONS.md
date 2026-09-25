@@ -78,6 +78,26 @@
 - 関連ファイル: v13 §5.3 note（L844）、`docs/spec/detailed-design/DB物理設計.md`、
   `docs/spec/データモデル図_ER_Diagram.md`、`supabase/migrations/0007_quests_schema.sql`、Issue #167
 
+## ⚡ [2026-09-25] 募集枠を占有する受注申請ステータスの定義（とくに `差戻し`）（v13 §5.3 note L844・§5.3.2 ／ WBS `5-2` ／ Issue #167）
+- ステータス: 未回答（**溢れさせない側へ倒して実装済み・ブロッカーではない**）
+- 優先度: 中（`recruit_count = 1` のクエストで「誰が枠を持っているか」が変わる。運用の見え方に直結する）
+- 背景: Issue #167（WBS `5-2` 受注申請・運営審査・実行指示）の PR #171 レビューで判明。
+  v13 §5.3 note L844 は「1クエスト＝運営が指定した**募集人数の範囲で**受注可」と定めるが、
+  **どのステータスの受注申請が枠を占有するかは正本にも `CONSOLIDATED_DECISIONS.md` にも記述が無い。**
+  `quest_applications.status` は `申請中` / `指示済み` / `承認` / `差戻し` / `完了` / `キャンセル` の6値
+  （`0017_quest_applications_and_work_logs.sql` L54-56）。
+- 採用した内容（暫定）: **`キャンセル` だけを枠から外し、`差戻し` を含む残り5値を占有として数える**
+  （`0041_quest_recruit_capacity.sql` の `quest_application_occupies_slot()`）。根拠は2点。
+  - v13 §5.3.2 の遷移図では `差戻し` の次は**再提出**であり、受注は成立したままである。
+    `0017` L64-65 も「差戻し後の再提出は `work_logs` を積み直すのであって、申請行を増やさない」と書いている
+  - `差戻し` を枠から外すと、`recruit_count = 1` のクエストで差戻し中の受注者がいる間に別人を受け入れ、
+    しかも `uq_quest_app_per_member`（`0017` L80）により**元の受注者は再申請できない**
+- 決めてほしいこと: `差戻し` 中の受注申請は募集枠を占有し続けてよいか（＝差戻し中は他の人を受け入れないでよいか）。
+  「占有しない」を選ぶ場合は、元の受注者が再提出できる経路（`uq_quest_app_per_member` の扱い）も併せて判断が要る。
+- 反映先: 回答が出たら `quest_application_occupies_slot()` 1本を直せばビュー・トリガーの両方が追随する。
+- 関連ファイル: v13 §5.3 note（L844）・§5.3.2、`supabase/migrations/0041_quest_recruit_capacity.sql`、
+  `supabase/migrations/0017_quest_applications_and_work_logs.sql`、Issue #167 ／ PR #171
+
 ## ✅ [2026-09-25] チェックイン QR が何を指し・誰が発行し・どう失効するかが正本に無い（v13 §5.2 ／ WBS `3-2` ／ Issue #156）
 - ステータス: **回答済み（2026-09-25 ／ 選択肢 A を採用）**
 - 決定: **QR 導線を `3-2` から外し、`3-2b`（★ チェックインQR基盤）として WBS へ独立させる**

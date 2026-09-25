@@ -45,7 +45,8 @@ export function canApplyToQuest(viewer: QuestBoardViewer, quest: Quest): boolean
   }
   // 募集人数の範囲でしか受注できない（v13 §5.3 note L844）。DB 側にも同じ上限がある
   // （0041 の `quest_applications_guard_capacity()`）が、一般会員のセッションは他人の
-  // 申請行を読めないため、件数は `v_quest_board.application_count` 経由で受け取る。
+  // 申請行を読めないため、充足の有無は `v_quest_board.is_recruitment_full` 経由で受け取る
+  // （件数そのものはビューも返さない／0041 ③）。
   if (isRecruitmentFull(quest)) {
     return false;
   }

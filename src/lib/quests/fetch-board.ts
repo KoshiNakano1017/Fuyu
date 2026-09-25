@@ -28,12 +28,16 @@ type QuestBoardRow = {
   reward_uii: number | null;
   description: string | null;
   recruit_count: number;
-  /** 枠を占有している受注申請の件数（0041 の `quest_occupied_application_count()`） */
-  application_count: number | null;
+  /**
+   * 募集枠が埋まっているか（0041 の `v_quest_board.is_recruitment_full`）。
+   * ビューは**件数を返さない**。返すと PostgREST 経由で全クエストの申請件数を
+   * 直接読めるため、DB 側で真偽値まで縮めてある（0041 ③）。
+   */
+  is_recruitment_full: boolean | null;
 };
 
 const QUEST_BOARD_COLUMNS =
-  "quest_id, title, category_id, origin_type, status, guest_allowed, core_only_reward, required_certification, reward_uii, description, recruit_count, application_count";
+  "quest_id, title, category_id, origin_type, status, guest_allowed, core_only_reward, required_certification, reward_uii, description, recruit_count, is_recruitment_full";
 
 function toQuest(row: QuestBoardRow): Quest {
   return {
@@ -50,7 +54,7 @@ function toQuest(row: QuestBoardRow): Quest {
     recruitCount: row.recruit_count,
     // 読めなかった場合は「満了」に倒す。上限は厳しい側が既定でなければならない
     // （DB 側の 0041 のガードが最後の砦だが、画面のボタンだけが開くのを避ける）。
-    applicationCount: row.application_count ?? row.recruit_count,
+    recruitmentFull: row.is_recruitment_full ?? true,
   };
 }
 
