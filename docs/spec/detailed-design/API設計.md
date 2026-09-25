@@ -279,7 +279,7 @@ up: "[[浮遊街アプリ 総合要件定義・設計書_v13]]"
 | --- | --- | --- | --- | --- |
 | ~~POST~~ | ~~`/api/admin/members/import/preview`~~ | ~~インポートCSVの列マッピング・プレビュー~~ | **不要（2026-08-16）** | ― |
 | ~~POST~~ | ~~`/api/admin/members/import/confirm`~~ | ~~インポート確定~~ | **不要（2026-08-16）** | ― |
-| PATCH | `/api/members/{id}/stay-days` | 宿泊日数の手動増減（理由必須） | admin | `stay_ticket_transactions`(`staff_adjust`) |
+| PATCH | `/api/members/{id}/stay-days` | 宿泊日数の手動増減（理由必須） | **admin / core_member**（~~admin~~ ／ 2026-09-25 訂正：正本 v13 §5.8.5 と `DB物理設計.md` §6 の RLS に合わせた ／ 決定ログ §23-3） | `stay_ticket_transactions`(`staff_adjust`) |
 
 ### 2-10. メディアライブラリ（画面設計.md A10、2026-08-16新設）
 
