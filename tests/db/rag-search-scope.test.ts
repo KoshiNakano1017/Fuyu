@@ -1,4 +1,4 @@
-// 検索スコープと PII 検出の拡張（`0041_rag_search_scope_and_pii.sql` ／ WBS 1-6 の決定 A）の受入テスト。
+// 検索スコープと PII 検出の拡張（`0102_rag_search_scope_and_pii.sql` ／ WBS 1-6 の決定 A）の受入テスト。
 //
 // 根拠: `CONSOLIDATED_DECISIONS.md` §17-6 #5（検索時スコープ）・#6（PII 検出の拡張）、
 //       §16-2 #61（**判定軸はロールではなくチャネル**）、`0100`（RAG 基盤）。

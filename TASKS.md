@@ -21,7 +21,7 @@
 決定 A（`1-6` を DB 層に閉じ、`9-1` はその上のアプリ側検索に限る）に沿って、
 `CONSOLIDATED_DECISIONS.md` §17-6 の残作業2件（#5 検索時スコープ・#6 PII 検出の拡張）を実装した。
 
-**入れたもの**: `0041_rag_search_scope_and_pii.sql`（`rag.search_knowledge()` ／
+**入れたもの**: `0102_rag_search_scope_and_pii.sql`（`rag.search_knowledge()` ／
 `rag.redact_contact_info()` ／ `rag.scan_for_index()`）＋ 受入テスト20件。
 
 **要点**:
