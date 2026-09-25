@@ -5,6 +5,8 @@
 //       判定基準＝備考が完全な空欄のときだけ自動確定）、§9 #30-⑤（Googleカレンダー同等の操作感）、
 //       `0015_room_availability_view.sql`（残枠の正本）。
 
+import { formatJapanDateTime } from "@/lib/japan-time";
+
 import type { DailyAvailability, MemberCategoryLabel, StayEntry } from "./fetch-lodging";
 
 export type CalendarDay = {
@@ -127,7 +129,9 @@ export function cancellationNoticeOf(stay: StayEntry): string | null {
   if (!isCancelledStay(stay)) {
     return null;
   }
-  const cancelledOn = new Date(stay.cancelledAt as string).toLocaleString("ja-JP");
+  // 日時は**日本時間**で出す。サーバコンポーネントで描画されるため、タイムゾーンを明示しないと
+  // 実行環境（Vercel / Node は UTC）の時刻が出て9時間ずれ、「相互確認」が成立しない。
+  const cancelledOn = formatJapanDateTime(stay.cancelledAt as string);
   const reason = [stay.cancelReasonType, stay.cancelReason].filter(
     (part) => (part ?? "") !== "",
   ) as string[];

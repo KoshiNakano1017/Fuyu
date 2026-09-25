@@ -6,6 +6,7 @@ import { Money } from "@/components/ui/Money";
 import { requireSignedIn } from "@/lib/auth/guard";
 import { fetchMyPendingAdjustments } from "@/lib/billing/fetch-my-ledger";
 import { fetchMyPendingGrants } from "@/lib/eumo/store";
+import { todayInJapan } from "@/lib/japan-time";
 import { buildMyStayCalendar, cancellationNoticeOf, isCancelledStay } from "@/lib/lodging/calendar";
 import { fetchMyStays } from "@/lib/lodging/fetch-lodging";
 import { formatBalanceTransition } from "@/lib/lodging/stay-ticket-adjust";
@@ -47,7 +48,9 @@ export default async function MyPage({
   const viewer = await requireSignedIn();
 
   const { stayMonth: requestedStayMonth } = await searchParams;
-  const today = new Date().toISOString().slice(0, 10);
+  // 既定表示月と「予定／履歴」の境界は**日本時間の今日**で決める。UTC で切ると
+  // JST 00:00〜09:00 が前日になり、毎月1日の朝だけ前月のカレンダーが既定で開く（`japan-time.ts`）。
+  const today = todayInJapan();
   const stayMonth = normalizeMonth(requestedStayMonth, today);
 
   const [orders, adjustments, pendingGrants, stayTicketBalance, stayTicketHistory, myStays] =

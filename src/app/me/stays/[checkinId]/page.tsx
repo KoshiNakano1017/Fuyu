@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 
 import { Money } from "@/components/ui/Money";
 import { requireSignedIn } from "@/lib/auth/guard";
+import { formatJapanDateTime, toJapanDate } from "@/lib/japan-time";
 import { cancellationNoticeOf } from "@/lib/lodging/calendar";
 import { fetchAccommodationTypes, fetchMyStay } from "@/lib/lodging/fetch-lodging";
 import { fetchMyOrdersOfCheckIn } from "@/lib/orders/fetch-orders";
@@ -30,18 +31,6 @@ import { toServingStatusDisplayLabel } from "@/lib/serving-status";
  * こちらだけ**滞在期間に重なる日付**で拾う。関係テーブルを新設して結ぶのは
  * 仕様（v13 §5.3）に無い構造を足すことになるため採らない。
  */
-/**
- * `timestamptz` を**日本時間**の日付（`YYYY-MM-DD`）にする。
- *
- * `slice(0, 10)` で切ると UTC の日付になり、**JST 00:00〜09:00 の作業が前日へずれる**。
- * 滞在初日の朝の作業が窓から外れて表示されない、という形で現れる。
- * 滞在日（`check_in_date` / `check_out_date`）は日本時間の `date` なので、
- * 突き合わせる側も日本時間に揃える（`src/app/staff/checkins/page.tsx` の `todayInJapan()` と同じ作法）。
- */
-function toJapanDate(timestamptz: string): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo" }).format(new Date(timestamptz));
-}
-
 /**
  * 受注1件が「いつの仕事か」を表す日付（`YYYY-MM-DD`）を集める。
  *
@@ -154,7 +143,9 @@ export default async function MyStayDetailPage({
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-sm text-neutral-600">
-                    {new Date(order.createdAt).toLocaleString("ja-JP")}
+                    {/* 注文日時は日本時間で出す。タイムゾーンを明示しないとサーバ（UTC）の
+                        時刻が出て、本人と運営が同じ注文を指しているか確認できない。 */}
+                    {formatJapanDateTime(order.createdAt)}
                   </span>
                   <span className="flex gap-1 text-xs">
                     <span className="rounded bg-neutral-100 px-2 py-0.5">{order.status}</span>

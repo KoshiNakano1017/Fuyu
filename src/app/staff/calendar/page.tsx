@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { AccessDenied } from "@/components/auth/AccessDenied";
 import { AccessDeniedError, requireStaff } from "@/lib/auth/guard";
+import { todayInJapan } from "@/lib/japan-time";
 // ★ 名前空間で取る。`buildStaffCalendar` を import 名として書くと、
 //   「認可判定より後ろで組み立てているか」をソースの並び順で読めなくなる
 //   （`tests/lodging-staff-calendar.test.ts`「認可判定より前にカレンダーを組み立てない」）。
@@ -229,7 +230,9 @@ function normalizeAnchorDate(
   ) {
     return `${candidateMonth}-01`;
   }
-  return new Date().toISOString().slice(0, 10);
+  // 既定は**日本時間の今日**。UTC で切ると JST 00:00〜09:00 に開いた運営へ前日の週・月を見せる
+  // （`japan-time.ts`）。滞在日そのものが日本時間の `date` なので基準日も揃える。
+  return todayInJapan();
 }
 
 /**
