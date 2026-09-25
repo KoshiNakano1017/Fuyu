@@ -23,6 +23,15 @@ import {
 import { canIssueSettlementQr } from "@/lib/billing/settlement-qr";
 import { judgeFirstVisitCashback } from "@/lib/eumo/grants";
 import {
+  decideStayTicketAdjustment,
+  formatBalanceTransition,
+  stayTicketAdjustDenialMessage,
+} from "@/lib/lodging/stay-ticket-adjust";
+import {
+  fetchStayTicketBalance,
+  insertStayTicketAdjustment,
+} from "@/lib/lodging/stay-tickets";
+import {
   countVisits,
   fetchCashbackStatus,
   fetchCurrentSignupCashbackUii,
@@ -402,5 +411,71 @@ export async function issueFirstVisitCashbackAction(
   return {
     status: "done",
     message: `初回来訪キャッシュバック ${amountUii} Uii を発行依頼として起票しました。`,
+  };
+}
+
+/**
+ * 宿泊券の手動増減（WBS 10-4 ／ v13 §5.8.5「運営による手動増減」）。
+ *
+ * ## 残高は上書きしない
+ *
+ * `staff_adjust` の取引を1行積むだけである。残高は `stay_ticket_balance()`（取引の合計）が
+ * 唯一の出所であり、保存された残高を書き換える経路はどこにも作らない（同節「消費との整合」）。
+ *
+ * ## 操作できるのは admin と core_member
+ *
+ * 2026-09-25 のオーナー決定（決定ログ §23-3 ／ Issue #95）で、正本 v13 §5.8.5 が正しいことが
+ * 確定した（`API設計.md`・`画面設計.md` C8 の「admin のみ」は同日に訂正済み）。
+ * 認可の実体は `0016` の `stay_tx_insert_staff` であり、ここの判定はそれと同じ幅にしてある。
+ *
+ * ## 理由は3重に必須である
+ *
+ * ① 画面の `required` ② ここ（`decideStayTicketAdjustment`）③ `0016` の
+ * `chk_stay_tx_manual_needs_reason`。②が要るのは利用者へ理由を返すためで、
+ * 画面を経由しない呼び出しでも③で必ず落ちる（v13 §5.9.3 の二重防御）。
+ */
+export async function adjustStayTicketsAction(
+  _prev: SubmitState,
+  formData: FormData,
+): Promise<SubmitState> {
+  const viewer = await readStaffViewer();
+  if (viewer === null) {
+    return fail("not_staff");
+  }
+
+  const memberId = String(formData.get("memberId") ?? "").trim();
+  const reason = String(formData.get("reason") ?? "");
+  const nights = Number(formData.get("nights") ?? Number.NaN);
+
+  // 調整前の残高を読む。前後の残高を記録には持たないため、判定のためだけに使う
+  // （`would_go_negative` の判断と、操作後の報告文に出す値）。
+  const currentBalance = await fetchStayTicketBalance(memberId);
+
+  const decision = decideStayTicketAdjustment({
+    actorRole: viewer.role,
+    nights,
+    reason,
+    currentBalance,
+  });
+  if (!decision.allowed) {
+    return { status: "error", message: stayTicketAdjustDenialMessage(decision.reason) };
+  }
+
+  const saved = await insertStayTicketAdjustment({
+    memberId,
+    nights,
+    reason: reason.trim(),
+    operatorId: viewer.memberId,
+  });
+  if (!saved) {
+    return fail("failed");
+  }
+
+  revalidatePath(`/admin/customers/${memberId}`);
+  // 本人のマイログにも即時反映させる（v13 §5.8.5「本人への反映」）。
+  revalidatePath("/me");
+  return {
+    status: "done",
+    message: `宿泊券を ${formatBalanceTransition(currentBalance, nights)} に調整しました。`,
   };
 }
