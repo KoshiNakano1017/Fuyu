@@ -3,8 +3,9 @@ import { notFound } from "next/navigation";
 
 import { Money } from "@/components/ui/Money";
 import { requireSignedIn } from "@/lib/auth/guard";
+import { cancellationNoticeOf } from "@/lib/lodging/calendar";
 import { fetchAccommodationTypes, fetchMyStay } from "@/lib/lodging/fetch-lodging";
-import { fetchMyOrders } from "@/lib/orders/fetch-orders";
+import { fetchMyOrdersOfCheckIn } from "@/lib/orders/fetch-orders";
 import { fetchMyApplications, type MyApplication } from "@/lib/quests/fetch-my-applications";
 import { toServingStatusDisplayLabel } from "@/lib/serving-status";
 
@@ -20,10 +21,13 @@ import { toServingStatusDisplayLabel } from "@/lib/serving-status";
  * 「権限がありません」と出すと、**その滞在IDが存在すること自体**を教えてしまう
  * （v13 §8 ／ CLAUDE.md §7.1）。
  *
- * ## 注文もクエストも「日付の重なり」で結ぶ
+ * ## 注文は滞在IDで結び、クエストだけ日付で結ぶ
  *
- * 伝票（`orders` ／ `0019`）も受注申請（`quest_applications` ／ `0017`）も滞在IDを持たない。
- * そのため両方とも**滞在期間に重なる日付**で拾う。関係テーブルを新設して結ぶのは
+ * 伝票（`orders`）は `checkin_id uuid NOT NULL REFERENCES check_ins`（`0019`）を持つため、
+ * **滞在IDで厳密に結ぶ**。日付の重なりで拾うと、連泊をまたぐ予約で隣の滞在の伝票が混ざる。
+ *
+ * 受注申請（`quest_applications` ／ `0017`）のほうは滞在IDを持たないので、
+ * こちらだけ**滞在期間に重なる日付**で拾う。関係テーブルを新設して結ぶのは
  * 仕様（v13 §5.3）に無い構造を足すことになるため採らない。
  */
 /**
@@ -52,21 +56,20 @@ export default async function MyStayDetailPage({
     notFound();
   }
 
-  const [types, orders, applications] = await Promise.all([
+  const [types, ordersOfStay, applications] = await Promise.all([
     fetchAccommodationTypes(),
-    fetchMyOrders(viewer.memberId),
+    fetchMyOrdersOfCheckIn({ memberId: viewer.memberId, checkinId }),
     fetchMyApplications(viewer.memberId),
   ]);
   const roomTypeLabel =
     types.find((type) => type.roomType === stay.roomType)?.displayName ?? stay.roomType;
+  // キャンセル済みでも 404 にしない。古いブックマークから開いた本人に、
+  // 取り消された事実・日時・理由を読ませる（v13 §5.2.2「本人への表示」）。
+  const cancellationNotice = cancellationNoticeOf(stay);
 
   const isDuringStay = (date: string) => stay.checkInDate <= date && date <= stay.checkOutDate;
 
-  // 滞在中に出した注文だけを並べる。日付で切るのは、伝票が滞在IDを持たないためである
-  // （`orders` は購入者と時刻だけを持つ ／ `0019`）。
-  const ordersDuringStay = orders.filter((order) => isDuringStay(order.createdAt.slice(0, 10)));
-
-  // クエストも同じ日付窓で拾う（v13 §5.2.5②「部屋・同伴人数・注文・クエスト」）。
+  // クエストは日付窓で拾う（v13 §5.2.5②「部屋・同伴人数・注文・クエスト」）。
   // 作業日（`work_logs.worked_at`）と実行指示の予定日（`scheduled_start_at`）の
   // **どちらかが滞在期間に重なれば**その滞在の仕事として並べる。報告前の受注が
   // 落ちないよう予定日も見る（指示だけ出て報告がまだ、が滞在中の通常の状態である）。
@@ -85,6 +88,14 @@ export default async function MyStayDetailPage({
         </h1>
       </div>
 
+      {cancellationNotice !== null && (
+        <p className="rounded border border-neutral-300 bg-neutral-50 p-3 text-sm text-neutral-700">
+          {cancellationNotice}
+          <br />
+          お心当たりがない場合は運営へお伝えください。
+        </p>
+      )}
+
       <section className="flex flex-col gap-2 rounded border border-neutral-200 bg-white p-4">
         <h2 className="text-lg font-bold">滞在の内容</h2>
         <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
@@ -92,8 +103,14 @@ export default async function MyStayDetailPage({
           <dd>{roomTypeLabel}</dd>
 
           <dt className="text-neutral-600">お部屋</dt>
-          {/* 未割当は「未割当」と出す。当日までに決まることがあるため空欄にしない */}
-          <dd>{stay.assignedRoomName ?? "未割当（当日ご案内します）"}</dd>
+          {/*
+            未割当は「未割当」と出す。当日までに決まることがあるため空欄にしない。
+            ただしキャンセル済みの予約に「当日ご案内します」と出すのは誤った案内になる。
+          */}
+          <dd>
+            {stay.assignedRoomName ??
+              (cancellationNotice === null ? "未割当（当日ご案内します）" : "未割当")}
+          </dd>
 
           <dt className="text-neutral-600">人数</dt>
           <dd>
@@ -114,11 +131,11 @@ export default async function MyStayDetailPage({
 
       <section className="flex flex-col gap-2">
         <h2 className="text-lg font-bold">この滞在中の注文</h2>
-        {ordersDuringStay.length === 0 ? (
+        {ordersOfStay.length === 0 ? (
           <p className="text-sm text-neutral-600">この期間の注文はありません。</p>
         ) : (
           <ul className="flex flex-col gap-2">
-            {ordersDuringStay.map((order) => (
+            {ordersOfStay.map((order) => (
               <li
                 key={order.orderId}
                 className="flex flex-col gap-1 rounded border border-neutral-200 bg-white p-3"

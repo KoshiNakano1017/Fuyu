@@ -6,7 +6,7 @@ import { Money } from "@/components/ui/Money";
 import { requireSignedIn } from "@/lib/auth/guard";
 import { fetchMyPendingAdjustments } from "@/lib/billing/fetch-my-ledger";
 import { fetchMyPendingGrants } from "@/lib/eumo/store";
-import { buildMyStayCalendar } from "@/lib/lodging/calendar";
+import { buildMyStayCalendar, cancellationNoticeOf, isCancelledStay } from "@/lib/lodging/calendar";
 import { fetchMyStays } from "@/lib/lodging/fetch-lodging";
 import { formatBalanceTransition } from "@/lib/lodging/stay-ticket-adjust";
 import {
@@ -64,6 +64,9 @@ export default async function MyPage({
   ]);
 
   const unsettled = sumUnsettled(orders);
+  // キャンセル済みは日セルに塗らない代わりに、必ず一覧として出す
+  // （v13 §5.2.2「本人への表示」＝日時・理由を添えて相互確認できる状態にする）。
+  const cancelledStays = myStays.filter(isCancelledStay);
   const stayDays = buildMyStayCalendar({
     month: stayMonth,
     today,
@@ -167,6 +170,30 @@ export default async function MyPage({
           日付を選ぶと滞在の詳細（部屋・同伴人数・注文）へ移動します。
         </p>
         <StayCalendar month={stayMonth} days={stayDays} />
+
+        {/*
+          キャンセル・ノーショーの予約（v13 §5.2.2「本人への表示」）。
+          月をまたいで見落とされないよう、カレンダーの表示月で絞らず全件を出す。
+          運営だけが知っていて本人が知らない取り消しを作らないための表示である。
+        */}
+        {cancelledStays.length > 0 && (
+          <div className="rounded border border-neutral-300 bg-neutral-50 p-3">
+            <h3 className="text-sm font-bold">キャンセルされた予約</h3>
+            <ul className="mt-1 flex flex-col gap-1 text-sm text-neutral-700">
+              {cancelledStays.map((stay) => (
+                <li key={stay.checkinId} className="flex flex-col">
+                  <span className="line-through">
+                    {stay.checkInDate} 〜 {stay.checkOutDate}
+                  </span>
+                  <span className="text-xs">{cancellationNoticeOf(stay)}</span>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-2 text-xs text-neutral-600">
+              お心当たりがない場合は運営へお伝えください。
+            </p>
+          </div>
+        )}
       </section>
 
       <section className="flex flex-col gap-2">

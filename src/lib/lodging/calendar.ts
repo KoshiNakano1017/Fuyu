@@ -111,6 +111,32 @@ export type MyStayDay = {
   tone: MyStayTone | null;
 };
 
+/** キャンセル済みの予約か（`cancelled_at` が入っていれば論理削除済み）。 */
+export function isCancelledStay(stay: StayEntry): boolean {
+  return (stay.cancelledAt ?? null) !== null;
+}
+
+/**
+ * 本人向けのキャンセル表示（v13 §5.2.2「本人への表示」）。
+ *
+ * 正本は「マイログの宿泊履歴に**『運営によりキャンセル（日時・理由）』**と表示し、
+ * 相互確認できる状態にする」と定める。日時と理由を欠くと「相互確認」が成立しないため、
+ * 文言と一緒に必ず両方を組み立てる。
+ */
+export function cancellationNoticeOf(stay: StayEntry): string | null {
+  if (!isCancelledStay(stay)) {
+    return null;
+  }
+  const cancelledOn = new Date(stay.cancelledAt as string).toLocaleString("ja-JP");
+  const reason = [stay.cancelReasonType, stay.cancelReason].filter(
+    (part) => (part ?? "") !== "",
+  ) as string[];
+  // 理由は入力必須（`0014` の chk_check_ins_cancel_reason）だが、
+  // 取れなかったときに日時だけでも出す（無言で消えるより本人が問い合わせられる）。
+  const reasonText = reason.length === 0 ? "理由の記録なし" : reason.join("・");
+  return `運営によりキャンセル（${cancelledOn} ／ ${reasonText}）`;
+}
+
 /**
  * 本人の宿泊予定（未来）と宿泊履歴（過去）を月表示のカレンダーへ組む。
  *
@@ -119,6 +145,12 @@ export type MyStayDay = {
  * DB 側では RLS が同じ境界を引いているが、ここでも絞るのは
  * 運営向けの取得関数（`fetchStaysOverlapping()`）の結果を誤って渡したときに
  * 他人の滞在が画面へ出るのを防ぐためである。
+ *
+ * **キャンセル済みは日セルに描かない。** このカレンダーが表す「予定」「履歴」は
+ * 実際に泊まる（泊まった）日であり、取り消された予約を同じ色で塗ると本人が
+ * 有効な予約と取り違える。取り消された事実は日セルではなく、
+ * 「キャンセルされた予約」の一覧として日時・理由つきで出す（v13 §5.2.2「本人への表示」／
+ * `cancellationNoticeOf()`）。**除外であって非表示ではない。**
  */
 export function buildMyStayCalendar(params: {
   month: string;
@@ -127,7 +159,9 @@ export function buildMyStayCalendar(params: {
   memberId: string;
   stays: readonly StayEntry[];
 }): MyStayDay[] {
-  const mine = params.stays.filter((stay) => stay.memberId === params.memberId);
+  const mine = params.stays.filter(
+    (stay) => stay.memberId === params.memberId && !isCancelledStay(stay),
+  );
 
   return datesOfMonth(params.month).map((date) => {
     const staysOnDate = mine.filter((stay) => occupiesDate(stay, date));

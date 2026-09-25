@@ -64,6 +64,17 @@ export type StayEntry = {
   assignedRoomName?: string | null;
   /** 会員区分の表示語。引けなければ `null`（別の値で埋めない）。 */
   memberCategory?: MemberCategoryLabel | null;
+  /**
+   * キャンセル日時（`check_ins.cancelled_at`）。`null`／未設定なら有効な予約。
+   *
+   * キャンセルは**物理削除しない**（v13 §5.2.2 ／ §9 #27）。本人向けには
+   * 「運営によりキャンセル（日時・理由）」として残すため、取得側で行ごと落とさない。
+   */
+  cancelledAt?: string | null;
+  /** キャンセル理由の区分（`会員都合` / `ノーショー` / `運営都合` ／ `0014` L155-157）。 */
+  cancelReasonType?: string | null;
+  /** キャンセル理由の自由記述（`check_ins.cancel_reason`。キャンセル時は必須）。 */
+  cancelReason?: string | null;
 };
 
 export async function fetchAccommodationTypes(): Promise<AccommodationType[]> {
@@ -195,10 +206,14 @@ export async function fetchStaysOverlapping(params: {
 /**
  * 本人の予約（マイページの宿泊タブ ／ 画面ID A12 ／ WBS 3-8）。RLS が行を絞る。
  *
- * **キャンセルは除く。** 運営の `fetchStaysOverlapping()` と残枠ビュー `v_room_availability`
- * （`0015`）がどちらも `cancelled_at IS NULL` で絞っており、ここだけ残すと
- * **取り消した予約が本人のカレンダーにだけ「予定」として残る**（v13 §5.2.2：
- * キャンセルは物理削除せず `cancelled_at` で論理削除する ／ §9 #27）。
+ * ★ **キャンセル済みも返す。** v13 §5.2.2「本人への表示」は、キャンセル／ノーショーを
+ * 「マイログの宿泊履歴に『運営によりキャンセル（日時・理由）』と表示し、**相互確認できる
+ * 状態にする**」と定める。本人向けにキャンセルを知らせる画面は他に無いため、ここで
+ * `cancelled_at IS NULL` を掛けると、**取り消された事実が本人からだけ見えなくなる**。
+ *
+ * 運営の `fetchStaysOverlapping()` と残枠ビュー `v_room_availability`（`0015`）が
+ * キャンセルを除くのは**残枠を専有させないため**（§5.2.5①）であり、本人への表示とは目的が違う。
+ * 「予定」として描かない手当ては `buildMyStayCalendar()` 側で行う。
  */
 export async function fetchMyStays(memberId: string): Promise<StayEntry[]> {
   const supabase = await createServerSupabaseClient();
@@ -206,10 +221,9 @@ export async function fetchMyStays(memberId: string): Promise<StayEntry[]> {
   const { data, error } = await supabase
     .from("check_ins")
     .select(
-      "checkin_id, member_id, room_type, check_in_date, check_out_date, adults_count, children_count, status, note",
+      "checkin_id, member_id, room_type, check_in_date, check_out_date, adults_count, children_count, status, note, cancelled_at, cancel_reason_type, cancel_reason",
     )
     .eq("member_id", memberId)
-    .is("cancelled_at", null)
     .order("check_in_date", { ascending: false });
 
   if (error || !data) {
@@ -227,6 +241,9 @@ export async function fetchMyStays(memberId: string): Promise<StayEntry[]> {
       children_count: number;
       status: string;
       note: string | null;
+      cancelled_at: string | null;
+      cancel_reason_type: string | null;
+      cancel_reason: string | null;
     }[]
   ).map((row) => ({
     checkinId: row.checkin_id,
@@ -239,6 +256,9 @@ export async function fetchMyStays(memberId: string): Promise<StayEntry[]> {
     childrenCount: row.children_count,
     status: row.status,
     note: row.note,
+    cancelledAt: row.cancelled_at,
+    cancelReasonType: row.cancel_reason_type,
+    cancelReason: row.cancel_reason,
   }));
 }
 
@@ -249,6 +269,10 @@ export async function fetchMyStays(memberId: string): Promise<StayEntry[]> {
  * URL の `checkinId` は利用者が書き換えられる。他人の滞在IDを入れられたときに
  * 「RLS が弾くはず」に頼ると、ポリシーを1つ緩めた瞬間に他人の滞在が読める
  * （v13 §5.9.4「認可は多層で持つ」）。見つからなければ `null`。
+ *
+ * キャンセル済みの滞在も返す。404 にすると、古いブックマークから開いた本人が
+ * 「予約が消えた」としか分からない。画面側で `cancellationNoticeOf()` を出して
+ * 取り消された事実・日時・理由を読ませる（v13 §5.2.2「本人への表示」）。
  */
 export async function fetchMyStay(params: {
   memberId: string;
@@ -259,7 +283,7 @@ export async function fetchMyStay(params: {
   const { data, error } = await supabase
     .from("check_ins")
     .select(
-      "checkin_id, member_id, room_type, check_in_date, check_out_date, adults_count, children_count, status, note",
+      "checkin_id, member_id, room_type, check_in_date, check_out_date, adults_count, children_count, status, note, cancelled_at, cancel_reason_type, cancel_reason",
     )
     .eq("member_id", params.memberId)
     .eq("checkin_id", params.checkinId)
@@ -279,6 +303,9 @@ export async function fetchMyStay(params: {
     children_count: number;
     status: string;
     note: string | null;
+    cancelled_at: string | null;
+    cancel_reason_type: string | null;
+    cancel_reason: string | null;
   };
 
   const assignedRoomNames = await fetchAssignedRoomNames([row.checkin_id]);
@@ -295,6 +322,9 @@ export async function fetchMyStay(params: {
     status: row.status,
     note: row.note,
     assignedRoomName: assignedRoomNames.get(row.checkin_id) ?? null,
+    cancelledAt: row.cancelled_at,
+    cancelReasonType: row.cancel_reason_type,
+    cancelReason: row.cancel_reason,
   };
 }
 
