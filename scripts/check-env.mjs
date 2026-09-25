@@ -109,6 +109,28 @@ if (read("SUPABASE_SERVICE_ROLE_KEY") === null) {
   );
 }
 
+// ★ RESEND_* も実行時のみ使う。**エラーにしてはならない**（SUPABASE_SERVICE_ROLE_KEY と同じ理由）。
+//    RESEND_API_KEY は Vercel へ Secret（Sensitive）型で登録するため、正しく設定されていても
+//    ビルド時には見えない。ここで errors.push すると「設定は正しいのにビルドが落ちる」になり、
+//    2026-09-21 の再演になる。手順書 §7-2 はエラー案で書かれていたが、この理由で警告に留める。
+//
+//    警告でも意味はある。未設定のまま本番へ出ると /reserve の本人確認コードが
+//    not_configured で**静かに**失敗し、ビルドもデプロイも緑のまま通る（手順書 §6-3）。
+//    少なくともビルドログに変数名が残る。
+if (read("RESEND_API_KEY") === null) {
+  warnings.push(
+    "RESEND_API_KEY がビルド時には見えません。Vercel の Secret 型なら正常なことがあります。" +
+      "実際に欠けていると公開予約の本人確認コードが送れず、画面には何も出ないまま失敗します",
+  );
+}
+
+if (read("RESEND_FROM_EMAIL") === null) {
+  warnings.push(
+    "RESEND_FROM_EMAIL がビルド時には見えません。" +
+      "sendReservationOtpMail() は既定値を持たないため、本当に未設定なら公開予約の送信は必ず失敗します",
+  );
+}
+
 for (const w of warnings) {
   console.warn(`⚠️  ${w}`);
 }

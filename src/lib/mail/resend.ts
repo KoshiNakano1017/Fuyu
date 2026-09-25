@@ -25,8 +25,9 @@
  * ⚠️ **宛先アドレスをログへ出さない**（CLAUDE.md §3.2）。失敗時も理由だけを返す。
  */
 
-/** 送信元。`fuyugai.jp` は Resend 側で SPF/DKIM を通したドメイン（`非機能要件詳細.md` §2-6）。 */
-const DEFAULT_FROM_ADDRESS = "浮遊街アプリ <no-reply@fuyugai.jp>";
+/** 送信元。`fuyuugai.com` は Resend 側で SPF/DKIM を通したドメイン（`非機能要件詳細.md` §2-6）。
+ *  2026-09-24 に `fuyugai.jp` から修正。旧値は**未登録ドメイン**で、送信すれば必ず弾かれた。 */
+const DEFAULT_FROM_ADDRESS = "浮遊街アプリ <no-reply@fuyuugai.com>";
 
 export type MailResult = { ok: true } | { ok: false; reason: "not_configured" | "send_failed" };
 
@@ -47,7 +48,10 @@ export async function sendPlainTextEmail(params: {
     return { ok: false, reason: "not_configured" };
   }
 
-  const from = process.env.MAIL_FROM_ADDRESS ?? DEFAULT_FROM_ADDRESS;
+  // 同じ「送信元」を下の sendReservationOtpMail() は RESEND_FROM_EMAIL で読む。
+  // 片方しか設定されていないときに既定値（＝旧ドメイン）へ落ちる事故を避けるため両方見る。
+  const from =
+    process.env.MAIL_FROM_ADDRESS ?? process.env.RESEND_FROM_EMAIL ?? DEFAULT_FROM_ADDRESS;
 
   try {
     const response = await fetch("https://api.resend.com/emails", {
