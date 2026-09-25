@@ -330,7 +330,7 @@ nslookup -type=CNAME send.fuyuugai.com              8.8.8.8
 期待される出力（抜粋）:
 
 ```
-resend._domainkey.fuyuugai.com  text = "p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCfmTJw..."
+resend._domainkey.fuyuugai.com  text = "v=DKIM1; k=rsa; p=<公開鍵。Resend のダッシュボードが表示する値と一致すること>"
 rsend.fuyuugai.com  canonical name = rsend-apne1.forge.rmta.net
 send.fuyuugai.com   canonical name = send.forge.rmta.net
 ```
@@ -339,6 +339,11 @@ CLI を使わない担当者向け（ブラウザだけで確認できます）:
 
 - [Google Admin Toolbox Dig](https://toolbox.googleapps.com/apps/dig/)
 - [MXToolbox SuperTool](https://mxtoolbox.com/SuperTool.aspx)
+
+> [!note] 公開鍵の実値は本書に書かない
+> DKIM の公開鍵は秘密ではないが、**値を書くと鍵のローテーションで本書が必ず古くなる**。
+> さらに高エントロピーの文字列は `secret-scan`（gitleaks）が誤検知するため、CI が赤くなる。
+> 照合は「Resend のダッシュボードが表示する値と `nslookup` の出力が一致するか」で行う。
 
 反映は通常15分〜1時間、DNS 伝播の都合で最大72時間。**Verify を連打しても早くなりません。**
 3件そろったら **§4-2 の Verify** へ進みます。

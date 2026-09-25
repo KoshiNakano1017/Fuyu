@@ -3955,14 +3955,14 @@ Cloud Functions から Supabase PostgreSQL へ**ネットワーク越しに接�
 | テーブル | 結果 | 備考 |
 | --- | --- | --- |
 | `member_identifiers` | 対応不要 | **2026-09-22 に別経路（`0025_member_identifiers.sql`）で先に実装済み**と判明。Vaultとは列構成が異なる（`kind`の値・`is_primary`/`source`の有無）が、**作り直さず現状維持**する（オーナー確認済み） |
-| `member_notes` | ✅ `0033_member_notes.sql` | Vaultの定義をそのまま転記。可視性は`core_only`/`admin_only`のCHECK制約どおり |
-| `uii_transactions` | ✅ `0034_uii_transactions.sql` | Vaultの定義をそのまま転記。Phase 1では書き込みアプリコードを作らない（RLS/GRANTのみ先に張る） |
-| `member_import_links` | ✅ `0035_member_import_links.sql` | **Vault側にも定義が無かったため、この1件だけ選択肢B（新規起案）**。`import_jobs`（`0024`）と同じ「ポリシー0件＝全拒否」方針を踏襲し、`match_basis`（照合根拠）を自由記述の列として追加した |
+| `member_notes` | ✅ `0034_member_notes.sql` | Vaultの定義をそのまま転記。可視性は`core_only`/`admin_only`のCHECK制約どおり |
+| `uii_transactions` | ✅ `0035_uii_transactions.sql` | Vaultの定義をそのまま転記。Phase 1では書き込みアプリコードを作らない（RLS/GRANTのみ先に張る） |
+| `member_import_links` | ✅ `0036_member_import_links.sql` | **Vault側にも定義が無かったため、この1件だけ選択肢B（新規起案）**。`import_jobs`（`0024`）と同じ「ポリシー0件＝全拒否」方針を踏襲し、`match_basis`（照合根拠）を自由記述の列として追加した |
 
 ⚠️ **Docker（`supabase start`）がこの実行環境に無く、ローカルでの適用検証はできていない。** 次にこのブランチへ触るとき、
-またはCIの`db-test`ジョブで`0033`〜`0035`が問題なく適用されることを確認すること。受入テストは未着手（`10-2`・`10-3`側で追加する）。
+またはCIの`db-test`ジョブで`0034`〜`0036`が問題なく適用されることを確認すること。受入テストは未着手（`10-2`・`10-3`側で追加する）。
 - 関連ファイル: `docs/spec/detailed-design/DB物理設計.md` §2・§3-14・§6-1、`supabase/migrations/0005_rls_policies.sql`・
-  `0025_member_identifiers.sql`・`0033_member_notes.sql`・`0034_uii_transactions.sql`・`0035_member_import_links.sql`
+  `0025_member_identifiers.sql`・`0034_member_notes.sql`・`0035_uii_transactions.sql`・`0036_member_import_links.sql`
 
 ## [2026-09-21] Phase 1 のテーブルが6つ未作成のまま、依存する画面だけが実装されている
 

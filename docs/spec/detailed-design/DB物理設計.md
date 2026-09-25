@@ -1062,8 +1062,8 @@ CREATE UNIQUE INDEX uq_import_job_committed_file
   → **2026-09-24 解消**：`QUESTIONS.md`「[2026-09-21] Phase 1 に必要な4テーブルの DDL が本リポジトリに存在しない」
   がオーナー決定で解消した。**`member_identifiers` は 2026-09-22 に別経路（`0025`）で先に実装済み**
   （Vault 側とは列構成が異なる。§6-1 #2 参照）。残る3件は 2026-09-24 に採用：
-  **`member_notes`（`0033`）・`uii_transactions`（`0034`）は選択肢 A（Vault `01_schema.sql` を転記）**、
-  **`member_import_links`（`0035`）だけは Vault 側にも定義が無かったため選択肢 B（新規起案）**で追加した
+  **`member_notes`（`0034`）・`uii_transactions`（`0035`）は選択肢 A（Vault `01_schema.sql` を転記）**、
+  **`member_import_links`（`0036`）だけは Vault 側にも定義が無かったため選択肢 B（新規起案）**で追加した
 
 #### ④ 会員単位の照合：正規化した本名 ＋ 誕生年月
 
