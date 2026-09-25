@@ -87,6 +87,19 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.AUTOMATION_PAT }}
 
+      - name: 件名の🔴プレフィックスを外す（再開時の後始末・冪等）
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
+          ISSUE: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          TITLE="$(gh issue view "$ISSUE" --repo "$REPO" --json title --jq .title)"
+          STRIPPED="${TITLE#"🔴[要判断] "}"
+          if [ "$STRIPPED" != "$TITLE" ]; then
+            gh issue edit "$ISSUE" --repo "$REPO" --title "$STRIPPED"
+          fi
+
       - name: ラベルを auto:implementing に付け替え
         env:
           GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
@@ -361,6 +374,15 @@ jobs:
           fi
           gh issue edit "$ISSUE" --repo "$REPO" \
             --remove-label "auto:implementing" --add-label "$NEW_LABEL" || true
+
+          # 2026-09-25 新設: auto-01 と同じ規約（オーナー判断待ちだけ件名に🔴・冪等）
+          if [ "$NEW_LABEL" = "auto:blocked" ]; then
+            TITLE="$(gh issue view "$ISSUE" --repo "$REPO" --json title --jq .title)"
+            case "$TITLE" in
+              "🔴[要判断] "*) : ;;
+              *) gh issue edit "$ISSUE" --repo "$REPO" --title "🔴[要判断] ${TITLE}" ;;
+            esac
+          fi
 
           if [ "$NEW_LABEL" = "auto:retry" ]; then
             cat > notice.md <<'EOF'

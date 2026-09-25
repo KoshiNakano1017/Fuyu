@@ -329,7 +329,7 @@
 ---
 
 ## [2026-09-22] 精算QRをゲストが読み取る先（未ログインで金額を見せてよいか）（v13 §5.6.1④・§5.6.3-5）
-- ステータス: 未回答
+- ステータス: ~~未回答~~ → ✅ **回答済み（2026-09-24・オーナー確定）**
 - 優先度: 中（**WBS `7-3` の発行・失効・消し込みは実装済みでブロックされていない**。残るのは「読み取った先に何を出すか」だけ）
 - 背景: v13 §5.6.1④ と §5.10.4 は「一括精算QRをモーダルで発行し、**ゲストのスマホで読み取ってもらう**」と定める。
   2026-09-22 に発行・失効・単回使用の基盤（256bit乱数 ／ ハッシュ保存 ／ TTL 24時間）を実装したが、
@@ -348,10 +348,18 @@
   ③B の漏洩範囲は「合計金額」1点で、トークンは24時間・単回使用であり、
   伝票を編集すれば即時失効する（§5.6.3-5 ／ 実装済み）。明細を出さなければ、何を頼んだかは漏れない）
 - ⚠️ 金額と未ログイン表示に関わるため、**オーナー判断が要る**（CLAUDE.md §7.0 の「必ず先に聞く」区分）。
+
+### ✅ 回答（2026-09-24・オーナー確定）
+
+**未ログインのゲストが精算QRを読み取って参照できるようにする。** 選択肢**B**（トークン限定の公開ページ。
+表示は「合計金額（Uii主・円副）と支払い方法の案内」のみに限り、明細・氏名・会員番号は出さない。
+TTL24時間・単回使用はそのまま効く）を採用する。実装はまだ着手していない
+（`src/lib/billing/settlement-qr.ts`は発行・失効・単回使用の基盤のみで、QRが指す公開ページ自体は未作成）。
+
 - 関連ファイル: v13 §5.6.1④・§5.6.3-5・§5.10.4、`src/lib/billing/settlement-qr.ts`、
   `src/app/admin/customers/[memberId]/actions.ts`、`supabase/migrations/0019_orders_and_settlement.sql`
 ## [2026-09-22] 朝会の「ナレッジ候補」の恒久的な保存先（v13 §5.7.4 ② ／ WBS `1-6`・`9-1`）
-- ステータス: 未回答
+- ステータス: ~~未回答~~ → ✅ **回答済み（2026-09-24・オーナー確定）**
 - 優先度: 中（**WBS `4-2` は迂回済みでブロックされていない**。`9-1`（横断セマンティック検索）の入力源に関わる）
 - 背景: v13 §5.7.4 ② は、朝会の構造化と**同じ1回の呼び出し**でナレッジ候補も出させると定める
   （別呼び出しにすると非機能 P3 の60秒を圧迫するため）。実装もそのとおりに1回で受け取っている
@@ -372,6 +380,14 @@
   ②C は v13 §5.7.4 ② が「同じ1回の呼び出しに相乗りさせる」と定めた趣旨——**後から別呼び出しで
   作り直すと60秒枠を圧迫する**——に反し、Phase 1 蓄積分が失われる。③B は `0020` と同じ形の列追加1本で済み、
   `9-1` 側は jsonb を読むだけになる）
+
+### ✅ 回答（2026-09-24・オーナー確定）
+
+**恒久的な保存先は `knowledge_chunks`（pgvector・`0100_rag_pgvector_knowledge_chunks.sql`）とする。**
+保存経路は推奨どおり**選択肢B**（`morning_meetings.extracted_knowledge_candidates jsonb` 列を新設し、
+機械可読な形でいったん貯める → `1-6`／`9-1` の完成時に `knowledge_chunks` へ移送する）を採用する。
+選択肢Aのテキスト逆パースは避ける。
+
 - 関連ファイル: v13 §5.7.4 ②、`src/lib/morning-meetings/structure.ts`、
   `supabase/migrations/0020_morning_meeting_structuring.sql`、`supabase/migrations/0100_rag_pgvector_knowledge_chunks.sql`、
   `docs/spec/WBS_Phase1.md` `4-2`・`1-6`・`9-1`
@@ -791,10 +807,15 @@ Phase 1 の外部リンク先を指すキーが無い。
     連鎖して止まる。同期版は Server Action 1本であり、Cloud Tasks へ載せ替えるときに**呼び出し口ごと差し替わる**
     （載せ替えが手戻りにならない形で切ってある）。⚠️ **非機能 P3「60秒以内・バックグラウンド処理」の
     後半は未達**であり、これは `4-2` の完了条件として残る
-  - ⛔ **待っている（オーナー判断）**: 上記「あわせて確定してほしい点」の **1（PII-A 本文の外部送信の是非・
-    マスキングの要否）**。現在の実装は**本文をそのまま Gemini へ送る**（v13 §5.1 が前提としている形）。
-    画面には「本文はそのまま AI へ送られます」と明示したが、**マスキングが必要という判断になれば
-    送信前処理を足す必要がある**。2（P3 の起点）・3（保存先＝`0020` で列追加済み）は実装側で処理済み
+  - ⛔ ~~待っている（オーナー判断）~~ → ✅ **回答済み（2026-09-24・オーナー確定）**: 上記「あわせて確定してほしい点」の
+    **1（PII-A 本文の外部送信の是非・マスキングの要否）＝マスキング不要。現状の実装（本文をそのまま
+    Gemini へ送る）を正式な恒久仕様として確定する。** 2（P3 の起点）・3（保存先＝`0020` で列追加済み）は
+    従来どおり実装側で処理済み。**本論点はこれで全項目が解消し、`4-2` は完了として扱える**（Issue #90 の
+    `auto:blocked` は解除してよい）。
+
+### ✅ 回答（2026-09-24・オーナー確定）
+
+朝会の議事録・クエスト候補・ナレッジ候補の抽出処理において、**個人の発言を含む本文（`morning_meetings.transcript_text`）をマスキングせず Gemini API へ送信することを正式に許可する。** 上記「実装メモ」で先行実装済みの挙動（マスキングなし）がそのまま恒久仕様になる。追加の送信前処理は不要。
 
 
 ## [2026-09-20] WBS `12-1`（街人登録モーダル）の完了条件と、`12-2` との範囲の切れ目（v13 §5.10.1〜§5.10.3・§5.10.6）
@@ -1017,7 +1038,7 @@ Phase 1 の外部リンク先を指すキーが無い。
 - 関連ファイル: v13 §5.11.5・§5.11.7、`docs/spec/basic-design/infra/非機能要件詳細.md` §1、Issue #18
 
 ## [2026-09-19] メディア用 GCS バケットを `line-rag-bot` と同一 GCP プロジェクトに置くか（v13 §5.11.2）
-- ステータス: 未回答（**ブロッカーではない**。バケット名・プロジェクトIDは環境変数で外出しできる）
+- ステータス: ~~未回答~~ → ✅ **回答済み（2026-09-24・オーナー決定）**
 - 優先度: 中（Issue #18 ／ WBS `1-4` のバケット・サービスアカウント・予算アラートの作成先に影響する）
 - 背景: Issue #18 本文の ⚠️4。`CONSOLIDATED_DECISIONS.md` §15-2 に
   「両システムが同一 GCP プロジェクトか」が**どの設計文書にも記録がない未決**として残っている。
@@ -1028,7 +1049,31 @@ Phase 1 の外部リンク先を指すキーが無い。
   - B. 浮遊街アプリ専用のプロジェクトを新設する
 - 推奨: B（理由: `line-rag-bot` とは §9 #31 で「API 連携ゼロ」の境界を引いており、
   課金・予算アラート・IAM を跨がせない方が §5.11.2 の「権限を用途ごとに分ける」方針と一貫する）
-- 関連ファイル: v13 §5.11.2、`docs/spec/CONSOLIDATED_DECISIONS.md` §15-2、Issue #18
+
+### ✅ 回答（2026-09-24・オーナー確定）
+
+**A（`line-rag-bot` と同一プロジェクト `gen-lang-client-0065941155` を使う）を採用する。** 新規プロジェクトは作らない。
+- 理由: 新規プロジェクトの起票・請求先アカウントの紐付けの手間を避け、既存の認証・課金経路をそのまま使う
+- 推奨 B（分離）の懸念点は、`scripts/gcp/setup-media-infra.sh` が**バケット単位のIAMバインディング**
+  （`media-signer`＝`roles/storage.objectAdmin` を `fuyuugai-media-private` バケットにのみ付与、
+  `media-finalize`＝`roles/storage.objectViewer` を同バケットにのみ付与。プロジェクト全体のロールは付けない）
+  で満たしている。監査ログ用バケット（別途 GCS 保管予定）とは**サービスアカウントを分ける**運用を維持すること
+- ✅ **実行済み（2026-09-24）**: `GCP_PROJECT_ID=gen-lang-client-0065941155` で
+  `scripts/gcp/setup-media-infra.sh` を実行し、バケット `fuyuugai-media-private`（Tokyo region・
+  Uniform bucket-level access・Public access prevention・ライフサイクル・CORS）・
+  サービスアカウント2件・Cloud Tasks キュー `media-finalize`・予算アラート（月5,000円）を作成した。
+  Vercel 側の `GCP_PROJECT_ID`／`GCS_BUCKET_PRIVATE`／`GCP_SERVICE_ACCOUNT_JSON` は既に Secret 型で登録済み
+  （3日前）だったため追加設定は不要だった
+- ⚠️ **実行時に `scripts/gcp/media-bucket-cors.json` のバグを発見・修正した**：
+  `--cors-file` は配列そのものを要求するが、同ファイルは `lifecycle-file` と同じ形式
+  （`{"_comment": ..., "cors": [...]}`）で包んでしまっており、`'str' object has no attribute 'items'`
+  で毎回失敗していた。バケット・サービスアカウント・キューが「既に在る」状態だったのは、
+  過去のセッションでこのバグに阻まれ CORS 設定だけが当たらないまま止まっていたためと推測される
+- 残タスク: Cloud Function `media-object-finalize`（`functions/media-object-finalize/` にソースあり）の
+  デプロイは本論点のスコープ外・未実施。`SUPABASE_SERVICE_ROLE_KEY` を Secret Manager へ登録してから
+  `gcloud functions deploy` する必要がある（スクリプト末尾の案内コマンド参照）
+- 関連ファイル: v13 §5.11.2、`docs/spec/CONSOLIDATED_DECISIONS.md` §15-2、Issue #18、
+  `scripts/gcp/setup-media-infra.sh`、`scripts/gcp/media-bucket-cors.json`
 
 ## [2026-09-19] GCP 月額予算アラートの水準（監査ログの GCS 保管を追加した後の妥当性）（v13 §5.11.4）
 - ステータス: 未回答（**ブロッカーではない**。金額はコンソール設定値であり、実装物に焼き込まれない）
@@ -2276,8 +2321,8 @@ Phase 1 の外部リンク先を指すキーが無い。
     Resend が有料化すると**3つ目**になる。起票時（2026-09-05）の「Supabase と Vercel は無料枠」という
     前提は**既に Supabase 側が撤回済み**である点に注意（本ファイル「[2026-09-05] 無料枠運用で満たせない非機能要件の扱い」）。
     `非機能要件詳細.md` §4 の予算管理に含めること
-- **③ 送信ドメイン: `fuyugai.jp`**（既存。`OLD/2026-08-22_..._OLD.md` に `support@fuyugai.jp` の記載あり）に
-  SPF / DKIM を設定し、`no-reply@fuyugai.jp` で送出する。**DNS 設定の担当者は未定（要指名）**
+- **③ 送信ドメイン: `fuyuugai.com`**（既存。`OLD/2026-08-22_..._OLD.md` に `support@fuyuugai.com` の記載あり）に
+  SPF / DKIM を設定し、`no-reply@fuyuugai.com` で送出する。**DNS 設定の担当者は未定（要指名）**
 
 ### 検討の記録：Gmail への外だしを不採用とした理由（2026-09-10）
 
@@ -2286,7 +2331,7 @@ Phase 1 の外部リンク先を指すキーが無い。
 
 | 案 | 判定 | 理由 |
 | --- | :---: | --- |
-| 無料 Gmail を SMTP に使う | ❌ | 500通/日だが **From が `@gmail.com` に固定**され、`fuyugai.jp` の SPF/DKIM を張れない。予約確認・本人確認メールがスパム判定されやすい。App Password は2段階認証必須。**配信ログ・バウンス追跡ができない** |
+| 無料 Gmail を SMTP に使う | ❌ | 500通/日だが **From が `@gmail.com` に固定**され、`fuyuugai.com` の SPF/DKIM を張れない。予約確認・本人確認メールがスパム判定されやすい。App Password は2段階認証必須。**配信ログ・バウンス追跡ができない** |
 | Google Workspace SMTP relay | △ | 2,000通/日（relay 10,000通/日）と枠は十分。ただし [Supabase 公式](https://supabase.com/docs/guides/troubleshooting/using-google-smtp-with-supabase-custom-smtp-ZZzU4Y) が「**送信元と SMTP ユーザーは Workspace 管理者アドレスであること**」と明記しており `no-reply@` の役割アドレスで出しにくい。Workspace 未契約なら結局課金。**同ドキュメント自身が「解決しなければ Resend / SendGrid / Mailgun / SES を検討」と誘導している** |
 | GAS 等で送信処理ごと外だし | ❌ | **Supabase Auth のメールは Auth 内部で送るため外だし不可**（SMTP を差し替えることしかできない）。予約OTPは自前実装のため技術的には可能だが、GAS の無料クォータは実質100通/日で **Resend と変わらない**。加えて配信の可観測性とレート制限を自前で作ることになり、利点が無い |
 
@@ -3874,7 +3919,7 @@ Cloud Functions から Supabase PostgreSQL へ**ネットワーク越しに接�
 
 ## [2026-09-21] Phase 1 に必要な4テーブルの DDL が本リポジトリに存在しない（`member_identifiers` / `member_notes` / `member_import_links` / `uii_transactions`）
 
-- ステータス: 未回答
+- ステータス: ~~未回答~~ → ✅ **回答済み・クローズ（2026-09-24・オーナー決定）**
 - 優先度: 高（WBS `10-2`（名寄せロジック）・`10-3`（再訪アラート）をブロック。`member_identifiers` は
   v13 §5.8.3 が名寄せの初回紐付けに必須とする連絡先の格納先そのもの）
 - 背景: 2026-09-21 に「正本を満たすために足りない DB」を棚卸しした際に判明。
@@ -3902,7 +3947,22 @@ Cloud Functions から Supabase PostgreSQL へ**ネットワーク越しに接�
     （`member_notes` は `10-3` 再訪アラート、`member_import_links` は `10-2` 取込監査を落とすことになる）
 - 推奨: A（理由: 既存の実体があるなら列構成を二重に決めない。§1.1 の二重管理事故を繰り返さないためにも、
   Vault 側にしか無い状態を解消して本リポジトリへ寄せるのが筋である）
-- 関連ファイル: `docs/spec/detailed-design/DB物理設計.md` §2・§3-14・§6-1、`supabase/migrations/0005_rls_policies.sql`
+
+### ✅ 回答（2026-09-24・オーナー確定）
+
+**A（Vault 側 `01_schema.sql` を正として転記）を採用する。**
+
+| テーブル | 結果 | 備考 |
+| --- | --- | --- |
+| `member_identifiers` | 対応不要 | **2026-09-22 に別経路（`0025_member_identifiers.sql`）で先に実装済み**と判明。Vaultとは列構成が異なる（`kind`の値・`is_primary`/`source`の有無）が、**作り直さず現状維持**する（オーナー確認済み） |
+| `member_notes` | ✅ `0033_member_notes.sql` | Vaultの定義をそのまま転記。可視性は`core_only`/`admin_only`のCHECK制約どおり |
+| `uii_transactions` | ✅ `0034_uii_transactions.sql` | Vaultの定義をそのまま転記。Phase 1では書き込みアプリコードを作らない（RLS/GRANTのみ先に張る） |
+| `member_import_links` | ✅ `0035_member_import_links.sql` | **Vault側にも定義が無かったため、この1件だけ選択肢B（新規起案）**。`import_jobs`（`0024`）と同じ「ポリシー0件＝全拒否」方針を踏襲し、`match_basis`（照合根拠）を自由記述の列として追加した |
+
+⚠️ **Docker（`supabase start`）がこの実行環境に無く、ローカルでの適用検証はできていない。** 次にこのブランチへ触るとき、
+またはCIの`db-test`ジョブで`0033`〜`0035`が問題なく適用されることを確認すること。受入テストは未着手（`10-2`・`10-3`側で追加する）。
+- 関連ファイル: `docs/spec/detailed-design/DB物理設計.md` §2・§3-14・§6-1、`supabase/migrations/0005_rls_policies.sql`・
+  `0025_member_identifiers.sql`・`0033_member_notes.sql`・`0034_uii_transactions.sql`・`0035_member_import_links.sql`
 
 ## [2026-09-21] Phase 1 のテーブルが6つ未作成のまま、依存する画面だけが実装されている
 

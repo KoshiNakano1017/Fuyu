@@ -45,6 +45,64 @@
 立替実費の記述の食い違い（正本 §5.12.4 vs 派生文書）は**正本優先で進行**（設計 §3.3 ／ `QUESTIONS.md` に ⚡ で記録）。
 
 ## [2026-09-22 22:00] `claude-review.yml` が PR ごとに自己キャンセルして赤くなる — TODO
+## [2026-09-24] WBS `14-1` 残作業：GCS Object Finalize → Cloud Tasks → `media-object-finalize` の実配線 — BLOCKED（IAM権限不足）
+
+インタラクティブセッションでの作業。`1-4`（GCS基盤・署名付きURL）完了後、`14-1`の残り26%
+（Object Finalizeの実処理・書き戻し経路）に着手した。
+
+**やったこと**:
+- `media-object-finalize`（`functions/media-object-finalize`）を実際にデプロイ（asia-northeast1・gen2・
+  `media-finalize` SA・`--no-allow-unauthenticated`）。Secret Manager `supabase-service-role-key` を作成し
+  IAMアクセス権も付与。テスト呼び出しで**関数自体は正しく動作**していることを確認した
+  （Supabaseへの書き戻しPATCHを試み、404を正しくログしている＝`media_assets`がPostgRESTからまだ見えない
+  という別件〔dev Supabaseのマイグレーション未反映〕に起因するもので、関数のバグではない）。
+  ⚠️ **デプロイ過程で実際のバグを発見・修正**：Secret Managerの旧バージョンが
+  PowerShellの`Set-Content -Encoding utf8`が付与するBOM（U+FEFF）だけの中身になっており、
+  関数が`TypeError: Cannot convert argument to a ByteString`でクラッシュしていた。正しい値で
+  新バージョンを追加し再デプロイして解消。
+- **起動経路の中継関数を新規作成**：`functions/media-object-finalize-enqueue`
+  （Eventarc の GCS Object Finalize イベント → Cloud Tasks キュー `media-finalize` へ1件積む → 
+  OIDCトークン付きで`media-object-finalize`を呼ぶ）。`システムアーキテクチャ.md`が定める
+  「GCS Object Finalize → Cloud Tasks → Cloud Functions」の3段構成をそのまま実装した
+  （2026-09-10決定。GCSから直接叩く2段構成にはしていない）。
+- IAM設定（完了分）：`media-finalize` SAへ`roles/cloudtasks.enqueuer`（プロジェクト）・
+  `roles/run.invoker`（`media-object-finalize`サービス）を付与。Eventarcサービスエージェントへ
+  バケットの`roles/storage.legacyBucketReader`、`roles/eventarc.serviceAgent`を付与。
+
+**ブロック理由**: Eventarcトリガーのデプロイに`media-finalize` SAへの`roles/eventarc.eventReceiver`
+（プロジェクトレベルのIAMバインディング）が必要だが、Claude Codeの自動モード安全装置が
+理由の説明なくブロックした。オーナー側で以下を実行するか、この種のIAM操作を許可する設定に
+していただく必要がある。
+
+```
+gcloud projects add-iam-policy-binding gen-lang-client-0065941155 \
+  --member="serviceAccount:media-finalize@gen-lang-client-0065941155.iam.gserviceaccount.com" \
+  --role="roles/eventarc.eventReceiver" \
+  --condition=None
+```
+
+実行後、以下でトリガーごとデプロイすれば完了する（`functions/media-object-finalize-enqueue`に実装済み）：
+
+```
+gcloud functions deploy media-object-finalize-enqueue \
+  --gen2 --runtime nodejs20 --region asia-northeast1 \
+  --project gen-lang-client-0065941155 \
+  --source functions/media-object-finalize-enqueue \
+  --entry-point enqueueMediaObjectFinalize \
+  --trigger-event-filters="type=google.cloud.storage.object.v1.finalized" \
+  --trigger-event-filters="bucket=fuyuugai-media-private" \
+  --trigger-location=asia-northeast1 \
+  --trigger-service-account="media-finalize@gen-lang-client-0065941155.iam.gserviceaccount.com" \
+  --service-account="media-finalize@gen-lang-client-0065941155.iam.gserviceaccount.com" \
+  --no-allow-unauthenticated \
+  --set-env-vars "GCP_PROJECT_ID=gen-lang-client-0065941155,GCS_LOCATION=asia-northeast1,MEDIA_FINALIZE_QUEUE=media-finalize,MEDIA_FINALIZE_URL=https://media-object-finalize-jcvxte5tpa-an.a.run.app,MEDIA_FINALIZE_INVOKER_SA=media-finalize@gen-lang-client-0065941155.iam.gserviceaccount.com"
+```
+
+⚠️ 別件として、`media_assets`が現行Supabaseプロジェクトの PostgREST から404（見えない）ままであることを
+実測で再確認した。`0021`〜`0035`のバックログが未反映の可能性が高い（本ファイル [2026-09-22 18:30] 参照）。
+このEventarc配線が動いても、Supabase側が追いつくまでは書き戻しが失敗し続ける。
+
+## [2026-09-22 22:00] `claude-review.yml` が PR ごとに自己キャンセルして赤くなる — ~~TODO~~ → 決定済み（運用ルール確定・2026-09-24）
 
 2026-09-22 のセッションで **9本中7本の PR** で「Claude によるレビュー」が `fail` になった。
 中身はいずれも `##[error]The operation was canceled.` ＝ **同じ concurrency group の新しい実行に
@@ -66,6 +124,15 @@
   **いまはこれで凌いでいる**が、毎回2〜5分待つことになる
 
 ⚠️ どれを採ってもワークフローの課金挙動が変わるため、本タスクは**実装側で勝手に決めない**。
+
+### ✅ 決定（2026-09-24・オーナー確定）
+
+**C（運用で回避・現状維持）を採用する。** `cancel-in-progress` は外さず、トリガも変更しない。
+push から `gh pr create` まで少し待つ、または赤くなったら `gh run rerun` で再実行する運用を継続する。
+理由（オーナー判断）: A・Bはいずれもワークフローの課金・カバレッジ挙動を変えるため、現状の運用コスト
+（毎回2〜5分の待ち／rerun）で許容する。**CIが赤い＝レビュー内容の問題、と誤読しないよう、
+マージ判断時は必ず「`##[error]The operation was canceled.` かどうか」を確認すること**
+（CLAUDE.md §6.2「CIが赤いPRはマージしない」の例外運用として扱う）。
 
 
 ## [2026-09-22 20:00] 画面層の一括接続（インタラクティブセッション） — DONE
@@ -109,6 +176,12 @@
 やること: `supabase link` のうえ `supabase db push --include-all` を流す（`1-1c` と同じ手順）。
 ⚠️ **`--include-all` が要る**理由は WBS `1-1` の注記と同じ（既定の `db push` はリモート最新より前の連番を拒否する）。
 ⚠️ 適用前に `0029`（ニックネーム必須化・親方会員番号の採番）が dev の既存データで通るかを確認すること。
+
+**2026-09-24 追記**: オーナーが Supabase の GitHub 連携（本番ブランチへのマイグレーション自動デプロイ）を設定した
+（`CLAUDE.md` §6.3 訂正済み）。**この設定が `0021`〜`0031` の既存の未適用分まで遡って拾うか、
+連携後に新規 push された分だけが対象かは未確認。** 次にこのタスクへ触るときは、まず
+`accommodation_rates` 等7表が PostgREST から見えるようになったか（`PGRST205` が解消したか）を確認し、
+解消していなければ上記の手動 `supabase db push --include-all` を一度だけ流してバックログを解消すること。
 
 
 ## [2026-09-22 10:50] 招待（経路B）のコード方式化（WBS `2-1d`） — DONE

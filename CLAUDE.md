@@ -33,7 +33,7 @@ Claude Code（Claudian経由を含む）がこのリポジトリで作業する�
 | --- | --- |
 | フロントエンド | Next.js（Vercel） / Tailwind CSS |
 | バックエンド・DB・認証 | Supabase（PostgreSQL / Auth / Realtime / RLS） |
-| メディアストレージ | Cloud Storage for Firebase（署名付きURL方式・Firebase Auth不採用） |
+| メディアストレージ | Google Cloud Storage（GCS）。署名付きURL方式・IAMベースのサービスアカウントで認可する（Firebase Authentication／Security Rules は不採用。実装は `gcloud storage` のみで Firebase SDK は使わない） |
 | AI基盤 | Claude API / Agent SDK、Gemini API。**アプリは録音データを扱わず、朝会の入力は文字起こし済みテキストのみ**（v13 §9 #63 ／ 2026-09-05 決定） |
 | RAG/ベクトル検索 | ~~`line-rag-bot`（Firestore）へ統合。本体は独自ベクトル基盤を持たない~~ → **2026-09-11 確定：Supabase pgvector へ一本化**。アプリと浮遊街コンシェルジュが同一のベクトル空間 `public.knowledge_chunks` を共有する（v13 §9 #31 限定改訂・v1.26.0 ／ `CONSOLIDATED_DECISIONS.md` §17） |
 | 通知 | LINE Messaging API |
@@ -398,7 +398,11 @@ git config core.hooksPath .githooks
 
 - `main` へのマージで Vercel の Production デプロイが走る（Vercel の GitHub 連携）
 - PR ごとに Vercel Preview が生成される。UI 変更のレビューは Preview URL で行う
-- Supabase のマイグレーションは自動適用しない。手動で内容を確認してから適用する（データ破壊を防ぐため）
+- ~~Supabase のマイグレーションは自動適用しない。手動で内容を確認してから適用する（データ破壊を防ぐため）~~ →
+  **2026-09-24 訂正：Supabase の GitHub 連携（本番ブランチへのマイグレーション自動デプロイ）を設定した。**
+  `main` への push／マージで `supabase/migrations/` の未適用分が dev/prod の Supabase プロジェクトへ自動適用される。
+  ⚠️ **手動 `supabase db push` の運用に戻すべき明確な合図が無い限り、CI/ドキュメント側でこの前提を崩さないこと。**
+  適用ミスによるデータ破壊を防ぐ手当て（マイグレーションのレビュー・ロールバック手順）は今後 §6.2/§6.3 へ追記する
 
 **Vercel の環境変数（2026-09-21 障害を受けて明文化）**
 
@@ -549,6 +553,25 @@ middleware の matcher は静的アセット以外の全経路であるため、
   着手可能になれば、次回のスイープが自動で拾う
 - **「WBS に 🟢着手可能 と書いてあるのに Issue が無い」状態を放置しない。**
   起票されない場合は上限・依存・重複判定のどれで落ちているかをスイープのログで確認する
+
+### 7.0.3 WBSパッケージを完了させたら、紐づく auto Issue も同じ作業の中で閉じる（2026-09-25 オーナー確定）
+
+> [!important] 正本を更新しても、自律ループ側の記録は自動では追随しない
+> `auto-03-review-merge.yml` の「マージ時に Issue を close する」ステップは、
+> **そのワークフロー自身のラベル遷移からしか発火しない。** インタラクティブセッションが
+> `gh pr merge` 等で直接マージすると、この後始末を一度も通らない。
+> 2026-09-24〜25 に、`WBS_Phase1.md` 側は✅なのに GitHub Issue が `auto:blocked`／
+> `auto:review` のまま open で残り続ける事例（#18・#85・#90）が見つかった
+> （`docs/operations/自律ループ停滞要因_ロジックツリー分析.md` §②）。
+
+- **恒久対応**: `automation/scripts/sweep.py` の `reconcile_completed()`（2026-09-25 新設）が、
+  定時実行のたびに「WBS側が✅なのに open のまま」の Issue を自動で見つけて閉じる。
+  **誰がどう完了させたかに依存しない**ため、これが本筋の対処である
+- **運用対応（即時性を上げるための保険）**: WBSパッケージを完了させるPRをマージしたら、
+  **同じセッション内で** `<!--wbs:N-M-->` マーカーを持つ対応 Issue を検索し、
+  `gh issue close <N> --reason completed` を実行する。次回のスイープ（数時間後）を待たない
+- 対応するIssueが見つからない・番号が分からない場合は無理に探さず、スイープに任せてよい
+  （閉じ忘れても最悪数時間で機械的に解消される設計にしてある）
 
 ### 7.1 🚫 会員データの持ち込み禁止（2026-08-22 オーナー確定 ／ 違反時は即中止）
 

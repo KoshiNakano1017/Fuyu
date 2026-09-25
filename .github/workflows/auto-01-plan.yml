@@ -68,6 +68,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: 件名の🔴プレフィックスを外す（再開時の後始末・冪等）
+        # 2026-09-25 新設: auto:blocked → auto の再付与（オーナーの再開操作）で
+        # このジョブが再度走るため、ここで剥がしておけば「止まっていたが再開した」
+        # 状態が件名に残らない。プレフィックスが無ければ何もしない。
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
+          ISSUE: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          TITLE="$(gh issue view "$ISSUE" --repo "$REPO" --json title --jq .title)"
+          STRIPPED="${TITLE#"🔴[要判断] "}"
+          if [ "$STRIPPED" != "$TITLE" ]; then
+            gh issue edit "$ISSUE" --repo "$REPO" --title "$STRIPPED"
+          fi
+
       - name: ラベルを auto:planning に付け替え
         env:
           GH_TOKEN: ${{ secrets.AUTOMATION_PAT }}
@@ -180,6 +196,16 @@ jobs:
           gh issue edit "$ISSUE" --repo "$REPO" \
             --remove-label "auto:planning" --add-label "$NEW_LABEL"
 
+          # 2026-09-25 新設: オーナー判断待ちだけ件名に🔴を付け、通知の件名一覧だけで
+          # 「要判断」と分かるようにする（自動再試行 auto:retry には付けない・冪等）。
+          if [ "$NEW_LABEL" = "auto:blocked" ]; then
+            TITLE="$(gh issue view "$ISSUE" --repo "$REPO" --json title --jq .title)"
+            case "$TITLE" in
+              "🔴[要判断] "*) : ;;
+              *) gh issue edit "$ISSUE" --repo "$REPO" --title "🔴[要判断] ${TITLE}" ;;
+            esac
+          fi
+
           if [ "$NEW_LABEL" = "auto:retry" ]; then
             cat > notice.md <<'EOF'
           ## ⏳ 一時的な事由で停止しました
@@ -251,11 +277,15 @@ jobs:
           set -euo pipefail
           if [ "$RISK" = "high" ]; then
             GATE='**マージ前（ゲート3）で承認を求めます。** 計画・実装・レビューはここから自動で進みます。'
+            # 2026-09-25 新設: 高リスクは後でゲート3の承認待ちになる。
+            # 承認待ちになってから気づくと後手に回るため、分類の時点で先に呼ぶ。
+            MENTION="@${OWNER} "
           else
             GATE='**承認なしでマージまで進みます。**（リスク区分が高以外のため・設計 §4.1 改訂）'
+            MENTION=""
           fi
           {
-            printf '計画フェーズが完了しました。リスク区分: **%s**\n\n' "$RISK"
+            printf '%s計画フェーズが完了しました。リスク区分: **%s**\n\n' "$MENTION" "$RISK"
             printf '%s\n\n' "$GATE"
             printf '%s\n' '> [!note] 異議がある場合'
             printf '%s\n' '> `auto:needs-review` ラベルを付けてください。**マージ前であればいつでも有効**で、'
