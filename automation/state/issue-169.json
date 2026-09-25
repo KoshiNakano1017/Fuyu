@@ -3,7 +3,7 @@
   "issue": 169,
   "pr": null,
   "branch": null,
-  "phase": "plan",
+  "phase": "implement",
   "risk": "high",
   "attempts": {
     "infra": 0,
@@ -21,11 +21,112 @@
     "review": 0
   },
   "tokens": {
-    "input": 144,
-    "output": 93272,
-    "costUsd": 8.268875000000001
+    "input": 202,
+    "output": 140889,
+    "costUsd": 12.430347500000002
   },
-  "testHashes": {},
+  "testHashes": {
+    "e2e/TEST_PLAN.md": "9e1ff3682d6cdff6",
+    "e2e/smoke.spec.ts": "ed6ce8db5e0004a2",
+    "e2e/unauthenticated-access.spec.ts": "21a3ebc8b9acfac3",
+    "tests/acceptance.test.ts": "ba0921981b4630b7",
+    "tests/accommodation-rates.test.ts": "c6fe0752abed4c8e",
+    "tests/adjustment-resolution.test.ts": "1a7d3e62b2691cd6",
+    "tests/ai-client.test.ts": "26b0511e481725da",
+    "tests/ai-env.test.ts": "af2ee601c87cfcce",
+    "tests/auth-guard.test.ts": "d5f5764a1a6cd138",
+    "tests/checkin-ops.test.ts": "01bede9045bf2ad5",
+    "tests/concierge-admin-link.test.ts": "9c74468cb3723c2e",
+    "tests/customer-sort.test.ts": "688da7e20b4f533d",
+    "tests/db-test-infra.test.ts": "b4db59cc79914376",
+    "tests/db/accommodation-rates.test.ts": "4580ed3e6630dc91",
+    "tests/db/check-ins-and-availability.test.ts": "dd5b7f024e5723b1",
+    "tests/db/current-operator-id.test.ts": "82e8173ec61178d7",
+    "tests/db/eumo-self-receipt.test.ts": "f714d3bc89bf1e0b",
+    "tests/db/helpers/fixtures.ts": "82faf25409aa0dd6",
+    "tests/db/helpers/psql.ts": "d95bcca15e534a0a",
+    "tests/db/helpers/shopping-list.ts": "865b8e969aaa6e1f",
+    "tests/db/lodging-register.test.ts": "30b65e1be2f195fd",
+    "tests/db/login-binding.test.ts": "951155ad26536214",
+    "tests/db/media-assets.test.ts": "7056a46ab127be72",
+    "tests/db/member-display-name.test.ts": "2523551edafc36af",
+    "tests/db/member-matching.test.ts": "c7ac7ce81a8e102e",
+    "tests/db/members-guard-trigger.test.ts": "c0675285d9d0be31",
+    "tests/db/members-schema.test.ts": "a8be52aaca0f7994",
+    "tests/db/membership-applications.test.ts": "34905163b0ff8cf8",
+    "tests/db/membership-approval.test.ts": "b915b376e2f3d616",
+    "tests/db/morning-meetings-rls.test.ts": "d20220c01e6fa90c",
+    "tests/db/order-items-void.test.ts": "2978314ba8257104",
+    "tests/db/oyakata-member-no-and-nickname.test.ts": "27c798c90b1fb10e",
+    "tests/db/quest-review-guard.test.ts": "64707ab63ba3c3a3",
+    "tests/db/quests-guest-visibility.test.ts": "9114f86497b20d71",
+    "tests/db/rag-pgvector.test.ts": "e1edec2f180986f8",
+    "tests/db/rag-search-scope.test.ts": "f56bb6951c21e46f",
+    "tests/db/rls-and-helper-functions.test.ts": "9ac749d11b2c42ad",
+    "tests/db/rls-policies.test.ts": "3748be28b027dcc3",
+    "tests/db/rooms.test.ts": "593113cb58ea14ca",
+    "tests/db/shopping-list-authz.test.ts": "0e3887e6d43e3aeb",
+    "tests/db/shopping-list-items.test.ts": "d80e80b7733b9ae1",
+    "tests/db/shopping-list-schema.test.ts": "a535e3fd18b27f50",
+    "tests/db/stay-ticket-adjust.test.ts": "1c825debaad36243",
+    "tests/eumo-grants.test.ts": "78634abea96ac68d",
+    "tests/fixtures-are-synthetic.test.ts": "1175f89a51b8831a",
+    "tests/fixtures/quest-board.ts": "2177f6c4931566c8",
+    "tests/helpers/ai-sources.ts": "b976105b854a38e2",
+    "tests/helpers/concierge-sources.ts": "a3b2ceefd9c779bf",
+    "tests/home-entry.test.ts": "9077e2c7ff02ef55",
+    "tests/invitation-route-b.test.ts": "4b88c22c9dafa615",
+    "tests/lodging-calendar.test.ts": "1225291bb46635a2",
+    "tests/lodging-cancellation.test.ts": "0b007d98e5ede355",
+    "tests/lodging-register.test.ts": "8da422d56bcbdd87",
+    "tests/login-invitation-gate.test.ts": "3340ab0cb43dcd62",
+    "tests/media-env.test.ts": "342023269f6ec655",
+    "tests/media-exif.test.ts": "5fb355521f9e0529",
+    "tests/media-moderation-screen.test.ts": "8de28a34f77d602b",
+    "tests/media-moderation.test.ts": "f0d2fa33943aa863",
+    "tests/media-signed-url.test.ts": "42e219fc5ae67d82",
+    "tests/media-upload-client.test.ts": "d2a9a4b110a729bb",
+    "tests/media-upload-policy.test.ts": "de1e345c465f6fdc",
+    "tests/member-link-queue-screen.test.ts": "3334ebbb5420fc4e",
+    "tests/member-matching-login.test.ts": "dc368814fb084e1d",
+    "tests/member-matching.test.ts": "dc675b1fccb2bd11",
+    "tests/membership-approval-screen.test.ts": "88cb1faaa806fb9f",
+    "tests/membership-approval.test.ts": "0ac8a684681fe45b",
+    "tests/membership-registration-screen.test.ts": "24f3669b3c24002f",
+    "tests/membership-registration.test.ts": "2ce26839682a3bb0",
+    "tests/middleware-resilience.test.ts": "ffd48fd3af959071",
+    "tests/migrations-baseline.test.ts": "cd1b6e29a043b253",
+    "tests/money-component.test.ts": "490dc6325275fa08",
+    "tests/morning-meeting-intake.test.ts": "9256f65a908066c8",
+    "tests/morning-meeting-structuring.test.ts": "98c410024c211ee6",
+    "tests/nickname.test.ts": "4a2293853eb17903",
+    "tests/no-line-rag-bot-integration.test.ts": "78a9bcd933b7ea04",
+    "tests/order-totals.test.ts": "4ab4cfe04b9eae89",
+    "tests/orders-menu.test.ts": "9597bcd5b03c6a07",
+    "tests/quest-application-gate.test.ts": "daf570f863ab6141",
+    "tests/quest-application-screen.test.ts": "01060d3b4c0a6917",
+    "tests/quest-board.test.ts": "e5bfc002c8c4c8b2",
+    "tests/quest-review.test.ts": "1e04017f5b38bb31",
+    "tests/reservation-otp.test.ts": "746960f1c378a1ab",
+    "tests/revisit-alerts.test.ts": "d98b45a310817310",
+    "tests/role-labels.test.ts": "40883f8cad8dcbaa",
+    "tests/role-navigation.test.ts": "cf16b87575989f3a",
+    "tests/room-availability.test.ts": "5f1e319a1a1878da",
+    "tests/self-order-serving-status-screen.test.ts": "2af6ee9c44fd2ed6",
+    "tests/serving-status.test.ts": "4b3d762719a30c34",
+    "tests/settlement-qr.test.ts": "191a2fb8db6725b8",
+    "tests/shopping-list-acceptance.test.ts": "eeabc950d0bbd08e",
+    "tests/shopping-list-screen.test.ts": "06f2e9c3bf876f6b",
+    "tests/shopping-list.test.ts": "e1bf5282967ab550",
+    "tests/slip-edit.test.ts": "cb9070bb9f9c13d8",
+    "tests/staff-knowledge-page.test.ts": "41e23e6ba5ee51d7",
+    "tests/stay-history.test.ts": "b1af641092cab662",
+    "tests/stay-ticket-adjust.test.ts": "0c216013280676ab",
+    "tests/supabase-env.test.ts": "2e12df77018a4f12",
+    "tests/uii.test.ts": "b5791629644723f4",
+    "tests/unsettled-totals.test.ts": "e90a9b97fa9fb23f",
+    "tests/work-log-report.test.ts": "de6c85fb35ed638c"
+  },
   "specRefs": [
     {
       "ref": "v13 §5.2.5①（★ 宿泊枠の残数管理 ＆ カレンダー表示・残枠の算出）",
@@ -96,143 +197,143 @@
       "criterion": "`v_room_availability` が 日付 × 宿泊形態 の行を返し、各行が `total` / `occupied` / `available` を持つ",
       "origin": "issue",
       "basis": "v13 §5.2.5① 算出式 ／ DB物理設計.md §3-12",
-      "test": "`v_room_availability` は日付と宿泊形態の組ごとに `total`・`occupied`・`available` を返す"
+      "test": "tests/db/room-availability-view.test.ts:`ある日付について宿泊形態6種ぶんの行が返る（日付 × 宿泊形態の粒度である）` ／ `各行が total・occupied・available を値として持つ（NULL を返さない）`"
     },
     {
       "criterion": "占有量の算出元が `check_ins` であり、`room_assignments` を参照しない",
       "origin": "issue",
       "basis": "v13 §5.2.5① 算出式 ／ v13 §9 #47",
-      "test": "`room_assignments` に部屋割当を足しても `occupied` は変わらない（算出元は `check_ins` である）"
+      "test": "tests/db/room-availability-view.test.ts:`ビュー定義が check_ins を参照する` ／ `ビュー定義が room_assignments を参照しない`"
     },
     {
       "criterion": "`allocation_mode` が `per_person` の形態（ドミトリー16／キャンプサイト10／車中泊30）で、`occupied` が予約人数の合計になる",
       "origin": "issue",
       "basis": "v13 §5.2.5① の warning ／ v13 L1019–1043「★ 宿泊形態と収容枠の確定」",
-      "test": "人数枠型のドミトリーは大人2名＋子供1名の予約で `occupied` が3になる"
+      "test": "tests/db/room-availability-view.test.ts:`ドミトリーの occupied は予約人数の合計になる（大人2名＋子供1名で3）` ／ `車中泊の分母は確定表どおり 30 である`"
     },
     {
       "criterion": "`allocation_mode` が `per_unit` の形態（コテージ3棟／アースバッグ1棟／サロン1室）で、`occupied` が占有棟数になり、1棟あたり定員2名を超える予約は複数棟を消費する",
       "origin": "issue",
       "basis": "v13 §5.2.5① の warning",
-      "test": "棟貸型のコテージは定員2名を超える3名の予約で `occupied` が2棟になる"
+      "test": "tests/db/room-availability-view.test.ts:`コテージの occupied は占有棟数になる（1名の予約1件で1棟）` ／ `1棟あたり定員2名を超える3名の予約は2棟を消費する` ／ `アースバッグの分母は1棟である` ／ `サロンの分母は1室である`"
     },
     {
       "criterion": "収容枠の合計が 66 である",
       "origin": "issue",
-      "basis": "v13 L1019–1043「★ 宿泊形態と収容枠の確定」（§5.4.2 本文 L974–1017 の外側の番号なし #### 見出し。節番号では引けない）",
-      "test": "利用可の `rooms.capacity` の合計は66である"
+      "basis": "v13 L1019–1043「★ 宿泊形態と収容枠の確定」",
+      "test": "（既存）tests/db/check-ins-and-availability.test.ts:`利用可の部屋の収容枠の合計は 66 である`"
     },
     {
       "criterion": "`rooms.status` が `メンテナンス中` / `利用停止` の部屋は `total`（分母）に含まれない",
       "origin": "issue",
       "basis": "v13 §5.2.5① 除外条件 ／ v13 §5.2.1",
-      "test": "`rooms.status` を `メンテナンス中` にした部屋は `total` に数えられない"
+      "test": "tests/db/room-availability-view.test.ts:`メンテナンス中の部屋は total に数えない（3棟のうち1棟を外すと2棟になる）` ／ `利用停止の部屋は total に数えない`"
     },
     {
       "criterion": "`cancelled_at IS NOT NULL` の予約は `occupied` に数えない",
       "origin": "issue",
       "basis": "v13 §5.2.5① キャンセル分 ／ v13 §5.2.2",
-      "test": "`cancelled_at` が入った予約は `occupied` に数えられない"
+      "test": "（既存）tests/db/check-ins-and-availability.test.ts:`キャンセル済みの予約は残枠を専有しない（v13 §5.2.2）`"
     },
     {
       "criterion": "`occupied` に数える状態が `pre_registered` / `confirmed` / `staying` の3つに限られる",
       "origin": "issue",
       "basis": "v13 §5.2.5① 有効な予約",
-      "test": "`status` が `checked_out` の予約は `occupied` に数えられない"
+      "test": "tests/db/room-availability-view.test.ts:`pre_registered の予約は occupied に数える` ／ `confirmed の予約は occupied に数える` ／ `staying の予約は occupied に数える` ／ `checked_out の予約は occupied に数えない（滞在が終わった枠を空けないと二重に埋まる）`"
     },
     {
       "criterion": "チェックアウト日は専有しない（退去日と次の到着日が重なる予約が入る）",
       "origin": "issue",
       "basis": "DB物理設計.md §3-12 の注記（L830・L859）",
-      "test": "チェックアウト日は `occupied` に数えられない"
+      "test": "（既存）tests/db/check-ins-and-availability.test.ts:`チェックアウト日は専有しない（退去日と次の到着日が重なる予約を弾かないため）` ／ （新規）tests/lodging-my-calendar.test.ts:`退去日は滞在として現れない（残枠の数え方と揃える ／ DB物理設計 §3-12）`"
     },
     {
       "criterion": "残枠を保持するカラム・キャッシュが存在しない（加減算方式を採らない）",
       "origin": "issue",
       "basis": "v13 §5.2.5① の warning ／ v13 §9 #25",
-      "test": "`rooms`・`accommodation_types`・`check_ins` に残枠を保持する列が無く、残枠のマテリアライズドビューも存在しない"
+      "test": "tests/db/room-availability-view.test.ts:`残枠を保持する列がどのテーブルにも無い` ／ `残枠をキャッシュするマテリアライズドビューが存在しない`"
     },
     {
       "criterion": "`authenticated` は `v_room_availability` を SELECT できる",
       "origin": "issue",
-      "basis": "DB物理設計.md §6-1 一覧 #30（L1322 ／ Issue 本文の「§6-2」は誤り。§6-2 の見出しは L1338）",
-      "test": "一般会員（`authenticated`）は `v_room_availability` を SELECT できる"
+      "basis": "DB物理設計.md §6-1 一覧 #30（L1322）",
+      "test": "（既存）tests/db/check-ins-and-availability.test.ts:`一般会員も残枠を読める（他人の予約が見えなくても占有量は正しく出る）`"
     },
     {
       "criterion": "`anon` は `v_room_availability` を SELECT できない",
       "origin": "issue",
       "basis": "DB物理設計.md §6-8 突合表 #9（L2319）",
-      "test": "未ログイン（`anon`）は `v_room_availability` を SELECT すると権限エラー（`42501`）になる"
+      "test": "（既存）tests/db/check-ins-and-availability.test.ts:`anon は残枠ビューを SELECT できない（公開予約ページはサーバ経由で読む）`"
     },
     {
       "criterion": "ビューが `member_id`・氏名・備考などの行レベルの列を1つも持たない",
       "origin": "issue",
-      "basis": "DB物理設計.md L874・L1322（個人を含む列を持たせない）",
-      "test": "`v_room_availability` の列は `date`・`room_type`・`total`・`occupied`・`available` の5つだけである"
+      "basis": "DB物理設計.md L874・L1322",
+      "test": "tests/db/room-availability-view.test.ts:`集計に要る列以外を1つも持たない（member_id・氏名・備考を足させない）`"
     },
     {
       "criterion": "本人の宿泊予定（未来）と宿泊履歴（過去）が月表示のカレンダーで表示される",
       "origin": "issue",
       "basis": "v13 §5.2.5②（L681）／ 画面設計.md §4 A12「表示」（L430）",
-      "test": "A12 は本人の未来の予約と過去の履歴を同じ月表示カレンダーの日セルに描画する"
+      "test": "tests/lodging-my-calendar.test.ts:`指定した月の日数ぶんの日セルを返す（一覧ではなく月表示である）` ／ `未来の宿泊予定が日セルに現れる` ／ `過去の宿泊履歴も同じカレンダーの日セルに現れる` ／ `滞在の中日も現れる（初日だけの点にしない）`"
     },
     {
       "criterion": "日付をタップすると当該滞在の詳細（部屋・同伴人数・注文・クエスト）へ遷移する",
       "origin": "issue",
       "basis": "v13 §5.2.5②（L681）／ 画面設計.md §4 A12「遷移」（L431）",
-      "test": "A12 の滞在がある日セルは `/me/stays/{checkinId}` へのリンクになる"
+      "test": "tests/lodging-my-calendar.test.ts:`滞在のある日セルは当該滞在の詳細への遷移先を持つ` ／ `滞在の無い日セルは遷移先を持たない（空振りのリンクを作らない）`"
     },
     {
       "criterion": "予定・履歴・「要確認」が色で区別される",
       "origin": "issue",
       "basis": "画面設計.md §4 A12「区別」（L432）",
-      "test": "A12 は予定・履歴・要確認の日セルにそれぞれ異なる色クラスを付ける"
+      "test": "tests/lodging-my-calendar.test.ts:`未来の滞在の日セルは予定として区別される` ／ `過去の滞在の日セルは履歴として区別される` ／ `「要確認」の予約がある日セルは要確認として区別される（v13 §5.2.3 TO-BE④）` ／ `滞在の無い日セルには区別が付かない`"
     },
     {
       "criterion": "A12 は全ロール（ゲストを含む）が閲覧でき、自分の滞在のみが出る",
       "origin": "issue",
       "basis": "v13 §5.2.5② 権限行（L683）／ v13 §6 ／ 画面設計.md §5（L477）",
-      "test": "A12 はゲストロールでも自分の滞在を表示し、他人の滞在は1件も含まれない"
+      "test": "許可側: tests/lodging-my-calendar.test.ts:`許可側: ロールで絞り込まない（ゲストの利用者でも自分の滞在は現れる）` ／ tests/db/room-availability-view.test.ts:`許可側: ゲストロールの利用者も自分の滞在を SELECT できる` ／ 拒否側: tests/lodging-my-calendar.test.ts:`拒否側: 他人の滞在はカレンダーに現れない`・`拒否側: 他人の滞在だけの日セルは遷移先も持たない（他人の滞在IDを露出させない）` ／ tests/db/room-availability-view.test.ts:`拒否側: ゲストロールの利用者に他人の滞在は1件も見えない`"
     },
     {
       "criterion": "全予約が日付軸で表示される",
       "origin": "issue",
       "basis": "v13 §5.2.5② 運営向け（L682）",
-      "test": "C10 は全予約をその滞在期間の各日セルに配置する"
+      "test": "tests/lodging-staff-calendar.test.ts:`予約は滞在期間の各日に現れる（退去日は含まない）` ／ `会員をまたいで全件が同じ日セルに並ぶ（本人分だけに絞らない）`"
     },
     {
       "criterion": "月表示と週表示を切り替えられる",
       "origin": "issue",
       "basis": "v13 §5.2.5②「月/週切替」／ v13 §9 #30-⑤",
-      "test": "C10 は `?view=week` で7日分、既定で当月分の日セルを描画する"
+      "test": "tests/lodging-staff-calendar.test.ts:`月表示は基準日の属する月の日数ぶんの日セルを返す` ／ `週表示は7日分の日セルを返す` ／ `週表示は基準日を含む週を返す`"
     },
     {
       "criterion": "「要確認」予約（＝備考欄に記載があり自動確定されなかった予約。判定基準は完全な空欄のみ）が、他の予約と区別できるよう強調表示される",
       "origin": "issue",
       "basis": "v13 §5.2.5② ／ v13 §5.2.3 TO-BE④・「「要確認」予約の見え方」／ v13 §9 #30-④",
-      "test": "C10 は備考が非空で自動確定されなかった予約を強調クラス付きで描画する"
+      "test": "tests/lodging-staff-calendar.test.ts:`備考に記載があり自動確定されなかった予約は要確認になる` ／ `備考が空欄で自動確定された予約は要確認にしない` ／ `「特になし」のような定型文言も要確認として扱う（判定基準は完全な空欄のみ）` ／ `要確認の予約は日セルの中で強調対象として印が付く` ／ `満室の日でも備考の無い予約は強調しない（満室表示と取り違えない）`"
     },
     {
       "criterion": "各予約について チェックイン日・チェックアウト日・部屋タイプ・割当部屋（確定していれば）・大人/子供人数・会員区分 が読める",
       "origin": "issue",
       "basis": "v13 §5.2.3「表示内容」",
-      "test": "C10 の1予約にはチェックイン日・チェックアウト日・部屋タイプ・割当部屋・大人/子供人数・会員区分が出る"
+      "test": "tests/lodging-staff-calendar.test.ts:`チェックイン日・チェックアウト日・部屋タイプ・割当部屋・大人子供人数・会員区分が読める` ／ `割当部屋が確定していなければ空で返す（別の値で埋めない）`"
     },
     {
       "criterion": "C10 は `admin` / `core_member` のみ到達でき、`member` / `guest` はサーバサイドで拒否される",
       "origin": "issue",
       "basis": "v13 §5.2.5② 権限行（L683）／ v13 §6 ／ 画面設計.md §5（L483）",
-      "test": "許可側: `admin` と `core_member` は C10 を開ける ／ 拒否側: `member` と `guest` は C10 をサーバサイドで拒否される（`requireStaff()` が `AccessDeniedError`）"
+      "test": "許可側: tests/lodging-staff-calendar.test.ts:`許可側: 管理者は宿泊予定カレンダーへ入れる`・`許可側: コアメンバーは宿泊予定カレンダーへ入れる` ／ 拒否側: `拒否側: 一般会員は宿泊予定カレンダーへ入れない`・`拒否側: ゲストは宿泊予定カレンダーへ入れない`・`拒否はサーバサイドで行う（ページが requireStaff() を通る ／ v13 §5.9.3）`・`経路がナビの表に登録されている（表に無い経路は誰でも素通りするため）`"
     },
     {
       "criterion": "C10 に会員の実名を表示しない（表示名はニックネーム／会員番号に留める）",
       "origin": "issue",
       "basis": "CLAUDE.md §7.1",
-      "test": "C10 の出力に会員の氏名が1文字も含まれない（表示名は `v_member_public.display_name` のみ）"
+      "test": "tests/lodging-staff-calendar.test.ts:`氏名を持つテーブル（member_profiles_private）を参照しない` ／ `氏名の列（full_name）を参照しない` ／ `表示名は公開ビュー（v_member_public）から取る` ／ `走査対象のソースが存在する（0件で素通りさせない）`"
     }
   ],
   "acceptanceDerived": false,
-  "updatedAt": "2026-09-25T12:11:52.583Z",
+  "updatedAt": "2026-09-25T12:22:46.442Z",
   "provisional": [
     {
       "question": "本人向けカレンダー（画面ID A12）を、正本どおり A6 マイログ（`/me`）内へ移すか、現状の `/reservations`（画面ID A11 宿泊予約）内に置いたままにするか",
