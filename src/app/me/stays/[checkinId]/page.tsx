@@ -5,6 +5,7 @@ import { Money } from "@/components/ui/Money";
 import { requireSignedIn } from "@/lib/auth/guard";
 import { fetchAccommodationTypes, fetchMyStay } from "@/lib/lodging/fetch-lodging";
 import { fetchMyOrders } from "@/lib/orders/fetch-orders";
+import { fetchMyApplications, type MyApplication } from "@/lib/quests/fetch-my-applications";
 import { toServingStatusDisplayLabel } from "@/lib/serving-status";
 
 /**
@@ -19,12 +20,25 @@ import { toServingStatusDisplayLabel } from "@/lib/serving-status";
  * 「権限がありません」と出すと、**その滞在IDが存在すること自体**を教えてしまう
  * （v13 §8 ／ CLAUDE.md §7.1）。
  *
- * ## クエストはまだ出さない
+ * ## 注文もクエストも「日付の重なり」で結ぶ
  *
- * 正本は詳細に「クエスト」も挙げているが、滞在と参加クエストを結ぶ導線は
- * WBS `4-*`（クエスト）側に無く、この画面から引ける関係が存在しない。
- * **空欄や推測で埋めず、出さない。** 取れるようになった時点で足す。
+ * 伝票（`orders` ／ `0019`）も受注申請（`quest_applications` ／ `0017`）も滞在IDを持たない。
+ * そのため両方とも**滞在期間に重なる日付**で拾う。関係テーブルを新設して結ぶのは
+ * 仕様（v13 §5.3）に無い構造を足すことになるため採らない。
  */
+/**
+ * 受注1件が「いつの仕事か」を表す日付（`YYYY-MM-DD`）を集める。
+ *
+ * 申請日（`applied_at`）は入れない。申請は滞在のずっと前に出せるため、
+ * それで拾うと滞在と関係のないクエストが詳細に並ぶ。
+ */
+function questDatesOf(application: MyApplication): string[] {
+  const workedDates = application.workLogs.map((log) => log.workedAt.slice(0, 10));
+  return application.scheduledStartAt === null
+    ? workedDates
+    : [application.scheduledStartAt.slice(0, 10), ...workedDates];
+}
+
 export default async function MyStayDetailPage({
   params,
 }: {
@@ -38,16 +52,27 @@ export default async function MyStayDetailPage({
     notFound();
   }
 
-  const [types, orders] = await Promise.all([fetchAccommodationTypes(), fetchMyOrders(viewer.memberId)]);
+  const [types, orders, applications] = await Promise.all([
+    fetchAccommodationTypes(),
+    fetchMyOrders(viewer.memberId),
+    fetchMyApplications(viewer.memberId),
+  ]);
   const roomTypeLabel =
     types.find((type) => type.roomType === stay.roomType)?.displayName ?? stay.roomType;
 
+  const isDuringStay = (date: string) => stay.checkInDate <= date && date <= stay.checkOutDate;
+
   // 滞在中に出した注文だけを並べる。日付で切るのは、伝票が滞在IDを持たないためである
   // （`orders` は購入者と時刻だけを持つ ／ `0019`）。
-  const ordersDuringStay = orders.filter((order) => {
-    const orderedOn = order.createdAt.slice(0, 10);
-    return stay.checkInDate <= orderedOn && orderedOn <= stay.checkOutDate;
-  });
+  const ordersDuringStay = orders.filter((order) => isDuringStay(order.createdAt.slice(0, 10)));
+
+  // クエストも同じ日付窓で拾う（v13 §5.2.5②「部屋・同伴人数・注文・クエスト」）。
+  // 作業日（`work_logs.worked_at`）と実行指示の予定日（`scheduled_start_at`）の
+  // **どちらかが滞在期間に重なれば**その滞在の仕事として並べる。報告前の受注が
+  // 落ちないよう予定日も見る（指示だけ出て報告がまだ、が滞在中の通常の状態である）。
+  const applicationsDuringStay = applications.filter((application) =>
+    questDatesOf(application).some(isDuringStay),
+  );
 
   return (
     <main className="mx-auto flex max-w-2xl flex-col gap-6 p-6">
@@ -119,6 +144,43 @@ export default async function MyStayDetailPage({
                 <span className="text-sm font-medium">
                   <Money priceYen={order.totalAmountYen} />
                 </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="flex flex-col gap-2">
+        <h2 className="text-lg font-bold">この滞在中のクエスト</h2>
+        {applicationsDuringStay.length === 0 ? (
+          <p className="text-sm text-neutral-600">この期間のクエストはありません。</p>
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {applicationsDuringStay.map((application) => (
+              <li
+                key={application.applicationId}
+                className="flex flex-col gap-1 rounded border border-neutral-200 bg-white p-3"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium">{application.questTitle}</span>
+                  <span className="rounded bg-neutral-100 px-2 py-0.5 text-xs">
+                    {application.status}
+                  </span>
+                </div>
+                {application.instructionPlace !== null && (
+                  <span className="text-sm text-neutral-600">
+                    場所: {application.instructionPlace}
+                  </span>
+                )}
+                {/* 報告の中身（写真・差戻し理由）は作業報告（A4）の関心。ここは日付だけに留める */}
+                {application.workLogs.length > 0 && (
+                  <span className="text-sm text-neutral-600">
+                    報告日: {application.workLogs.map((log) => log.workedAt.slice(0, 10)).join("・")}
+                  </span>
+                )}
+                <Link className="text-sm underline" href="/reports">
+                  作業報告へ
+                </Link>
               </li>
             ))}
           </ul>

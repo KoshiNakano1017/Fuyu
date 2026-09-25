@@ -145,7 +145,7 @@ export async function fetchStaysOverlapping(params: {
   const { data, error } = await supabase
     .from("check_ins")
     .select(
-      "checkin_id, member_id, room_type, check_in_date, check_out_date, adults_count, children_count, status, note",
+      "checkin_id, member_id, room_type, check_in_date, check_out_date, adults_count, children_count, status, note, reservation_source",
     )
     // 退去日は専有しないので、境界は `check_out_date > fromDate`（`>=` にすると
     // 前日に発った予約まで拾ってしまう）。
@@ -168,6 +168,7 @@ export async function fetchStaysOverlapping(params: {
     children_count: number;
     status: string;
     note: string | null;
+    reservation_source: string;
   }[];
 
   const [displayNames, assignedRoomNames] = await Promise.all([
@@ -187,11 +188,18 @@ export async function fetchStaysOverlapping(params: {
     status: row.status,
     note: row.note,
     assignedRoomName: assignedRoomNames.get(row.checkin_id) ?? null,
-    memberCategory: memberCategoryLabelOfReservation(),
+    memberCategory: memberCategoryLabelOfReservation(row.reservation_source),
   }));
 }
 
-/** 本人の予約（マイページの宿泊タブ ／ 画面ID A12 ／ WBS 3-8）。RLS が行を絞る。 */
+/**
+ * 本人の予約（マイページの宿泊タブ ／ 画面ID A12 ／ WBS 3-8）。RLS が行を絞る。
+ *
+ * **キャンセルは除く。** 運営の `fetchStaysOverlapping()` と残枠ビュー `v_room_availability`
+ * （`0015`）がどちらも `cancelled_at IS NULL` で絞っており、ここだけ残すと
+ * **取り消した予約が本人のカレンダーにだけ「予定」として残る**（v13 §5.2.2：
+ * キャンセルは物理削除せず `cancelled_at` で論理削除する ／ §9 #27）。
+ */
 export async function fetchMyStays(memberId: string): Promise<StayEntry[]> {
   const supabase = await createServerSupabaseClient();
 
@@ -201,6 +209,7 @@ export async function fetchMyStays(memberId: string): Promise<StayEntry[]> {
       "checkin_id, member_id, room_type, check_in_date, check_out_date, adults_count, children_count, status, note",
     )
     .eq("member_id", memberId)
+    .is("cancelled_at", null)
     .order("check_in_date", { ascending: false });
 
   if (error || !data) {
@@ -322,23 +331,38 @@ async function fetchMemberDisplayNames(
 /**
  * 予約1件の会員区分（C10 の表示 ／ v13 §5.2.3「表示内容」）。
  *
- * ## なぜ `member_type` から導かないのか
+ * ## 何から導くか ― 予約経路（`check_ins.reservation_source` ／ `0014` L144-146）
  *
  * 正本が定める会員区分は**料金の2値**（会員／非会員 ／ v13 §5.4.2②）だけで、
  * その判定は「**自己申告を使わずログイン状態から行う**」（v13 §5.2.3 の warning）。
- * これを実装したのが `rates.ts` の `memberCategoryOf(signedIn)` であり、**課金に使う唯一の規則**である。
+ * 予約時点のログイン状態を残している列は `reservation_source` である
+ * （`web_public` ＝ 公開予約ページ・**未ログイン** ／ v13 §5.2.4 の note）。
+ * そして同じ warning が「**未ログインの予約は常に非会員料金**」と定めている。
+ * したがって `web_public` は非会員、ログインが前提の `in_app` は会員になる。
+ *
+ * ## なぜ `member_type` から導かないのか
+ *
  * `member_type`（親方／街人（コア）／街人（一般）／ゲスト ＝ `0001` の CHECK）から別に導くと、
  * ゲストロールの会員に「非会員」と表示しながら**会員料金を請求する**食い違いが生まれる。
+ * 課金に使う唯一の規則は `rates.ts` の `memberCategoryOf(signedIn)` であり、ここもそれを通す。
  *
- * `check_ins.member_id` は NOT NULL（`0014`）＝カレンダーに並ぶ予約は必ず `members` の行を持つ。
- * したがってこの規則の下では常に「会員」になる。
- *
- * ⚠️ アカウントを持たない非会員予約の表し方は正本に無い。
- *    `QUESTIONS.md`「[2026-09-25] C10 の会員区分を何から導くか」に仮決定として起票済み。
+ * ⚠️ `staff_manual`（運営の手入力）と `google_form`（廃止済みフォームの過去データ）は、
+ *    予約者がログインしていたかを残していない。**推測で会員／非会員のどちらかに寄せず `null`**
+ *    にする（`StayEntry.memberCategory` の「引けなければ `null`」）。
+ *    この2経路の表し方は正本に無く、`QUESTIONS.md`
+ *    「[2026-09-25] C10 の会員区分を予約経路から導けない2経路（`staff_manual`・`google_form`）をどう表示するか」
+ *    に仮決定として起票してある。
  */
-function memberCategoryLabelOfReservation(): MemberCategoryLabel {
-  const hasMemberAccount = true;
-  return memberCategoryOf(hasMemberAccount) === "member" ? "会員" : "非会員";
+function memberCategoryLabelOfReservation(
+  reservationSource: string,
+): MemberCategoryLabel | null {
+  if (reservationSource === "web_public") {
+    return memberCategoryOf(false) === "member" ? "会員" : "非会員";
+  }
+  if (reservationSource === "in_app") {
+    return memberCategoryOf(true) === "member" ? "会員" : "非会員";
+  }
+  return null;
 }
 
 /**
