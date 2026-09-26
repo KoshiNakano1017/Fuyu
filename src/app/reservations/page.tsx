@@ -1,3 +1,4 @@
+import { MealPreOrderSection } from "@/components/lodging/MealPreOrderSection";
 import { ReservationForm } from "@/components/lodging/ReservationForm";
 import { MasterDataShortcut } from "@/components/nav/MasterDataShortcut";
 import { requireSignedIn } from "@/lib/auth/guard";
@@ -7,11 +8,15 @@ import {
   fetchAvailability,
   fetchMyStays,
 } from "@/lib/lodging/fetch-lodging";
+import {
+  fetchMealReservations,
+  fetchPreOrderableItems,
+} from "@/lib/lodging/meal-reservation-store";
 import { prefillFromStays } from "@/lib/lodging/reservation-intake";
 import { fetchStayTicketBalance } from "@/lib/lodging/stay-tickets";
 import { todayInJapan } from "@/lib/today";
 
-import { createReservationAction } from "./actions";
+import { createReservationAction, saveMealPreOrdersAction } from "./actions";
 
 /**
  * 宿泊予約（画面ID A11 ／ WBS 3-7）＋ 本人の宿泊予定・履歴（画面ID A12 ／ WBS 3-8）。
@@ -48,7 +53,8 @@ export default async function ReservationsPage() {
 
   // 基準日は日本時間で決める（`src/lib/today.ts`）。UTC で切ると深夜帯に前日の残枠が出る。
   const today = todayInJapan();
-  const [types, todayAvailability, myStays, rates, stayTicketBalance] = await Promise.all([
+  const [types, todayAvailability, myStays, rates, stayTicketBalance, mealItems] =
+    await Promise.all([
     fetchAccommodationTypes(),
     fetchAvailability({ fromDate: today, toDate: today }),
     fetchMyStays(viewer.memberId),
@@ -56,9 +62,20 @@ export default async function ReservationsPage() {
     fetchAccommodationRates(),
     // 宿泊券の充当（同節。**予約時点では消費しない**）
     fetchStayTicketBalance(viewer.memberId),
+    // カフェの事前予約（v13 §5.4.1b ／ WBS 3-5c）。選択肢は `is_pre_orderable` の商品だけ
+    fetchPreOrderableItems(),
   ]);
 
   const displayNameOf = new Map(types.map((type) => [type.roomType, type.displayName]));
+
+  // 事前予約の枠を出すのは「これから泊まる／泊まっている」滞在だけ（退館済み・取消は出さない）。
+  const upcomingStays = myStays.filter(
+    (stay) =>
+      stay.status === "pre_registered" || stay.status === "confirmed" || stay.status === "staying",
+  );
+  const mealReservations = await fetchMealReservations(
+    upcomingStays.map((stay) => stay.checkinId),
+  );
 
   return (
     <main className="mx-auto flex max-w-2xl flex-col gap-8 p-6">
@@ -82,6 +99,38 @@ export default async function ReservationsPage() {
           action={createReservationAction}
         />
       </section>
+
+      {/*
+        カフェの事前予約（v13 §5.4.1b ／ WBS 3-5c）。**予約フォームの直後に置く**。
+        滞在日数が決まってからでないと朝・昼・夜の枠を出せないため、
+        「予約する → 日別の食事を選ぶ」の順に並べている（§5.4.1b の [!note]：
+        朝ごはんはチェックイン翌朝であり、当日分だけでは成立しない）。
+      */}
+      {upcomingStays.length === 0 ? null : (
+        <section className="flex flex-col gap-3">
+          <h2 className="text-lg font-bold">食事の事前予約</h2>
+          <p className="text-xs text-neutral-600">
+            すべて任意です。会計は<strong>提供した時点</strong>で発生します（事前予約では請求されません）。
+            チェックイン後の変更は現地で承ります。
+          </p>
+          {upcomingStays.map((stay) => (
+            <MealPreOrderSection
+              key={stay.checkinId}
+              view={{
+                checkinId: stay.checkinId,
+                checkInDate: stay.checkInDate,
+                checkOutDate: stay.checkOutDate,
+                status: stay.status,
+                reservations: mealReservations.get(stay.checkinId) ?? [],
+              }}
+              items={mealItems}
+              // 本人が触れるのはチェックインまで（§5.4.1b「変更」）。判定の正はサーバ側にもある
+              canEdit={stay.status === "pre_registered" || stay.status === "confirmed"}
+              save={saveMealPreOrdersAction}
+            />
+          ))}
+        </section>
+      )}
 
       <section className="flex flex-col gap-2">
         <h2 className="text-lg font-bold">予定・履歴</h2>

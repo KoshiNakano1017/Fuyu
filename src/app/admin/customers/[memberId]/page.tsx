@@ -6,6 +6,7 @@ import { AdjustmentResolver } from "@/components/customers/AdjustmentResolver";
 import { CashbackPanel } from "@/components/customers/CashbackPanel";
 import { SlipEditor } from "@/components/customers/SlipEditor";
 import { StayChangeSection, type StayChangeView } from "@/components/customers/StayChangeSection";
+import { MealPreOrderSection } from "@/components/lodging/MealPreOrderSection";
 import { StayHistorySection } from "@/components/customers/StayHistorySection";
 import { StayTicketAdjuster } from "@/components/customers/StayTicketAdjuster";
 import { AccessDeniedError, requireAdmin } from "@/lib/auth/guard";
@@ -13,6 +14,10 @@ import { sumUnsettled } from "@/lib/billing/unsettled";
 import { fetchCustomerDetail } from "@/lib/customers/fetch-customers";
 import { fetchStayHistory } from "@/lib/customers/fetch-stay-history";
 import { fetchAccommodationRates, fetchAccommodationTypes } from "@/lib/lodging/fetch-lodging";
+import {
+  fetchMealReservations,
+  fetchPreOrderableItems,
+} from "@/lib/lodging/meal-reservation-store";
 import { memberCategoryOf } from "@/lib/lodging/rates";
 import {
   fetchChangeableStays,
@@ -38,6 +43,7 @@ import {
   fetchMemberOrigin,
 } from "@/lib/eumo/store";
 import { fetchStayingCheckIns } from "@/lib/orders/fetch-orders";
+import { saveMealPreOrdersAction } from "@/app/reservations/actions";
 import { todayInJapan } from "@/lib/today";
 
 import {
@@ -97,6 +103,7 @@ export default async function CustomerDetailPage({
     roomOptions,
     accommodationTypes,
     accommodationRates,
+    mealItems,
   ] = await Promise.all([
       fetchCustomerDetail(memberId),
       fetchStayingCheckIns(),
@@ -116,6 +123,8 @@ export default async function CustomerDetailPage({
       fetchRoomOptions(),
       fetchAccommodationTypes(),
       fetchAccommodationRates(),
+      // カフェの事前予約の選択肢（運営の代理編集 ／ v13 §5.4.1b の権限行 ／ WBS 3-5c）
+      fetchPreOrderableItems(),
     ]);
   if (customer === null) {
     notFound();
@@ -134,9 +143,10 @@ export default async function CustomerDetailPage({
   // 滞在の変更（WBS 3-10 ／ v13 §5.6.9）の表示材料。
   // ★ 夜ごとの形態は**変更履歴から復元する**。`check_ins.room_type`（現在の形態）で全泊を埋めると、
   //   滞在の途中で形態が変わった場合に滞在全体が新しい単価で塗り替わる（同節が禁じる振る舞い）。
-  const changeHistory = await fetchStayChangeHistory(
-    changeableStays.map((stay) => stay.checkinId),
-  );
+  const [changeHistory, mealReservations] = await Promise.all([
+    fetchStayChangeHistory(changeableStays.map((stay) => stay.checkinId)),
+    fetchMealReservations(changeableStays.map((stay) => stay.checkinId)),
+  ]);
   const today = todayInJapan();
   const stayChangeViews: StayChangeView[] = changeableStays.map((stay) => {
     const history = changeHistory.get(stay.checkinId) ?? [];
@@ -263,6 +273,31 @@ export default async function CustomerDetailPage({
         roomTypeLabels={roomTypeLabels}
         change={changeStayAction}
       />
+
+      {/*
+        カフェの事前予約（v13 §5.4.1b ／ WBS 3-5c）。運営は**滞在中も代理で直せる**（同節の権限行）。
+        本人の経路はチェックインまでで閉じるため、現地での追加・取消はここから行う。
+      */}
+      {changeableStays.length === 0 ? null : (
+        <section className="flex flex-col gap-3">
+          <h2 className="text-xl font-bold">食事の事前予約</h2>
+          {changeableStays.map((stay) => (
+            <MealPreOrderSection
+              key={stay.checkinId}
+              view={{
+                checkinId: stay.checkinId,
+                checkInDate: stay.checkInDate,
+                checkOutDate: stay.checkOutDate,
+                status: stay.status,
+                reservations: mealReservations.get(stay.checkinId) ?? [],
+              }}
+              items={mealItems}
+              canEdit
+              save={saveMealPreOrdersAction}
+            />
+          ))}
+        </section>
+      )}
 
       <section className="flex flex-col gap-3">
         <h2 className="text-xl font-bold">注文履歴</h2>

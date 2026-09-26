@@ -11,7 +11,23 @@ import {
   requestedNights,
   reservationDenialMessage,
 } from "@/lib/lodging/reservation-intake";
-import { fetchCapacities, fetchOtherStayNights } from "@/lib/lodging/stay-change-store";
+import {
+  fetchMealReservations,
+  fetchPreOrderableItems,
+  saveMealSlot,
+} from "@/lib/lodging/meal-reservation-store";
+import {
+  decideMealEdit,
+  indexByDateAndSlot,
+  mealDaysForStay,
+  mealEditDenialMessage,
+} from "@/lib/lodging/meal-reservations";
+import {
+  fetchCapacities,
+  fetchOtherStayNights,
+  fetchStayForChange,
+  fetchStayOwner,
+} from "@/lib/lodging/stay-change-store";
 import { findFullNight } from "@/lib/lodging/stay-changes";
 import { fetchStayTicketBalance } from "@/lib/lodging/stay-tickets";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
@@ -139,4 +155,114 @@ export async function createReservationAction(
   revalidatePath("/staff/calendar");
   revalidatePath("/staff/checkins");
   return { status: "done", message: describeReservationResult(decision.plan) };
+}
+
+/**
+ * カフェの事前予約注文の保存（WBS 3-5c ／ v13 §5.4.1b）。
+ *
+ * ## 本人の画面と運営の画面で同じ入口を使う
+ *
+ * §5.4.1b の権限は「本人（自身の予約分）／運営は全件参照・代理編集可」である。
+ * 判定（`decideMealEdit()`）が本人・運営の違いを持っているので、Action は1本で足りる。
+ * 入口を2つに分けると、片方だけに条件を足す取りこぼしが起きる。
+ *
+ * ## 枠ごとに保存し、変わっていない枠は触らない
+ *
+ * フォームは滞在日 × 区分ぶんの選択を全部送ってくる。毎回すべて UPDATE すると、
+ * 触っていない枠の `updated_at` まで動いて「誰がいつ変えたか」が読めなくなる。
+ *
+ * ⚠️ **伝票（`orders`）は作らない。** 事前予約の時点で伝票を起こすと、まだ提供していない金額が
+ * 未会計へ前倒しで載る（§5.4.1b の [!important]）。変換は提供操作の時点＝WBS `6-5` の責務である。
+ */
+export async function saveMealPreOrdersAction(
+  _prev: SubmitState,
+  formData: FormData,
+): Promise<SubmitState> {
+  const viewer = await readViewer();
+  if (!viewer.signedIn) {
+    return { status: "error", message: MESSAGE.denied };
+  }
+
+  const checkinId = String(formData.get("checkinId") ?? "").trim();
+  const [stay, owner, items] = await Promise.all([
+    fetchStayForChange(checkinId),
+    fetchStayOwner(checkinId),
+    fetchPreOrderableItems(),
+  ]);
+  if (stay === null || owner === null) {
+    return { status: "error", message: "対象の滞在が見つかりません。" };
+  }
+
+  const existingByKey = indexByDateAndSlot(
+    (await fetchMealReservations([checkinId])).get(checkinId) ?? [],
+  );
+  const isOwner = owner === viewer.memberId;
+  let changed = 0;
+
+  for (const day of mealDaysForStay(stay)) {
+    for (const slot of day.slots) {
+      const rawItem = formData.get(`item_${day.date}_${slot}`);
+      if (rawItem === null) {
+        continue; // その枠はフォームに無い（画面が出していない）
+      }
+      const menuItemId = String(rawItem).trim() === "" ? null : String(rawItem).trim();
+      const quantity = Number.parseInt(String(formData.get(`qty_${day.date}_${slot}`) ?? "1"), 10);
+      const existing = existingByKey.get(`${day.date}_${slot}`) ?? null;
+
+      // 変わっていない枠は触らない（`updated_at` を動かさない）
+      const unchanged =
+        (existing?.menuItemId ?? null) === menuItemId &&
+        (menuItemId === null || existing?.quantity === quantity);
+      if (unchanged) {
+        continue;
+      }
+
+      const item = menuItemId === null
+        ? null
+        : (items.find((candidate) => candidate.menuItemId === menuItemId) ?? undefined);
+      if (item === undefined) {
+        return { status: "error", message: mealEditDenialMessage("unknown_item") };
+      }
+
+      const decision = decideMealEdit({
+        actorRole: viewer.role,
+        isOwner,
+        stay,
+        date: day.date,
+        slot,
+        item,
+        quantity,
+        existing,
+      });
+      if (!decision.allowed) {
+        return { status: "error", message: mealEditDenialMessage(decision.reason) };
+      }
+
+      const saved = await saveMealSlot({
+        checkinId,
+        servedOn: day.date,
+        mealSlot: slot,
+        menuItemId,
+        quantity,
+        existing,
+      });
+      if (!saved) {
+        return { status: "error", message: MESSAGE.failed };
+      }
+      changed += 1;
+    }
+  }
+
+  revalidatePath("/reservations");
+  revalidatePath(`/admin/customers/${owner}`);
+  // 日別の食数サマリー（画面ID C10）が変わる。前日に翌日の仕込み数を出すのが本機能の価値である
+  revalidatePath("/staff/calendar");
+
+  return {
+    status: "done",
+    message:
+      changed === 0
+        ? "変更はありませんでした。"
+        : `食事の予約を保存しました（${changed}件を更新）。会計は提供した時点で発生します。`,
+  };
 }
