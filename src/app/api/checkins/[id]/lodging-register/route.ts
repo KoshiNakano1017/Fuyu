@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 
 import { isStaff, readViewer } from "@/lib/auth/session";
-import { submitLodgingRegisterEntry } from "@/lib/lodging/register";
+import {
+  submitCompanionRegisterEntry,
+  submitLodgingRegisterEntry,
+} from "@/lib/lodging/register";
 
 type RouteContext = {
   params: Promise<{ id: string }>;
@@ -29,7 +32,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Nex
 
   const { id: checkinId } = await context.params;
 
-  const result = await submitLodgingRegisterEntry({
+  const shared = {
     checkinId,
     recordedByMemberId: viewer.memberId,
     fullNameConfirmed: body.full_name_confirmed === true,
@@ -39,7 +42,21 @@ export async function POST(request: Request, context: RouteContext): Promise<Nex
     address: typeof body.address === "string" ? body.address : "",
     previousLocation: typeof body.previous_location === "string" ? body.previous_location : "",
     nextDestination: typeof body.next_destination === "string" ? body.next_destination : null,
-  });
+  };
+
+  // `is_representative` の既定は true（`API設計.md` §3-5 の schema default）。
+  // **`false` と明示されたときだけ**同伴者として扱う。未指定を同伴者側へ倒すと、
+  // 古い呼び出し元が代表者の名簿を作れなくなる。
+  const isCompanion = body.is_representative === false;
+
+  const result = isCompanion
+    ? await submitCompanionRegisterEntry({
+        ...shared,
+        // 同伴者は1チェックインに複数並ぶため、訂正の対象は `entry_id` で明示させる
+        // （代表者は「最新の1行」で決まるが、同伴者は決まらない）。
+        entryId: typeof body.entry_id === "string" ? body.entry_id : null,
+      })
+    : await submitLodgingRegisterEntry(shared);
 
   if (result.ok) {
     return NextResponse.json({ entryId: result.entryId }, { status: result.created ? 201 : 200 });
@@ -57,6 +74,11 @@ export async function POST(request: Request, context: RouteContext): Promise<Nex
   }
   if (result.reason === "checkin_not_found") {
     return NextResponse.json({ error: "指定されたチェックインが見つかりません。" }, { status: 404 });
+  }
+  // 別のチェックインの名簿・代表者の行を `entry_id` で指した場合もここへ来る。
+  // 403 ではなく 404 を返すのは、他人の名簿の存在を当てられるようにしないためである。
+  if (result.reason === "entry_not_found") {
+    return NextResponse.json({ error: "指定された名簿行が見つかりません。" }, { status: 404 });
   }
   if (result.reason === "denied") {
     return NextResponse.json({ error: "この操作を行う権限がありません。" }, { status: 403 });

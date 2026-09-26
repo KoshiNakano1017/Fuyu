@@ -41,10 +41,10 @@ export type Quest = {
   recruitCount: number;
   /**
    * 募集枠を占有している受注申請の件数。取り下げ（`キャンセル`）だけを数えない
-   * （数え方の正本は 0041 の `quest_occupied_application_count()`）。
+   * （数え方の正本は 0043 の `quest_occupied_application_count()`）。
    *
    * ⚠️ **DB から渡ってこない。** 件数は `v_quest_board` が返さない（返すと
-   *    `GET /rest/v1/v_quest_board?select=...` で全クエストの申請件数を直接読めるため／0041 ③）。
+   *    `GET /rest/v1/v_quest_board?select=...` で全クエストの申請件数を直接読めるため／0043 ③）。
    *    充足の有無だけが `recruitmentFull` として渡る。この列は、件数から可否を導く
    *    テスト・フィクスチャのための入力であり、省略された場合は `recruitCount`
    *    （＝満了）として扱う（`isRecruitmentFull()`）。
@@ -127,11 +127,11 @@ export function lacksRequiredCertification(quest: Quest, viewer: QuestBoardViewe
  * 募集人数が埋まっているか（v13 §5.3 note L844「募集人数の**範囲で**受注可」）。
  *
  * 判定の入口はこの関数1本のまま（v13 §5.9.3「二重管理しない」）。入力だけが2通りある:
- *   ① `recruitmentFull` — `v_quest_board` が返す判定結果。DB は件数を明かさない（0041 ③）
+ *   ① `recruitmentFull` — `v_quest_board` が返す判定結果。DB は件数を明かさない（0043 ③）
  *   ② `applicationCount` — 件数から導く。境界値をテストで固定するための入力
  *
  * `>=` で比べる。`===` だと、既に溢れているクエスト（運用ミス・`recruit_count` の
- * 引き下げで起こりうる）にだけ枠が開く。DB 側の上限ガード（0041 の
+ * 引き下げで起こりうる）にだけ枠が開く。DB 側の上限ガード（0043 の
  * `quest_applications_guard_capacity()`）も同じ不等号で書いてある。
  *
  * どちらも無ければ「満了」に倒す。上限は厳しい側が既定でなければならない。

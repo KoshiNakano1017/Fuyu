@@ -1,5 +1,5 @@
 -- =============================================================================
--- 0041_quest_recruit_capacity.sql — 受注申請を募集人数の範囲で閉じる
+-- 0043_quest_recruit_capacity.sql — 受注申請を募集人数の範囲で閉じる
 --
 --   WBS  : 5-2（受注申請・運営審査・実行指示 ／ Issue #167）
 --   根拠 : 正本 v13 §5.3 note L844「1クエスト＝運営が指定した**募集人数の範囲で**受注可」、
@@ -201,7 +201,7 @@ CREATE TRIGGER trg_quest_applications_guard_capacity
 
 COMMENT ON COLUMN public.quest_applications.member_id IS
   '受注者。1クエストに複数行を許容する（上限は quests.recruit_count）。'
-  '上限は 0041 の quest_applications_guard_capacity() が DB 側で強制する（v13 §5.3 note L844）。';
+  '上限は 0043 の quest_applications_guard_capacity() が DB 側で強制する（v13 §5.3 note L844）。';
 
 
 -- =============================================================================
@@ -247,7 +247,7 @@ SELECT
 
   q.core_only_reward,
 
-  -- ▼ 0041 追加（末尾）。受注申請の可否判定の材料。
+  -- ▼ 0043 追加（末尾）。受注申請の可否判定の材料。
   --   `recruit_count` は 0012 の列単位 GRANT で既に authenticated へ開いている列であり、
   --   ここで新たに見せるものは無い。増えるのは「埋まっているか」の1ビットだけである。
   q.recruit_count,
@@ -267,4 +267,4 @@ COMMENT ON VIEW public.v_quest_board IS
   'クエストボード用。報酬額・指示内容は (a) ゲスト×施錠中、(b) core_only_reward×非スタッフ、'
   'のいずれかで NULL を返す（v13 §5.10.6）。行は隠さない。security_invoker=false は意図的'
   '（0012 で0008から反転）。recruit_count / is_recruitment_full は受注申請の可否判定の材料であり'
-  '（0041 ／ v13 §5.3 note）、申請件数も申請者も返さない。担当者の列を足すときも同じ CASE を通すこと。';
+  '（0043 ／ v13 §5.3 note）、申請件数も申請者も返さない。担当者の列を足すときも同じ CASE を通すこと。';

@@ -29,9 +29,9 @@ type QuestBoardRow = {
   description: string | null;
   recruit_count: number;
   /**
-   * 募集枠が埋まっているか（0041 の `v_quest_board.is_recruitment_full`）。
+   * 募集枠が埋まっているか（0043 の `v_quest_board.is_recruitment_full`）。
    * ビューは**件数を返さない**。返すと PostgREST 経由で全クエストの申請件数を
-   * 直接読めるため、DB 側で真偽値まで縮めてある（0041 ③）。
+   * 直接読めるため、DB 側で真偽値まで縮めてある（0043 ③）。
    */
   is_recruitment_full: boolean | null;
 };
@@ -53,7 +53,7 @@ function toQuest(row: QuestBoardRow): Quest {
     description: row.description,
     recruitCount: row.recruit_count,
     // 読めなかった場合は「満了」に倒す。上限は厳しい側が既定でなければならない
-    // （DB 側の 0041 のガードが最後の砦だが、画面のボタンだけが開くのを避ける）。
+    // （DB 側の 0043 のガードが最後の砦だが、画面のボタンだけが開くのを避ける）。
     recruitmentFull: row.is_recruitment_full ?? true,
   };
 }

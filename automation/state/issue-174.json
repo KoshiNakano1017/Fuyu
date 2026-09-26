@@ -1,0 +1,133 @@
+{
+  "version": 1,
+  "issue": 174,
+  "pr": null,
+  "branch": null,
+  "phase": "plan",
+  "risk": "high",
+  "attempts": {
+    "infra": 0,
+    "verify": 0,
+    "review": 0
+  },
+  "lastFingerprint": {
+    "infra": null,
+    "verify": null,
+    "review": null
+  },
+  "repeatedFingerprint": {
+    "infra": 0,
+    "verify": 0,
+    "review": 0
+  },
+  "tokens": {
+    "input": 118,
+    "output": 69106,
+    "costUsd": 6.1690565
+  },
+  "testHashes": {},
+  "specRefs": [
+    {
+      "ref": "v13 §5.2.2",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "440-459"
+    },
+    {
+      "ref": "v13 §7",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "2538-2542"
+    },
+    {
+      "ref": "v13 §6",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "2344"
+    },
+    {
+      "ref": "v13 §5.2.5",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "632-683"
+    },
+    {
+      "ref": "v13 §5.6.8",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "1212-1235"
+    }
+  ],
+  "acceptance": [
+    {
+      "criterion": "管理者（admin）・コアメンバー（core_member）が顧客管理画面から、チェックイン前の予約をキャンセル／ノーショーとして取り消せる",
+      "origin": "issue",
+      "basis": "v13 §5.2.2 L446-447",
+      "test": "管理者は顧客管理画面の宿泊タブから入館前の予約をキャンセルできる／コアメンバーは顧客管理画面の宿泊タブから入館前の予約をキャンセルできる"
+    },
+    {
+      "criterion": "街人（member）・ゲスト（guest）はこの取り消し操作を実行できない",
+      "origin": "issue",
+      "basis": "v13 §6 L2344",
+      "test": "街人は顧客管理画面のキャンセル操作を実行できない／ゲストは顧客管理画面のキャンセル操作を実行できない"
+    },
+    {
+      "criterion": "入館済みの滞在（staying / checked_out）は取り消しの対象にならない",
+      "origin": "issue",
+      "basis": "v13 §5.2.2 L447",
+      "test": "滞在中（staying）の滞在はキャンセルできない／チェックアウト済み（checked_out）の滞在はキャンセルできない"
+    },
+    {
+      "criterion": "取り消した予約は check_ins の行として残り、cancelled_at ／ cancel_reason_type ／ cancel_reason ／ cancelled_by の4項目が記録される",
+      "origin": "issue",
+      "basis": "v13 §5.2.2 L448 ／ v13 §7 L2540",
+      "test": "キャンセルした予約には cancelled_at・cancel_reason_type・cancel_reason・cancelled_by の4項目が記録される"
+    },
+    {
+      "criterion": "authenticated ロールは check_ins に対する DELETE 権限を持たない",
+      "origin": "issue",
+      "basis": "v13 §7 L2541",
+      "test": "authenticated ロールは check_ins の行を DELETE できない"
+    },
+    {
+      "criterion": "種別が 会員都合 / ノーショー / 運営都合 のいずれでもない場合、取り消しは拒否され行は変化しない",
+      "origin": "issue",
+      "basis": "v13 §7 L2540",
+      "test": "値域外のキャンセル種別は拒否され、予約の行は変化しない"
+    },
+    {
+      "criterion": "自由記述の理由が空（空白文字のみを含む）の場合、取り消しは拒否され行は変化しない",
+      "origin": "issue",
+      "basis": "v13 §5.2.2 L449",
+      "test": "空白文字のみの理由は拒否され、予約の行は変化しない"
+    },
+    {
+      "criterion": "取り消しと同時に、その予約に紐づく room_assignments のうち ended_at IS NULL の行に ended_at が入る",
+      "origin": "issue",
+      "basis": "v13 §5.2.2 L450 ／ v13 §7 L2542",
+      "test": "キャンセルすると紐づく room_assignments の ended_at IS NULL の行に ended_at が入る"
+    },
+    {
+      "criterion": "取り消した予約は v_room_availability の占有から外れ、該当日程の残枠が取り消し前より増える",
+      "origin": "issue",
+      "basis": "v13 §5.2.5 L644",
+      "test": "キャンセルすると該当日程の v_room_availability の残枠が1つ増える"
+    },
+    {
+      "criterion": "取り消しによって stay_ticket_transactions の行は増えも減りもしない",
+      "origin": "issue",
+      "basis": "v13 §5.2.2 L454",
+      "test": "キャンセルしても stay_ticket_transactions の行数は変わらない"
+    },
+    {
+      "criterion": "本人が自分の宿泊履歴で、取り消された滞在を「運営によりキャンセル」・キャンセル日時・理由の3点で読める",
+      "origin": "issue",
+      "basis": "v13 §5.2.2 L451",
+      "test": "本人は自分の宿泊履歴でキャンセルされた滞在の「運営によりキャンセル」・日時・理由を読める"
+    },
+    {
+      "criterion": "顧客管理画面の「宿泊」タブで、取り消された滞在が取消線で表示され、行そのものは一覧から消えない",
+      "origin": "issue",
+      "basis": "v13 §7 L2541 ／ v13 §5.6.8 L1216",
+      "test": "顧客管理画面の宿泊タブでキャンセル済みの滞在は取消線で表示される／顧客管理画面の宿泊タブでキャンセル済みの滞在も一覧に残る"
+    }
+  ],
+  "acceptanceDerived": false,
+  "updatedAt": "2026-09-25T17:13:03.507Z",
+  "provisional": []
+}

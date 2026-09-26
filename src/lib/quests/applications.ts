@@ -20,7 +20,7 @@ export type CreateApplicationResult =
 /** 一意制約違反（`uq_quest_app_per_member`）。 */
 const UNIQUE_VIOLATION = "23505";
 
-/** CHECK 相当の拒否。0041 の上限ガードがこの SQLSTATE で落とす。 */
+/** CHECK 相当の拒否。0043 の上限ガードがこの SQLSTATE で落とす。 */
 const CHECK_VIOLATION = "23514";
 
 /**

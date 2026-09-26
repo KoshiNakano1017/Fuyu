@@ -139,7 +139,7 @@ export async function applyToQuestAction(
  * 登録が通らなかった理由を文言に写す（`applyToQuestAction` の下位問題）。
  *
  * 二重申請だけは別の文言でよい。本人が自分の状態を知るだけで、クエストの内情は漏れない。
- * それ以外（`unavailable` ＝ 0041 の上限ガードに当たった場合を含む）は、
+ * それ以外（`unavailable` ＝ 0043 の上限ガードに当たった場合を含む）は、
  * ゲート拒否と**同じ一律の文言**にする（v13 §5.10.6 末尾）。
  */
 function applyDenialMessage(
