@@ -16,6 +16,35 @@
 
 ## バックログ
 
+## [2026-09-26] リリース前環境設定 Step 4〜7 をエージェントで実施 — DONE（残2件はオーナー判断）
+
+オーナー指示「Step 1〜3 まで完了、Step 4〜7 はすべて Claude のエージェントで自律的に実装して、高リスクでも」。
+手順と結果の詳細は `docs/operations/リリース前環境設定_オーナー作業手順書.md` §2-1（本 PR で追記）。
+
+**やったこと**
+
+- **Step 4**: dev Supabase へ `0027`〜`0042`・`0102`・`0103` の18本を適用。
+  ⚠️ `0021`〜`0026` は**適用済みなのに記録が無い**状態だったため `migration repair` で是正してから push した
+  （そのまま `--include-all` すると `CREATE POLICY` が「既にある」で落ちる）。
+  `media_assets` ほか8表が PostgREST から見えるようになった
+- **Step 5**: メディアの自動処理を実機で疎通。`eventarc.eventReceiver` に加えて
+  **`pubsub.publisher`（GCSサービスエージェント）・`run.invoker`（enqueue）・`iam.serviceAccountUser`（自分自身への actAs）**の3件が不足していた。
+  さらに **CloudEvent 関数が HTTP シグネチャでデプロイされていた**ため全イベントが無視されていた
+  （`GOOGLE_FUNCTION_SIGNATURE_TYPE=cloudevent` を build env へ。コード修正は不要）
+- **Step 6**: `NEXT_PUBLIC_CONCIERGE_ADMIN_URL` を Secret → **Config**、Node を 24.x → **20.x**。
+  ⚠️ **反映は次のデプロイから**（Hobby の1日100デプロイ上限に当たった）
+- **Step 7**: 13画面をブラウザで確認。すべて実データで描画・**コンソールエラー0**・未ログインの保護経路9本は 307
+
+**見つかった要対応（2件）**
+
+1. 🟥 **`accommodation_rates` が0行** — 予約画面の見積りが「単価未登録」になり、**宿泊費が会計に載らない**。
+   WBS `3-9` の残作業。リリースまでに料金表の投入が要る
+2. 🟥 **マイグレーション連番の衝突**（`0041` が2本）。DB は巻き戻って無事だったが、
+   **CI の `check_migrations.py` をすり抜けている**。別セッションが `0043` へ採番し直して解消済みだが、
+   すり抜けた理由の調査が要る
+
+**残（オーナー判断）**: ①Vercel を Pro にするか（デプロイ上限・WAF R2）②`NEXT_PUBLIC_CONCIERGE_ADMIN_URL` の値が
+`line-rag-admin` の Cloud Run URL でよいか（Secret 型の旧値は読み出せないため入れ直した）
 ## [2026-09-26] 自律ループが起票直後に止まる2つの原因（Issue #193・#194） — DONE
 
 オーナー指示「3点を片付けてループを回す」の一環でスイープを起動したところ、払い出した2件が
