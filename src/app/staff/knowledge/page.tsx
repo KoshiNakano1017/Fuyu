@@ -1,9 +1,11 @@
 import { AccessDenied } from "@/components/auth/AccessDenied";
 import { ConciergeAdminLink } from "@/components/concierge/ConciergeAdminLink";
+import { KnowledgeSearch } from "@/components/knowledge/KnowledgeSearch";
 import { AccessDeniedError, requireStaff } from "@/lib/auth/guard";
 
 /**
- * ナレッジ登録の導線（B9 店員タブレット ／ WBS `9-2` line-rag-bot管理画面への導線（外部リンクのみ））。
+ * ナレッジ登録の導線（B9 店員タブレット ／ WBS `9-2` line-rag-bot管理画面への導線（外部リンクのみ））
+ * ＋ **横断セマンティック検索**（WBS `9-1` アプリ内の横断セマンティック検索）。
  *
  * **中身は外部リンク1つだけ。** 登録フォームもエスカレーション一覧も API 連携も
  * アプリ本体には作らず、浮遊街コンシェルジュ（line-rag-bot）の Streamlit 管理画面で完結する
@@ -13,6 +15,15 @@ import { AccessDeniedError, requireStaff } from "@/lib/auth/guard";
  * ナビから消えていても URL は叩けるので、**ナビの非描画とは別に**ここで判定する
  * （v13 §5.9.3「DOM非表示は認可ではない」）。判定が済むまで本体を組み立てないため、
  * 権限外の利用者に導線が一瞬見えることもない（§5.9.4）。
+ *
+ * ## なぜ横断検索を同じ画面に置くのか
+ *
+ * v13 §5.9.5 は常時ナビを7項目までに抑えることを要件にしており、**新しいタブを足せない**。
+ * 「ナレッジを扱う画面」はここ1枚なので、探す側（`9-1`）と登録する側（`9-2`）を同居させる。
+ * ⚠️ `AREAS`（`src/lib/auth/navigation.ts`）へ行を足さないこと。
+ *
+ * 検索は `searchKnowledge()` を通す。**スコープ（Tier・公開範囲・削除追随）は DB 関数側**に
+ * 固定してあり、この画面は条件を1つも渡さない（`CONSOLIDATED_DECISIONS.md` §17-6 #5）。
  */
 export default async function StaffKnowledgePage() {
   try {
@@ -37,6 +48,10 @@ export default async function StaffKnowledgePage() {
         別タブで開き、コンシェルジュ側のアカウントでログインしてください。
       </p>
       <ConciergeAdminLink />
+
+      <hr className="border-neutral-200" />
+
+      <KnowledgeSearch />
     </main>
   );
 }

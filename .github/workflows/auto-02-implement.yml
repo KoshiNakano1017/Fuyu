@@ -367,7 +367,8 @@ jobs:
         run: |
           set -euo pipefail
           KIND="${KIND:-infra}"
-          if [ "$KIND" = "spec" ]; then
+          # 2026-09-26 追加: infra-exhausted（同一の基盤エラーが3回続いた）はオーナー判断へ落とす（Issue #147）
+          if [ "$KIND" = "spec" ] || [ "$KIND" = "infra-exhausted" ]; then
             NEW_LABEL="auto:blocked"
           else
             NEW_LABEL="auto:retry"

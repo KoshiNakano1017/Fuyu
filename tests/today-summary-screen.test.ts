@@ -135,3 +135,25 @@ describe("買い物リストの登録はモーダル1枚で完結する入口（
     expect(cards).not.toContain("ShoppingRegisterForm");
   });
 });
+
+describe("Uii流通量のカードは累計であることを明示する（v13 §9 #69 の警告）", () => {
+  test("見出しに「累計」と書く", () => {
+    // 他の4枚は「今日の実数」なので、軸が違うことを書かないと当日分と誤読される。
+    expect(read()).toContain("Uii流通量（累計）");
+  });
+
+  test("★ 残高合計ではないことを断る", () => {
+    expect(read()).toContain("残高合計でもない");
+  });
+
+  test("数え方は純関数から取る", () => {
+    expect(readCode()).toContain("sumCirculatedUii(orders)");
+  });
+
+  test("★ 円から Uii を計算し直さない（保存値を足す）", () => {
+    // `Money` は円から Uii を導くため、ここで使うと伝票の合計と一致しなくなる。
+    const code = readCode();
+    const card = code.slice(code.indexOf("Uii流通量"));
+    expect(card.slice(0, 400)).not.toContain("<Money");
+  });
+});

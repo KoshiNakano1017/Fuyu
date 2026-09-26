@@ -17,6 +17,7 @@ import {
   countUnhandledQuestCandidates,
   isMorningMeetingRecorded,
   morningMeetingLabel,
+  sumCirculatedUii,
 } from "@/lib/dashboard/today-summary";
 
 const TODAY = "2026-09-26";
@@ -107,5 +108,33 @@ describe("AI 起案候補は未処理だけを数える", () => {
 
   test("候補が空の議事録があっても落ちない", () => {
     expect(countUnhandledQuestCandidates([{ candidates: [] }])).toBe(0);
+  });
+});
+
+describe("Uii流通量は累計（v13 §9 #69 ／ 2026-09-26 オーナー確定）", () => {
+  test("保存済みの Uii を足す（円から計算し直さない）", () => {
+    expect(
+      sumCirculatedUii([
+        { status: "精算済み", totalAmountUii: 2400 },
+        { status: "未会計", totalAmountUii: 800 },
+      ]),
+    ).toBe(3200);
+  });
+
+  test("★ 未会計も数える（会計ステータスは回収の話であって取引の有無ではない）", () => {
+    expect(sumCirculatedUii([{ status: "未会計", totalAmountUii: 800 }])).toBe(800);
+  });
+
+  test("★ 取消だけを除く（取引そのものが無かったことにする区分）", () => {
+    expect(
+      sumCirculatedUii([
+        { status: "取消", totalAmountUii: 5000 },
+        { status: "精算済み", totalAmountUii: 100 },
+      ]),
+    ).toBe(100);
+  });
+
+  test("1件も無ければ0", () => {
+    expect(sumCirculatedUii([])).toBe(0);
   });
 });

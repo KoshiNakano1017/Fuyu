@@ -1,7 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 
 import { readGeminiApiKey, redactApiKeys } from "./env";
-import type { StructuredTextRequest, TextAiClient } from "./types";
+import type { EmbeddingAiClient, StructuredTextRequest, TextAiClient } from "./types";
 
 /**
  * Gemini のテキスト用クライアント。**Gemini の SDK を import するのはこのファイルだけ**
@@ -57,4 +57,64 @@ function parseStructuredJson<T>(jsonText: string, schemaName: string): T {
   } catch {
     throw new Error(`Gemini の応答を "${schemaName}" の JSON として解釈できませんでした。`);
   }
+}
+
+/**
+ * 埋め込みのモデルと次元。**`knowledge_chunks.embedding` の `vector(768)` と対である。**
+ *
+ * 768 に揃える理由は `0100` のコメントのとおり、`line-rag-bot`（`gemini-embedding-001` /
+ * 768次元）と**同一のベクトル空間**を共有するためである（v13 §9 #31 の 2026-09-11 限定改訂）。
+ * 次元を変えると全件再埋め込みになり、pgvector の HNSW も 2000 次元までしか張れない。
+ */
+export const EMBEDDING_MODEL = "gemini-embedding-001";
+export const EMBEDDING_DIMENSIONS = 768;
+
+/**
+ * Gemini の埋め込みクライアント。**SDK を import するのはこのファイルだけ**（v13 §9 #45）。
+ *
+ * `outputDimensionality` を明示するのは、モデルの既定次元が 768 とは限らないためである。
+ * 既定に任せると、モデルの更新でベクトル空間が黙って変わり、**既存の索引と新しいチャンクの
+ * 距離が比較できなくなる**（検索結果が静かに壊れ、例外は出ない）。
+ * 受け取った次元もその場で確かめ、違えば投影を止める。
+ */
+export function createGeminiEmbeddingClient(): EmbeddingAiClient {
+  return {
+    dimensions: EMBEDDING_DIMENSIONS,
+    model: EMBEDDING_MODEL,
+
+    async embed(texts: readonly string[]): Promise<number[][]> {
+      if (texts.length === 0) {
+        return [];
+      }
+
+      const client = new GoogleGenAI({ apiKey: readGeminiApiKey() });
+
+      const response = await client.models
+        .embedContent({
+          model: EMBEDDING_MODEL,
+          contents: [...texts],
+          config: { outputDimensionality: EMBEDDING_DIMENSIONS },
+        })
+        .catch((error: unknown) => {
+          throw new Error(redactApiKeys(`Gemini の埋め込み呼び出しに失敗しました: ${String(error)}`));
+        });
+
+      const vectors = (response.embeddings ?? []).map((embedding) => embedding.values ?? []);
+
+      if (vectors.length !== texts.length) {
+        throw new Error(
+          `埋め込みの件数が入力と合いません（入力 ${texts.length}件 / 応答 ${vectors.length}件）。`,
+        );
+      }
+      for (const vector of vectors) {
+        if (vector.length !== EMBEDDING_DIMENSIONS) {
+          // 次元が違うベクトルを保存すると、以後の近傍検索が黙って壊れる。ここで止める。
+          throw new Error(
+            `埋め込みの次元が ${EMBEDDING_DIMENSIONS} ではありません（${vector.length} 次元）。`,
+          );
+        }
+      }
+      return vectors;
+    },
+  };
 }
