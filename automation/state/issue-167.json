@@ -1,0 +1,162 @@
+{
+  "version": 1,
+  "issue": 167,
+  "pr": null,
+  "branch": null,
+  "phase": "plan",
+  "risk": "high",
+  "attempts": {
+    "infra": 0,
+    "verify": 0,
+    "review": 0
+  },
+  "lastFingerprint": {
+    "infra": null,
+    "verify": null,
+    "review": null
+  },
+  "repeatedFingerprint": {
+    "infra": 0,
+    "verify": 0,
+    "review": 0
+  },
+  "tokens": {
+    "input": 136,
+    "output": 80124,
+    "costUsd": 7.44242
+  },
+  "testHashes": {},
+  "specRefs": [
+    {
+      "ref": "v13 §5.3",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "832-913",
+      "sha256": "338d1735"
+    },
+    {
+      "ref": "v13 §5.3.2",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "883-913",
+      "sha256": "9c37593e"
+    },
+    {
+      "ref": "v13 §5.9.3",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "1711-1718",
+      "sha256": "c8b7d14d"
+    },
+    {
+      "ref": "v13 §5.10.6",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "1875-1903",
+      "sha256": "932e9c66"
+    },
+    {
+      "ref": "v13 §6",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "2300-2367",
+      "sha256": "0c23086f"
+    }
+  ],
+  "acceptance": [
+    {
+      "criterion": "role = guest の閲覧者が guest_allowed = false のクエストへ POST /api/quests/{questId}/applications を直接叩くと拒否され、quest_applications に行が増えない",
+      "origin": "issue",
+      "basis": "v13 §5.10.6",
+      "test": "ゲストは guest_allowed=false のクエストへ受注申請できない ／ ゲストが API を直接叩いても quest_applications に行が増えない"
+    },
+    {
+      "criterion": "quests.required_certification の資格を1つでも保有しない会員は、そのクエストへ受注申請できない",
+      "origin": "issue",
+      "basis": "v13 §5.3（項目2）",
+      "test": "必要な資格を1つでも欠く会員は受注申請できない ↔ 必要な資格をすべて持つ会員は受注申請できる"
+    },
+    {
+      "criterion": "資格ゲートの判定は guest_allowed から独立している ― role が guest → member に変わっても、未保有資格のクエストは受注申請できないままである",
+      "origin": "issue",
+      "basis": "v13 §5.10.6 表3行目",
+      "test": "role が guest から member に変わっても、未保有資格のクエストは受注申請できないままである"
+    },
+    {
+      "criterion": "quests.status が open でないクエストへは受注申請できない",
+      "origin": "issue",
+      "basis": "0007_quests_schema.sql chk_quests_status ／ v13 §5.10.6",
+      "test": "status が closed のクエストへは受注申請できない"
+    },
+    {
+      "criterion": "画面の申請ボタンの活性・POST /api/quests/{questId}/applications・Server Action の3経路が、同一の判定関数の戻り値と一致する",
+      "origin": "issue",
+      "basis": "v13 §5.9.3",
+      "test": "画面の申請ボタンの活性と canApplyToQuest() の戻り値が資格ゲートを含めて全件一致する"
+    },
+    {
+      "criterion": "受注申請が成立すると quest_applications.status が 申請中 になる",
+      "origin": "issue",
+      "basis": "v13 §5.3（項目2）",
+      "test": "受注申請が成立した行の status は 申請中 である"
+    },
+    {
+      "criterion": "同じ会員が同じクエストへ2件目の受注申請を作れない。2度目の操作は画面上「申請済み」として伝わり、処理失敗の文言にならない",
+      "origin": "issue",
+      "basis": "0017_quest_applications_and_work_logs.sql uq_quest_app_per_member",
+      "test": "生きている申請がある会員の2度目の申請は「申請済み」として伝わる ／ キャンセル済みの申請がある会員の再申請も「申請済み」として伝わり処理失敗の文言にならない ／ uq_quest_app_per_member により DB が2行目を 23505 で拒否する"
+    },
+    {
+      "criterion": "受注申請が quests.recruit_count に達したクエストへは、さらに受注申請できない",
+      "origin": "issue",
+      "basis": "v13 §5.3 note（L844） ／ 0017 の member_id 列コメント",
+      "test": "募集人数に達したクエストへは受注申請できない ／ service_role で INSERT してもトリガーが拒否する ／ キャンセルされた申請は募集枠を占有しない"
+    },
+    {
+      "criterion": "拒否されたとき、理由（施錠・資格・募集終了）を区別した文言を返さない",
+      "origin": "issue",
+      "basis": "v13 §5.10.6 末尾",
+      "test": "施錠・資格不足・募集満了のいずれで拒否されても返る文言が同一である ／ v_quest_board は申請件数を返さず is_recruit_full の真偽値だけを返す"
+    },
+    {
+      "criterion": "role が admin / core_member のいずれでもない操作者は、quest_applications.status を 指示済み へ遷移させられない",
+      "origin": "issue",
+      "basis": "v13 §6 権限マトリクス（管理者〇・コアメンバー〇・会員−・ゲスト−）",
+      "test": "role が member の操作者は 指示済み へ遷移させられない ／ member_type が親方でも role が member なら遷移させられない ↔ admin・core_member は遷移できる"
+    },
+    {
+      "criterion": "B1 の拒否は、画面のボタンを外して service_role 経由で UPDATE しても成立する",
+      "origin": "issue",
+      "basis": "0017 quest_applications_guard_review() ／ v13 §5.9.3",
+      "test": "service_role から 指示済み へ UPDATE してもトリガーが 42501 で拒否する"
+    },
+    {
+      "criterion": "実行指示の「いつ・どこで・何を」が scheduled_start_at / instruction_place / instruction_body として保存される",
+      "origin": "issue",
+      "basis": "v13 §5.3（項目3）",
+      "test": "実行指示を出すと scheduled_start_at / instruction_place / instruction_body が保存される"
+    },
+    {
+      "criterion": "指示の内容（何を＝instruction_body）が空のままでは 指示済み へ遷移できない",
+      "origin": "issue",
+      "basis": "v13 §5.3（項目3）",
+      "test": "instruction_body が空のままでは 指示済み へ遷移できない"
+    },
+    {
+      "criterion": "受注者本人が、自分の受注申請に対して出された実行指示（いつ・どこで・何を）を自分の画面で読める",
+      "origin": "issue",
+      "basis": "v13 §5.3（項目3） ／ 0017 の RLS quest_applications_select_self",
+      "test": "受注者本人は自分の受注申請に出された実行指示を読める ↔ 受注者以外の一般会員は他人の受注申請の実行指示を読めない"
+    },
+    {
+      "criterion": "申請中 の受注申請が審査待ちとして一覧に並び、指示済み へ遷移したものは待ち行列から外れる",
+      "origin": "issue",
+      "basis": "v13 §5.3.2 の遷移図 申請中 → 指示済み ／ 画面設計.md §2 画面ID B5",
+      "test": "審査待ち一覧には 申請中 だけが並び、指示済み は外れる"
+    },
+    {
+      "criterion": "実行指示を出した運営の member_id と日時が reviewed_by / reviewed_at に記録される",
+      "origin": "issue",
+      "basis": "0017 chk_quest_app_reviewed_has_operator",
+      "test": "実行指示を出すと reviewed_by と reviewed_at が記録される ／ reviewed_at があるのに reviewed_by が無い行は DB が拒否する"
+    }
+  ],
+  "acceptanceDerived": false,
+  "updatedAt": "2026-09-25T12:04:14.652Z",
+  "provisional": []
+}

@@ -1,0 +1,250 @@
+{
+  "version": 1,
+  "issue": 169,
+  "pr": null,
+  "branch": null,
+  "phase": "plan",
+  "risk": "high",
+  "attempts": {
+    "infra": 0,
+    "verify": 0,
+    "review": 0
+  },
+  "lastFingerprint": {
+    "infra": null,
+    "verify": null,
+    "review": null
+  },
+  "repeatedFingerprint": {
+    "infra": 0,
+    "verify": 0,
+    "review": 0
+  },
+  "tokens": {
+    "input": 144,
+    "output": 93272,
+    "costUsd": 8.268875000000001
+  },
+  "testHashes": {},
+  "specRefs": [
+    {
+      "ref": "v13 §5.2.5①（★ 宿泊枠の残数管理 ＆ カレンダー表示・残枠の算出）",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "632-683"
+    },
+    {
+      "ref": "v13 §5.2.5②（本人向け A12 ／ 運営向け C10 ／ 権限）",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "679-683"
+    },
+    {
+      "ref": "v13 §5.2.1（rooms / room_assignments・rooms.status）",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "422-438"
+    },
+    {
+      "ref": "v13 §5.2.2（キャンセルは論理削除 cancelled_at）",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "440-459"
+    },
+    {
+      "ref": "v13 §5.2.3（TO-BE④「要確認」の定義・宿泊予定カレンダーの表示内容と見え方）",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "461-597"
+    },
+    {
+      "ref": "v13「★ 宿泊形態と収容枠の確定」（番号なし #### 見出し ／ 合計66。§5.4.2 本文 L974-1017 の外側にあり節番号では引けない）",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "1019-1043"
+    },
+    {
+      "ref": "v13 §6（権限マトリクス ／ 宿泊予定カレンダー全予約＝管理者・コアメンバーのみ）",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "2300-2367"
+    },
+    {
+      "ref": "v13 §9 #25（残枠のカラム保持禁止）／ #30-④⑤（要確認の判定基準・月週切替）／ #47（算出元を room_assignments → check_ins へ変更・2モード分離）",
+      "path": "docs/spec/浮遊街アプリ 総合要件定義・設計書_v13.md",
+      "lines": "2712,2719,2736"
+    },
+    {
+      "ref": "DB物理設計.md §3-12（チェックアウト日は専有しない cal.date < check_out_date）",
+      "path": "docs/spec/detailed-design/DB物理設計.md",
+      "lines": "830,859,874"
+    },
+    {
+      "ref": "DB物理設計.md §6-1 一覧 #30（v_room_availability は非PII・authenticated 全員 SELECT 可・個人を含む列を持たせない）※Issue 本文は「§6-2」とするが §6-2 の見出しは L1338 で当該行より後ろ",
+      "path": "docs/spec/detailed-design/DB物理設計.md",
+      "lines": "1322"
+    },
+    {
+      "ref": "DB物理設計.md §6-8 突合表 #9（anon は v_room_availability を読めない）",
+      "path": "docs/spec/detailed-design/DB物理設計.md",
+      "lines": "2319"
+    },
+    {
+      "ref": "画面設計.md §4 A12（表示＝月表示カレンダー／遷移＝日付タップで滞在詳細／区別＝予定・履歴・要確認を色で）・§5 マトリクス",
+      "path": "docs/spec/detailed-design/画面設計.md",
+      "lines": "84,426,430-432,477,483"
+    },
+    {
+      "ref": "CLAUDE.md §7.1（会員の実名を画面・テストデータへ書き出さない）／ §4.1（認可に member_type を使わない）／ §6.3（main マージでマイグレーション自動適用）"
+    }
+  ],
+  "acceptance": [
+    {
+      "criterion": "`v_room_availability` が 日付 × 宿泊形態 の行を返し、各行が `total` / `occupied` / `available` を持つ",
+      "origin": "issue",
+      "basis": "v13 §5.2.5① 算出式 ／ DB物理設計.md §3-12",
+      "test": "`v_room_availability` は日付と宿泊形態の組ごとに `total`・`occupied`・`available` を返す"
+    },
+    {
+      "criterion": "占有量の算出元が `check_ins` であり、`room_assignments` を参照しない",
+      "origin": "issue",
+      "basis": "v13 §5.2.5① 算出式 ／ v13 §9 #47",
+      "test": "`room_assignments` に部屋割当を足しても `occupied` は変わらない（算出元は `check_ins` である）"
+    },
+    {
+      "criterion": "`allocation_mode` が `per_person` の形態（ドミトリー16／キャンプサイト10／車中泊30）で、`occupied` が予約人数の合計になる",
+      "origin": "issue",
+      "basis": "v13 §5.2.5① の warning ／ v13 L1019–1043「★ 宿泊形態と収容枠の確定」",
+      "test": "人数枠型のドミトリーは大人2名＋子供1名の予約で `occupied` が3になる"
+    },
+    {
+      "criterion": "`allocation_mode` が `per_unit` の形態（コテージ3棟／アースバッグ1棟／サロン1室）で、`occupied` が占有棟数になり、1棟あたり定員2名を超える予約は複数棟を消費する",
+      "origin": "issue",
+      "basis": "v13 §5.2.5① の warning",
+      "test": "棟貸型のコテージは定員2名を超える3名の予約で `occupied` が2棟になる"
+    },
+    {
+      "criterion": "収容枠の合計が 66 である",
+      "origin": "issue",
+      "basis": "v13 L1019–1043「★ 宿泊形態と収容枠の確定」（§5.4.2 本文 L974–1017 の外側の番号なし #### 見出し。節番号では引けない）",
+      "test": "利用可の `rooms.capacity` の合計は66である"
+    },
+    {
+      "criterion": "`rooms.status` が `メンテナンス中` / `利用停止` の部屋は `total`（分母）に含まれない",
+      "origin": "issue",
+      "basis": "v13 §5.2.5① 除外条件 ／ v13 §5.2.1",
+      "test": "`rooms.status` を `メンテナンス中` にした部屋は `total` に数えられない"
+    },
+    {
+      "criterion": "`cancelled_at IS NOT NULL` の予約は `occupied` に数えない",
+      "origin": "issue",
+      "basis": "v13 §5.2.5① キャンセル分 ／ v13 §5.2.2",
+      "test": "`cancelled_at` が入った予約は `occupied` に数えられない"
+    },
+    {
+      "criterion": "`occupied` に数える状態が `pre_registered` / `confirmed` / `staying` の3つに限られる",
+      "origin": "issue",
+      "basis": "v13 §5.2.5① 有効な予約",
+      "test": "`status` が `checked_out` の予約は `occupied` に数えられない"
+    },
+    {
+      "criterion": "チェックアウト日は専有しない（退去日と次の到着日が重なる予約が入る）",
+      "origin": "issue",
+      "basis": "DB物理設計.md §3-12 の注記（L830・L859）",
+      "test": "チェックアウト日は `occupied` に数えられない"
+    },
+    {
+      "criterion": "残枠を保持するカラム・キャッシュが存在しない（加減算方式を採らない）",
+      "origin": "issue",
+      "basis": "v13 §5.2.5① の warning ／ v13 §9 #25",
+      "test": "`rooms`・`accommodation_types`・`check_ins` に残枠を保持する列が無く、残枠のマテリアライズドビューも存在しない"
+    },
+    {
+      "criterion": "`authenticated` は `v_room_availability` を SELECT できる",
+      "origin": "issue",
+      "basis": "DB物理設計.md §6-1 一覧 #30（L1322 ／ Issue 本文の「§6-2」は誤り。§6-2 の見出しは L1338）",
+      "test": "一般会員（`authenticated`）は `v_room_availability` を SELECT できる"
+    },
+    {
+      "criterion": "`anon` は `v_room_availability` を SELECT できない",
+      "origin": "issue",
+      "basis": "DB物理設計.md §6-8 突合表 #9（L2319）",
+      "test": "未ログイン（`anon`）は `v_room_availability` を SELECT すると権限エラー（`42501`）になる"
+    },
+    {
+      "criterion": "ビューが `member_id`・氏名・備考などの行レベルの列を1つも持たない",
+      "origin": "issue",
+      "basis": "DB物理設計.md L874・L1322（個人を含む列を持たせない）",
+      "test": "`v_room_availability` の列は `date`・`room_type`・`total`・`occupied`・`available` の5つだけである"
+    },
+    {
+      "criterion": "本人の宿泊予定（未来）と宿泊履歴（過去）が月表示のカレンダーで表示される",
+      "origin": "issue",
+      "basis": "v13 §5.2.5②（L681）／ 画面設計.md §4 A12「表示」（L430）",
+      "test": "A12 は本人の未来の予約と過去の履歴を同じ月表示カレンダーの日セルに描画する"
+    },
+    {
+      "criterion": "日付をタップすると当該滞在の詳細（部屋・同伴人数・注文・クエスト）へ遷移する",
+      "origin": "issue",
+      "basis": "v13 §5.2.5②（L681）／ 画面設計.md §4 A12「遷移」（L431）",
+      "test": "A12 の滞在がある日セルは `/me/stays/{checkinId}` へのリンクになる"
+    },
+    {
+      "criterion": "予定・履歴・「要確認」が色で区別される",
+      "origin": "issue",
+      "basis": "画面設計.md §4 A12「区別」（L432）",
+      "test": "A12 は予定・履歴・要確認の日セルにそれぞれ異なる色クラスを付ける"
+    },
+    {
+      "criterion": "A12 は全ロール（ゲストを含む）が閲覧でき、自分の滞在のみが出る",
+      "origin": "issue",
+      "basis": "v13 §5.2.5② 権限行（L683）／ v13 §6 ／ 画面設計.md §5（L477）",
+      "test": "A12 はゲストロールでも自分の滞在を表示し、他人の滞在は1件も含まれない"
+    },
+    {
+      "criterion": "全予約が日付軸で表示される",
+      "origin": "issue",
+      "basis": "v13 §5.2.5② 運営向け（L682）",
+      "test": "C10 は全予約をその滞在期間の各日セルに配置する"
+    },
+    {
+      "criterion": "月表示と週表示を切り替えられる",
+      "origin": "issue",
+      "basis": "v13 §5.2.5②「月/週切替」／ v13 §9 #30-⑤",
+      "test": "C10 は `?view=week` で7日分、既定で当月分の日セルを描画する"
+    },
+    {
+      "criterion": "「要確認」予約（＝備考欄に記載があり自動確定されなかった予約。判定基準は完全な空欄のみ）が、他の予約と区別できるよう強調表示される",
+      "origin": "issue",
+      "basis": "v13 §5.2.5② ／ v13 §5.2.3 TO-BE④・「「要確認」予約の見え方」／ v13 §9 #30-④",
+      "test": "C10 は備考が非空で自動確定されなかった予約を強調クラス付きで描画する"
+    },
+    {
+      "criterion": "各予約について チェックイン日・チェックアウト日・部屋タイプ・割当部屋（確定していれば）・大人/子供人数・会員区分 が読める",
+      "origin": "issue",
+      "basis": "v13 §5.2.3「表示内容」",
+      "test": "C10 の1予約にはチェックイン日・チェックアウト日・部屋タイプ・割当部屋・大人/子供人数・会員区分が出る"
+    },
+    {
+      "criterion": "C10 は `admin` / `core_member` のみ到達でき、`member` / `guest` はサーバサイドで拒否される",
+      "origin": "issue",
+      "basis": "v13 §5.2.5② 権限行（L683）／ v13 §6 ／ 画面設計.md §5（L483）",
+      "test": "許可側: `admin` と `core_member` は C10 を開ける ／ 拒否側: `member` と `guest` は C10 をサーバサイドで拒否される（`requireStaff()` が `AccessDeniedError`）"
+    },
+    {
+      "criterion": "C10 に会員の実名を表示しない（表示名はニックネーム／会員番号に留める）",
+      "origin": "issue",
+      "basis": "CLAUDE.md §7.1",
+      "test": "C10 の出力に会員の氏名が1文字も含まれない（表示名は `v_member_public.display_name` のみ）"
+    }
+  ],
+  "acceptanceDerived": false,
+  "updatedAt": "2026-09-25T12:11:52.583Z",
+  "provisional": [
+    {
+      "question": "本人向けカレンダー（画面ID A12）を、正本どおり A6 マイログ（`/me`）内へ移すか、現状の `/reservations`（画面ID A11 宿泊予約）内に置いたままにするか",
+      "options": [
+        "A. 正本どおり A6 マイログ内のタブへ A12 を移し、`/reservations` 側の一覧は削る",
+        "B. 現状どおり `/reservations` 内に置いたままとし、正本 v13 §5.2.5② と `画面設計.md` §2 の記述を実装に合わせて改める",
+        "C. 両方から到達できるようにする（A6 にタブを置き、`/reservations` からはそこへリンクする）"
+      ],
+      "chosen": "A（正本どおり A6 マイログ内へ移す。`/reservations` 側は A6 のカレンダータブへのリンクに置き換える）",
+      "rationale": "正本 v13 §5.2.5②（L681）と派生 `画面設計.md` L84・L426 が一致して「A6 マイログ内タブ」と定めており、食い違っているのは実装の配置だけである。CLAUDE.md §1.1「矛盾時は正本が勝つ」により、推測の余地なく正本を採る。選択肢 B は正本の改訂を伴い CLAUDE.md §7.0 の「`docs/spec/` の仕様変更」に当たるため自律ループの権限外。`QUESTIONS.md`「[2026-09-25] 本人向けカレンダー（A12）の置き場所が正本と実装で食い違う」に非ブロックで起票済みで、そこでの推奨も A。なお完了条件#14〜#17 は置き場所を条件にしていないため、この選択は受入テストの内容を変えない。",
+      "specRef": "v13 §5.2.5②（L681）／ 画面設計.md §2 A12（L84・L426）／ CLAUDE.md §1.1",
+      "reversibility": "高い（数分で戻せる）。カレンダー本体を共通コンポーネント `src/components/lodging/StayCalendar.tsx` として切り出し、A6・C10 の双方がそれをマウントするだけの形にするため、置き場所の変更は各ページのマウント数行の付け替えで済む。DB・ビュー・GRANT には一切触れないため、データ側に不可逆な影響は無い。"
+    }
+  ]
+}
