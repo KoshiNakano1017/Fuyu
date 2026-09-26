@@ -183,7 +183,15 @@ jobs:
     needs: route
     if: needs.route.outputs.mode == 'package'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # ⚠️ 2026-09-26: 10 → 25。**起票支援エージェントが 10 分で打ち切られていた。**
+    #    実測（WBS 3-2b ／ Issue #193）: 09:52:38 に起草を始め、10:02:42 に
+    #    「The operation was canceled」でジョブごと落ちた。結果、**完了条件が空のまま
+    #    Issue だけが残り**、`auto` も付かないので自律ループがそこで止まる
+    #    （オーナーが気づくまで誰も進めない ＝ 停滞要因分析 ⑤ と同じ形）。
+    #    正本を読みに行く量はパッケージによって大きく変わるため、
+    #    打ち切りではなく余裕を持たせる側へ倒す（agent 自身の実行時間上限は
+    #    下のステップの `timeout-minutes` で別に掛かっている）。
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
 
