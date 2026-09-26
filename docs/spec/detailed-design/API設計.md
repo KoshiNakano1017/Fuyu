@@ -115,6 +115,9 @@ up: "[[浮遊街アプリ 総合要件定義・設計書_v13]]"
 | ~~POST~~ | ~~`/api/reservations/webhook`~~ | ~~宿泊予約フォーム送信トリガー~~ → ❌ **廃止（2026-08-23 ／ v13 §9 #46）**：Googleフォームを廃止し公開予約ページへ置換したため、Webhook 自体が不要になった（§3-4 参照） | — | — |
 | POST | `/api/checkins` | チェックイン（QR/画面タップ） | core_member, admin, 本人 | `check_ins` |
 | POST | `/api/checkins/{id}/lodging-register` | 宿泊者名簿の登録・確定（チェックイン時の店員タブレット操作／v13 §5.2.7・詳細は §3-5） | core_member, admin | `lodging_register_entries` |
+| POST | `/api/admin/checkin-qr` | チェックインQR の発行（現地掲示用・有効期限1週間／v13 §5.2.8・詳細は §3-6） | **admin のみ** | `checkin_qr_tokens` |
+| DELETE | `/api/admin/checkin-qr` | チェックインQR の手失効（掲示物の紛失・流出時／§3-6） | **admin のみ** | `checkin_qr_tokens` |
+| POST | `/api/checkins/qr/{token}` | 掲示QRの読み取り（本人が自分の滞在をチェックインへ進める／§3-6） | ログイン済み全ロール | `check_ins` |
 | PATCH | `/api/checkins/{id}/checkout` | チェックアウト | core_member, admin, 本人 | `check_ins`, `stay_ticket_transactions`（consume） |
 | DELETE | `/api/checkins/{id}` | 予約キャンセル・ノーショー（論理削除、理由必須） | core_member, admin | `check_ins`, `room_assignments` |
 | POST | `/api/checkins/{id}/room-assignments` | 部屋割当 | core_member, admin | `room_assignments` |
@@ -641,6 +644,100 @@ paths:
 > 予約時点で確定させるのは**宿泊枠であって人物の同定ではない**、という切り分けを守ること。
 
 ---
+
+### 3-6. チェックインQR（v13 §5.2.8・2026-09-26 新設 ／ WBS `3-2b`）
+
+**発行者は管理者（`admin`）、有効期限は発行から1週間**（v13 §9 #68 ／ 決定ログ §25-1）。
+QR は個人でも滞在でもなく**拠点と発行期間**を指す、現地掲示の共通の入口である。
+したがって**単回使用にしない**（精算QR〈§3 の伝票系〉・入金QRと異なる点）。
+
+> [!danger] QR を読めたことを本人確認として扱わない
+> 現地に掲示するため撮影・共有は起こりうる。**読み取りの成功はチェックインの十分条件ではない。**
+> 状態遷移の API（`3-2` で実装済みの経路）が要求する条件を QR で置き換えてはならない:
+> ①**ログイン済みの本人** ②その本人に**当日の滞在予定がある**（`check_ins` が
+> `pre_registered` / `confirmed`）③**状態遷移の向きが正しい**（`checked_out` からの再開を許さない）。
+> 置き換えると、掲示物を撮影した第三者が遠隔から他人の滞在をチェックインできる。
+
+トークン規格は精算QR・入金QRと同一である（`DB物理設計.md` の `settlement_qr_token_hash` /
+`qr_token_hash` と同じ扱い）: `base64url(gen_random_bytes(32))` ＝ **256bit**、
+**平文はDBに保存せず** `sha256` の16進のみ保持し、**発行APIのレスポンスで1度だけ返す**。
+
+```yaml
+paths:
+  /api/admin/checkin-qr:
+    post:
+      summary: "チェックインQR の発行（管理者のみ・有効期限1週間）"
+      description: >
+        現地掲示用のQRを発行する。既に有効なQRがある場合は失効させてから新しい行を作る
+        （同時に2枚が有効になると、貼り替え漏れの掲示物でチェックインできてしまう）。
+        レスポンスの token は平文で、この1度だけ返す（DBには sha256 のみ保持）。
+      security:
+        - adminSession: []   # admin のみ。core_member は発行できない（v13 §5.2.8）
+      responses:
+        "201":
+          description: 発行した
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token, expires_at]
+                properties:
+                  token:
+                    type: string
+                    description: "掲示するURLに載せる平文トークン。**再取得はできない**"
+                  expires_at:
+                    type: string
+                    format: date-time
+                    description: "発行から1週間後（v13 §5.2.8）"
+        "403":
+          description: "admin 以外からの呼び出し（core_member を含む）"
+
+    delete:
+      summary: "チェックインQR の手失効（掲示物の紛失・撮影の流出時）"
+      description: >
+        期限を待たずに止める。掲示物が流出した時点で有効なQRが残っていると、
+        期限切れまでの最大1週間、第三者が入口URLを開ける状態が続く。
+      security:
+        - adminSession: []
+      responses:
+        "204":
+          description: 失効させた（既に失効済みでも 204。冪等にする）
+        "403":
+          description: "admin 以外からの呼び出し"
+
+  /api/checkins/qr/{token}:
+    post:
+      summary: "掲示QRの読み取り（宿泊者本人が自分の滞在をチェックインへ進める）"
+      description: >
+        token を検証し、**呼び出した本人の**当日の滞在を staying へ進める。
+        token は「どの滞在か」を指さない（拠点と発行期間を指すだけ）ため、
+        対象の滞在はセッションの会員IDから引く。
+      security:
+        - userSession: []   # ログイン済みであること。ロールは問わない
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: チェックインした
+        "401":
+          description: "未ログイン（QR は認証情報ではない）"
+        "404":
+          description: >
+            token が存在しない・失効済み・期限切れ。**403 と区別しない**
+            （掲示物の有効性を当てられるようにしないため）
+        "409":
+          description: >
+            当日の滞在予定が無い、または状態遷移の向きが不正
+            （`checked_out` からの再開など）。⚠️ この判定を QR 側で緩めてはならない
+```
+
+> [!note] DB 側の置き場所
+> `check_ins` に列を足すのではなく**拠点単位の1行**を持つ表（`checkin_qr_tokens` 等）にする。
+> QR が指すのは滞在ではないため、`check_ins` に持たせると「どの滞在の QR か」という
+> 存在しない対応関係を作ることになる。DDL は `3-2b` の実装時に `DB物理設計.md` へ追記する。
 
 ## 4. Webhook・外部トリガー一覧
 
