@@ -35,6 +35,7 @@ function stay(overrides: Partial<StayForChange> = {}): StayForChange {
     childrenCount: 0,
     roomId: null,
     roomName: null,
+    stayTicketsAppliedNights: 0,
     ...overrides,
   };
 }
@@ -224,6 +225,24 @@ describe("decideStayChange", () => {
 
     const blocked = decide({ inputOverrides: { checkOutDate: "2026-10-06" }, others });
     expect(blocked).toMatchObject({ reason: "full", fullNight: { date: "2026-10-05" } });
+  });
+
+  test("★ 宿泊券の充当泊数より短い日程には変更できない（履歴だけが積まれるのを防ぐ）", () => {
+    // 3泊の滞在に3泊ぶんの宿泊券を充てている状態で、1泊へ短縮しようとする
+    const decision = decide({
+      stayOverrides: { stayTicketsAppliedNights: 3 },
+      inputOverrides: { checkOutDate: "2026-10-02", effectiveDate: "2026-10-01" },
+    });
+    expect(decision).toEqual({ allowed: false, reason: "tickets_exceed_nights" });
+  });
+
+  test("充当泊数と同じ泊数までは短縮できる", () => {
+    expect(
+      decide({
+        stayOverrides: { stayTicketsAppliedNights: 1 },
+        inputOverrides: { checkOutDate: "2026-10-02", effectiveDate: "2026-10-01" },
+      }).allowed,
+    ).toBe(true);
   });
 
   test("許可された変更は差分を返す（変わっていない項目は null）", () => {
@@ -466,6 +485,10 @@ describe("利用者へ返す言葉", () => {
 
   test("理由の書き忘れを「満室」と言い換えない", () => {
     expect(stayChangeDenialMessage("blank_reason")).toContain("理由");
+  });
+
+  test("宿泊券の充当が邪魔しているときはそう伝える", () => {
+    expect(stayChangeDenialMessage("tickets_exceed_nights")).toContain("宿泊券");
   });
 
   test("変更の要約は変わった項目だけを並べる", () => {

@@ -242,8 +242,8 @@ up: "[[浮遊街アプリ 総合要件定義・設計書_v13]]"
 > 本項の `fuyuugai.com` は**メールの送信ドメイン**であって、アプリのURLではない（両者は独立）。
 | GET | `/api/public/availability?from=&to=` | 未認証で参照できる残枠。**非会員料金**で表示する | **公開（未認証）** | `v_room_availability` |
 | GET | `/api/public/rates` | 宿泊料金・送迎料金の公開表示（Uii 主・円 副） | **公開（未認証）** | `accommodation_rates`, `menu_items` |
-| POST | `/api/reservations/{id}/meals` | 事前予約注文の登録・変更（滞在日別・朝/昼/夜／**任意**） | 本人, core_member, admin | `meal_reservations` |
-| GET | `/api/admin/meal-summary?date=` | **日別の食数サマリー**（仕込み数量の把握用） | core_member, admin | `meal_reservations` |
+| POST | `/api/reservations/{id}/meals` | 事前予約注文の登録・変更（滞在日別・朝/昼/夜／**任意**）。⚠️ **実装は Server Action**（`saveMealPreOrdersAction`）であり公開 HTTP エンドポイントは置いていない。枠（滞在 × 日付 × 区分）ごとに1行を UPDATE で持ち回す（`0019` は DELETE を与えていないため、取消 → 同じメニューの再選択を INSERT で表すと `uq_meal_res_slot` に当たる）。**本人はチェックインまで／運営は滞在中も代理編集可**（v13 §5.4.1b） | 本人, core_member, admin | `meal_reservations` |
+| GET | `/api/admin/meal-summary?date=` | **日別の食数サマリー**（仕込み数量の把握用）。⚠️ 実装は画面ID C10（`/staff/calendar`）が月ぶんをまとめて読み、**数量の合計**で日別に集計する（件数ではない）。誰が予約したかは返さない | core_member, admin | `meal_reservations` |
 
 > [!warning] 公開エンドポイントは anon キーで直接DBを触らせない
 > `/api/public/*` は未認証で到達できるため、**クライアントから Supabase へ直接 INSERT させてはならない**。
@@ -779,3 +779,4 @@ paths:
 | 2026-08-16（オーナー指示反映） | ①**呼称変更**：§2-6見出しの説明文をline-rag-bot単独表記から「浮遊街コンシェルジュ（line-rag-bot）」表記に統一。②**§2-7 会員一括インポートAPI（`preview`/`confirm`）を実装不要に変更**：画面設計.md C6と連動。③**§2-10 メディアライブラリAPIを新設**：`POST /api/media/signed-upload-url`等6エンドポイント。画面設計.md A10・DB物理設計.md §3-7と連動。 |
 | **2026-09-26** | **§2-2 に `PATCH /api/checkins/{id}`（滞在の変更）を追加**（v13 §5.6.9 ／ WBS `3-10`）。宿泊形態・部屋・退去日・人数の変更で、**理由必須**・変更後の残枠を再判定し満室なら拒否する。⚠️ **実装は Server Action（`changeStayAction`）であり、公開 HTTP エンドポイントは置いていない**（顧客管理画面からのみ呼ぶ）。対応DB は `check_in_changes`（追記）・`check_ins`（現在値）・`room_assignments`（旧割当を終了し新規追加）。 |
 | **2026-09-26（2）** | **§2-2b の `POST /api/reservations` を実装に合わせて具体化**（WBS `3-7` ／ v13 §5.2.4 ／ 決定ログ §27）。受け取る項目（到着予定時刻・交通手段・**宿泊券の充当泊数**・備考）と、**既知情報は自動補完ではなく「尋ねない」**形にしたこと、予約可能な範囲が**今日から180日先まで**（残枠ビュー `0015` の窓）であること、実装が Server Action であり公開 HTTP エンドポイントを置いていないことを明記した。 |
+| **2026-09-26（3）** | **§2-2b の事前予約注文（`POST /api/reservations/{id}/meals`）と日別食数サマリーに実装の所在を注記**（WBS `3-5c` ／ v13 §5.4.1b ／ 決定ログ §28）。枠ごとに1行を UPDATE で持ち回す理由（`0019` は物理削除を許さず、取消 → 再選択を INSERT で表すと一意制約に当たる）、**本人はチェックインまで／運営は滞在中も代理編集可**、サマリーは**数量の合計**で数え誰が予約したかは返さないこと、いずれも Server Action で実装しており公開 HTTP エンドポイントを置いていないことを明記した。 |
