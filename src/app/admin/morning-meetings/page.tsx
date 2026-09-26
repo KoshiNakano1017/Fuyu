@@ -2,7 +2,7 @@ import { AccessDenied } from "@/components/auth/AccessDenied";
 import { MinutesBoard } from "@/components/morning-meetings/MinutesBoard";
 import { AccessDeniedError, requireStaff } from "@/lib/auth/guard";
 import { fetchRecentMeetings } from "@/lib/morning-meetings/store";
-import { todayInJapan } from "@/lib/today";
+import { todayInJapan } from "@/lib/japan-time";
 
 import { MorningMeetingForm } from "./MorningMeetingForm";
 import {

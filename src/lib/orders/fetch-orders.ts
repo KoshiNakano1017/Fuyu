@@ -21,6 +21,13 @@ export type OrderChannel = "self" | "staff_proxy";
 
 export type OrderSummary = {
   orderId: string;
+  /**
+   * どの滞在で出した伝票か（`orders.checkin_id` ／ `0019`）。
+   *
+   * 注文はチェックイン中しか作れないため **NOT NULL** である。滞在ごとの絞り込みは
+   * 日付の重なりではなくこの列で行う（連泊をまたぐ予約で隣の滞在の伝票が混ざるため）。
+   */
+  checkinId: string;
   purchaserId: string;
   /** 伝票の持ち主の表示名。`v_member_public` 由来で、実名は含まない。 */
   purchaserLabel: string;
@@ -188,10 +195,11 @@ async function fetchMemberLabels(memberIds: readonly string[]): Promise<Map<stri
 }
 
 const ORDER_COLUMNS =
-  "order_id, purchaser_id, status, serving_status, order_channel, total_amount_yen, total_amount_uii, created_at, order_items(product_name, unit_price_yen, quantity)";
+  "order_id, checkin_id, purchaser_id, status, serving_status, order_channel, total_amount_yen, total_amount_uii, created_at, order_items(product_name, unit_price_yen, quantity)";
 
 type OrderRow = {
   order_id: string;
+  checkin_id: string;
   purchaser_id: string;
   status: OrderStatus;
   serving_status: string;
@@ -205,6 +213,7 @@ type OrderRow = {
 function toOrderSummary(row: OrderRow, labels: Map<string, string>): OrderSummary {
   return {
     orderId: row.order_id,
+    checkinId: row.checkin_id,
     purchaserId: row.purchaser_id,
     purchaserLabel: labels.get(row.purchaser_id) ?? "（表示名なし）",
     status: row.status,
@@ -256,6 +265,35 @@ export async function fetchMyOrders(memberId: string): Promise<OrderSummary[]> {
     .from("orders")
     .select(ORDER_COLUMNS)
     .eq("purchaser_id", memberId)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    throw new Error("注文を取得できませんでした");
+  }
+  return toSummaries((data ?? []) as OrderRow[]);
+}
+
+/**
+ * ある滞在で出した本人の注文（滞在の詳細 `/me/stays/[checkinId]` ／ WBS 3-8）。
+ *
+ * ★ **`checkin_id` で厳密に結ぶ。** 日付の重なりで拾うと、同じ会員が連泊をまたいで
+ * 予約した場合に「退去日＝次の到着日」の伝票が**両方の滞在に出る**。加えて `created_at` は
+ * `timestamptz` であり、日付へ切り落とすと JST 深夜の注文が前日側へずれて落ちる。
+ *
+ * `purchaser_id` の条件を重ねるのは、URL の `checkinId` を書き換えられたときに
+ * 他人の滞在の伝票を引かないためである（RLS も同じ境界を引く ／ v13 §5.9.4）。
+ */
+export async function fetchMyOrdersOfCheckIn(params: {
+  memberId: string;
+  checkinId: string;
+}): Promise<OrderSummary[]> {
+  const supabase = await createServerSupabaseClient();
+
+  const { data, error } = await supabase
+    .from("orders")
+    .select(ORDER_COLUMNS)
+    .eq("purchaser_id", params.memberId)
+    .eq("checkin_id", params.checkinId)
     .order("created_at", { ascending: false });
 
   if (error) {
