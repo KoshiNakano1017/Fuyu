@@ -240,13 +240,14 @@ export async function fetchCapacities(): Promise<Map<string, AccommodationCapaci
  * 本来入れる変更を満室として弾く（`0041` の残枠ビューと同じ理屈）。
  */
 export async function fetchOtherStayNights(params: {
-  excludeCheckinId: string;
+  /** 除外する滞在（自分自身）。**新規予約の判定では null**（除外するものが無い） */
+  excludeCheckinId: string | null;
   fromDate: string;
   toDate: string;
 }): Promise<NightlyStay[]> {
   const supabase = await createServerSupabaseClient();
 
-  const { data, error } = await supabase
+  const query = supabase
     .from("check_ins")
     .select(
       "checkin_id, member_id, room_type, check_in_date, check_out_date, adults_count, children_count, status",
@@ -254,8 +255,12 @@ export async function fetchOtherStayNights(params: {
     .gt("check_out_date", params.fromDate)
     .lte("check_in_date", params.toDate)
     .is("cancelled_at", null)
-    .in("status", CHANGEABLE_STATUSES)
-    .neq("checkin_id", params.excludeCheckinId);
+    .in("status", CHANGEABLE_STATUSES);
+
+  const { data, error } =
+    params.excludeCheckinId === null
+      ? await query
+      : await query.neq("checkin_id", params.excludeCheckinId);
 
   if (error || !data) {
     // 読めないときに「空いている」として返すと、満室の枠へ変更を通してしまう。
