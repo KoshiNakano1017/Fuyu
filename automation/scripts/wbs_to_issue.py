@@ -359,6 +359,33 @@ def pick(row: dict, *names: str, default: str = "") -> str:
     return default
 
 
+# 正本（v13）に実在する節番号の索引。`spec_ref.py` の見出し走査をそのまま借りる
+# （節の索引を2箇所に持つと、片方だけが正本の改訂に追いつかなくなる）。
+_V13_SECTIONS: set[str] | None = None
+
+
+def v13_section_numbers() -> set[str]:
+    """正本に実在する節番号の集合（`{"5.2.3", "9", ...}`）。読めなければ空集合。
+
+    空集合のときは**判定に使わない**（下記 `extract_spec_refs()` を参照）。
+    「正本が読めない」ことを「その節は存在しない」と読み替えると、
+    実在する参照を他ドキュメント扱いへ落としてしまう。
+    """
+    global _V13_SECTIONS
+    if _V13_SECTIONS is None:
+        try:
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+            import spec_ref  # noqa: PLC0415 — 遅延 import（CLI 実行時のみ必要）
+
+            spec_path = Path(spec_ref.DEFAULT_SPEC)
+            lines = spec_path.read_text(encoding="utf-8").splitlines()
+            sections, _duplicated = spec_ref.parse_sections(lines)
+            _V13_SECTIONS = set(sections)
+        except Exception:  # noqa: BLE001 — 読めないときは判定を諦める（理由は docstring）
+            _V13_SECTIONS = set()
+    return _V13_SECTIONS
+
+
 def extract_spec_refs(*texts: str) -> list[dict]:
     """節番号を **出典つき**で、出現順・重複なしに拾う。
 
@@ -384,11 +411,37 @@ def extract_spec_refs(*texts: str) -> list[dict]:
                 candidate = before.group("src").strip()
                 if not any(alias in candidate for alias in SPEC_ALIASES):
                     source = candidate
+            elif not refers_to_v13(ref):
+                # ⚠️ 2026-09-26 追加。**出典名が無くても v13 の節とは限らない。**
+                #   WBS のステータス欄は自分自身の節を出典名なしで書く
+                #   （例: `9-1` の「チャネルは app に固定し引数にしない（§16-2 #61）」）。
+                #   これを `v13 §16` として転記すると、`spec_ref.py` が
+                #   「節 §16 は正本に存在しません」で終了コード 3 を返し、
+                #   起票支援エージェントが起草を諦める（実測: Issue #194 ／ WBS 9-1）。
+                #   正本に**実在しない**節番号は、WBS 自身の節として出典を付け替える。
+                source = "WBS_Phase1.md"
 
             if (source, ref) not in seen:
                 seen.add((source, ref))
                 found.append({"source": source, "ref": ref})
     return found
+
+
+def refers_to_v13(ref: str) -> bool:
+    """`§16-2 #61` のような参照が、正本の節として実在するか。
+
+    `#` の後ろ（§9 の課題番号など）は節番号ではないため落として見る。
+    `§16-2` のようにハイフンで枝番を付ける書き方は **WBS 側の記法**であり、
+    正本の節番号（`5.2.3` のようにドット区切り）では使われない。
+
+    正本の索引が読めなかったとき（`v13_section_numbers()` が空）は **True** を返す
+    ＝ 従来どおり v13 扱いにする。読めないことを根拠に出典を書き換えない。
+    """
+    sections = v13_section_numbers()
+    if not sections:
+        return True
+    num = ref.replace("§", "").split("#", 1)[0].strip()
+    return num in sections
 
 
 def section_spec_refs(section_title: str) -> list[dict]:
