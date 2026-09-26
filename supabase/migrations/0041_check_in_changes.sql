@@ -6,7 +6,7 @@
 --
 -- ── 含む ────────────────────────────────────────────────────
 --   ①〜③ check_in_changes（変更履歴。誰が・いつ・何を・なぜ変えたか）＋ RLS ＋ GRANT
---   ④     check_in_state_on()（その夜に効いている形態・人数を引く関数）
+--   ④     v_check_in_nights（その夜に効いている形態・人数を展開する内部ビュー）
 --   ⑤     v_room_availability の差し替え（**その夜に実際に使う形態**で占有を数える）
 --   ⑥     rooms.room_type の書き換え禁止トリガー（v13 §5.6.9 の [!important] の実装ガード）
 --
@@ -139,64 +139,86 @@ GRANT SELECT, INSERT ON public.check_in_changes TO authenticated;  -- UPDATE/DEL
 
 
 -- =============================================================================
--- ④ check_in_state_on() — その夜に効いている滞在の内容（形態・人数）
+-- ④ v_check_in_nights — 滞在 × 夜 ごとに「その夜に効いている内容」を展開する内部ビュー
+--
+-- > [!danger] ここを**関数**にしてはいけない（2026-09-26 に CI が捕まえた）
+-- > 最初の実装は `check_in_state_on(checkin_id, date)` という SQL 関数だったが、
+-- > **関数の本体は呼び出し元のロールで走る**ため、残枠ビュー（`security_invoker = false`）の
+-- > 内側から呼んでも `check_ins` の RLS が一般会員のまま効き、**他人の占有が 0 と数えられた**
+-- > （`0015` の冒頭が名指しで警告している事故そのもの。
+-- >  `tests/db/check-ins-and-availability.test.ts`「一般会員も残枠を読める」が落ちた）。
+-- >
+-- > ビューにすれば、テーブルへのアクセスは**このビューの所有者**の権限で走るため、
+-- > 誰が残枠を読んでも占有量が同じになる。
 --
 --   ★ **項目ごとに「最後の非NULL」を引く。** 1件の変更行は変わった項目だけを持つため
 --     （`chk_cic_has_change` の規約）、「最後の変更行」を1行選んでその列を読む実装では、
---     人数だけを直した変更のあとに形態が NULL で返る。
+--     人数だけを直した変更のあとに形態が NULL になる。
 --
 --   優先順は3段：① その夜までに効いた変更の最後の `*_after`
 --                ② 1件も無ければ最初の変更の `*_before`（＝滞在開始時の値）
 --                ③ 変更履歴が無ければ `check_ins` の現在値
 --
---   ⚠️ 直接呼ぶと `check_ins` の RLS が効く（本人 ＋ staff）。残枠ビューから呼ぶ場合は
---      ビュー所有者の権限で走るため、他人の滞在も数えられる（`0015` の security_invoker = false）。
+-- > [!warning] このビューは**行レベルの情報**（どの滞在がどの夜に何名か）を返す
+-- > したがって `anon`・`authenticated` には GRANT しない。読むのは
+-- > `v_room_availability`（所有者権限で参照する）と `service_role` だけである。
+-- > 画面へ出すのは集計後の残枠だけに保つ（`0015` の [!danger] と同じ約束）。
 -- =============================================================================
 
-CREATE OR REPLACE FUNCTION public.check_in_state_on(p_checkin_id uuid, p_date date)
-RETURNS TABLE (room_type text, adults_count integer, children_count integer)
-LANGUAGE sql
-STABLE
-SET search_path = ''
-AS $$
-  SELECT
-    COALESCE(
-      (SELECT c.room_type_after FROM public.check_in_changes c
-        WHERE c.checkin_id = p_checkin_id AND c.room_type_after IS NOT NULL
-          AND c.effective_date <= p_date
-        ORDER BY c.effective_date DESC, c.created_at DESC LIMIT 1),
-      (SELECT c.room_type_before FROM public.check_in_changes c
-        WHERE c.checkin_id = p_checkin_id AND c.room_type_before IS NOT NULL
-        ORDER BY c.effective_date ASC, c.created_at ASC LIMIT 1),
-      ci.room_type),
-    COALESCE(
-      (SELECT c.adults_after FROM public.check_in_changes c
-        WHERE c.checkin_id = p_checkin_id AND c.adults_after IS NOT NULL
-          AND c.effective_date <= p_date
-        ORDER BY c.effective_date DESC, c.created_at DESC LIMIT 1),
-      (SELECT c.adults_before FROM public.check_in_changes c
-        WHERE c.checkin_id = p_checkin_id AND c.adults_before IS NOT NULL
-        ORDER BY c.effective_date ASC, c.created_at ASC LIMIT 1),
-      ci.adults_count),
-    COALESCE(
-      (SELECT c.children_after FROM public.check_in_changes c
-        WHERE c.checkin_id = p_checkin_id AND c.children_after IS NOT NULL
-          AND c.effective_date <= p_date
-        ORDER BY c.effective_date DESC, c.created_at DESC LIMIT 1),
-      (SELECT c.children_before FROM public.check_in_changes c
-        WHERE c.checkin_id = p_checkin_id AND c.children_before IS NOT NULL
-        ORDER BY c.effective_date ASC, c.created_at ASC LIMIT 1),
-      ci.children_count)
-  FROM public.check_ins ci
-  WHERE ci.checkin_id = p_checkin_id;
-$$;
+CREATE OR REPLACE VIEW public.v_check_in_nights
+WITH (security_invoker = false)
+AS
+SELECT
+  ci.checkin_id,
+  -- ★ `date` 型へ落とす（`generate_series` は timestamptz を返す）。
+  --   落とさないと `v_room_availability` 側の `cal.date`（date）との比較が暗黙変換になり、
+  --   実行時のタイムゾーン設定で境界の1日がずれうる。
+  cal.date::date AS date,
+  COALESCE(
+    (SELECT c.room_type_after FROM public.check_in_changes c
+      WHERE c.checkin_id = ci.checkin_id AND c.room_type_after IS NOT NULL
+        AND c.effective_date <= cal.date
+      ORDER BY c.effective_date DESC, c.created_at DESC LIMIT 1),
+    (SELECT c.room_type_before FROM public.check_in_changes c
+      WHERE c.checkin_id = ci.checkin_id AND c.room_type_before IS NOT NULL
+      ORDER BY c.effective_date ASC, c.created_at ASC LIMIT 1),
+    ci.room_type
+  ) AS room_type,
+  COALESCE(
+    (SELECT c.adults_after FROM public.check_in_changes c
+      WHERE c.checkin_id = ci.checkin_id AND c.adults_after IS NOT NULL
+        AND c.effective_date <= cal.date
+      ORDER BY c.effective_date DESC, c.created_at DESC LIMIT 1),
+    (SELECT c.adults_before FROM public.check_in_changes c
+      WHERE c.checkin_id = ci.checkin_id AND c.adults_before IS NOT NULL
+      ORDER BY c.effective_date ASC, c.created_at ASC LIMIT 1),
+    ci.adults_count
+  ) AS adults_count,
+  COALESCE(
+    (SELECT c.children_after FROM public.check_in_changes c
+      WHERE c.checkin_id = ci.checkin_id AND c.children_after IS NOT NULL
+        AND c.effective_date <= cal.date
+      ORDER BY c.effective_date DESC, c.created_at DESC LIMIT 1),
+    (SELECT c.children_before FROM public.check_in_changes c
+      WHERE c.checkin_id = ci.checkin_id AND c.children_before IS NOT NULL
+      ORDER BY c.effective_date ASC, c.created_at ASC LIMIT 1),
+    ci.children_count
+  ) AS children_count
+FROM       public.check_ins ci
+-- 窓は `0015` と同じ（今日から180日先）。ここを広げると残枠ビューの行数もそのまま増える。
+CROSS JOIN generate_series(current_date, current_date + interval '180 days', interval '1 day') AS cal(date)
+WHERE  cal.date::date >= ci.check_in_date
+  AND  cal.date::date <  ci.check_out_date    -- チェックアウト日は専有しない
+  AND  ci.cancelled_at IS NULL                -- キャンセル・ノーショーは専有しない（v13 §5.2.2）
+  AND  ci.status IN ('pre_registered', 'confirmed', 'staying');
 
-COMMENT ON FUNCTION public.check_in_state_on(uuid, date) IS
-  'その夜に効いている滞在の内容（宿泊形態・大人・子供 ／ v13 §5.6.9 ／ WBS 3-10）。'
-  '変更履歴（check_in_changes）を項目ごとに引き当てる。残枠ビューと宿泊費の算定が同じ答えを見るための唯一の出所。';
+COMMENT ON VIEW public.v_check_in_nights IS
+  '滞在 × 夜ごとの「その夜に効いている宿泊形態・人数」（v13 §5.6.9 ／ WBS 3-10）。'
+  '変更履歴（check_in_changes）を項目ごとに引き当てる。残枠ビューが占有を数えるための内部ビュー。'
+  '★ 行レベルの情報を返すため anon / authenticated には GRANT しない。';
 
-REVOKE ALL    ON FUNCTION public.check_in_state_on(uuid, date) FROM PUBLIC, anon;
-GRANT  EXECUTE ON FUNCTION public.check_in_state_on(uuid, date) TO authenticated, service_role;
+REVOKE ALL    ON public.v_check_in_nights FROM anon, authenticated;
+GRANT  SELECT ON public.v_check_in_nights TO   service_role;
 
 
 -- =============================================================================
@@ -240,14 +262,11 @@ booked AS (
     -- 定員超過分は複数棟を消費する。3名でコテージ（定員2）を取れば2棟。
     SUM(CEIL((eff.adults_count + eff.children_count)::numeric
              / NULLIF(cap.unit_capacity, 0)))  AS booked_units
-  FROM   public.check_ins ci
-  JOIN   cal ON cal.date >= ci.check_in_date
-            AND cal.date <  ci.check_out_date   -- チェックアウト日は専有しない
-  -- ★ その夜に効いている形態・人数を使う（`ci.room_type` ＝ 現在の形態では数えない ／ ④）。
-  CROSS JOIN LATERAL public.check_in_state_on(ci.checkin_id, cal.date) eff
+  -- ★ その夜に効いている形態・人数で数える（`check_ins.room_type` ＝ 現在の形態では数えない ／ ④）。
+  --   キャンセル・退館済みの除外と「退去日は専有しない」も内部ビュー側が済ませている。
+  FROM   public.v_check_in_nights eff
+  JOIN   cal ON cal.date = eff.date
   JOIN   cap ON cap.room_type = eff.room_type
-  WHERE  ci.cancelled_at IS NULL
-    AND  ci.status IN ('pre_registered', 'confirmed', 'staying')
   GROUP BY eff.room_type, cal.date
 )
 SELECT

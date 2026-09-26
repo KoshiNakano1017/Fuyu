@@ -5,7 +5,7 @@
 //
 // ここで固定するのは、アプリ側の判定（`tests/stay-change.test.ts`）では守れない3点である。
 //   ① 追記専用であること（UPDATE / DELETE が拒まれる）と、理由なしの行が入らないこと
-//   ② `check_in_state_on()` が**その夜に効いている形態**を返すこと
+//   ② `v_check_in_nights` が**その夜に効いている形態**を返すこと
 //   ③ 残枠ビューが「明日から移る」変更で**今夜を空きにしない**こと
 //   ④ `rooms.room_type` を書き換えられないこと（部屋台帳を壊す経路をふさぐ）
 //
@@ -135,58 +135,90 @@ describeDb("check_in_changes の制約（理由必須・空の変更行を作ら
   });
 });
 
-describeDb("check_in_state_on（その夜に効いている形態 ／ v13 §5.6.9）", () => {
+describeDb("v_check_in_nights（その夜に効いている形態・人数 ／ v13 §5.6.9）", () => {
+  // ⚠️ このビューは **authenticated へ GRANT していない**（行レベルの情報を返すため）。
+  //    そのため検査はロールを切り替えずに（＝所有者のまま）流す。
+  //    残枠ビューが所有者権限でこれを読む、という実際の経路と同じ条件になる。
+
   test("変更が無ければ check_ins の現在値を返す", () => {
     const roomType = query(`
-      ${asStaff}
+      ${SEEDED}
       ${STAY_IN_WINDOW}
-      SELECT room_type FROM public.check_in_state_on('${STAY_ID}', current_date + 10);
+      SELECT room_type FROM public.v_check_in_nights
+      WHERE checkin_id = '${STAY_ID}' AND date = current_date + 10;
     `);
     expect(roomType).toBe("campsite");
   });
 
   test("★ 変更が効く前の夜は、変更前の形態を返す（滞在全体を塗り替えない）", () => {
     const roomTypes = query(`
-      ${asStaff}
+      ${SEEDED}
       ${STAY_IN_WINDOW}
       ${MOVE_TO_COTTAGE}
       -- 形態の現在値も移動後に合わせて更新する（アプリは履歴と本体の両方を書く）
       UPDATE public.check_ins SET room_type = 'cottage' WHERE checkin_id = '${STAY_ID}';
-      SELECT string_agg(s.room_type, ',' ORDER BY d.date)
-      FROM   generate_series(current_date + 10, current_date + 12, interval '1 day') AS d(date)
-      CROSS JOIN LATERAL public.check_in_state_on('${STAY_ID}', d.date::date) s;
+      SELECT string_agg(room_type, ',' ORDER BY date) FROM public.v_check_in_nights
+      WHERE checkin_id = '${STAY_ID}';
     `);
     expect(roomTypes).toBe("campsite,campsite,cottage");
   });
 
   test("人数だけを直した変更のあとでも形態は失われない（項目ごとに引くため）", () => {
     const roomType = query(`
-      ${asStaff}
+      ${SEEDED}
       ${STAY_IN_WINDOW}
       ${MOVE_TO_COTTAGE}
       INSERT INTO public.check_in_changes
         (checkin_id, effective_date, adults_before, adults_after, reason, changed_by)
       VALUES ('${STAY_ID}', current_date + 12, 2, 3, '同伴者1名追加',
               '${TEST_MEMBERS.admin.memberId}');
-      SELECT room_type FROM public.check_in_state_on('${STAY_ID}', current_date + 12);
+      SELECT room_type FROM public.v_check_in_nights
+      WHERE checkin_id = '${STAY_ID}' AND date = current_date + 12;
     `);
     expect(roomType).toBe("cottage");
   });
 
   test("人数は変更が効く夜から切り替わる", () => {
     const counts = query(`
-      ${asStaff}
+      ${SEEDED}
       ${STAY_IN_WINDOW}
       INSERT INTO public.check_in_changes
         (checkin_id, effective_date, adults_before, adults_after, reason, changed_by)
       VALUES ('${STAY_ID}', current_date + 12, 2, 4, '同伴者2名追加',
               '${TEST_MEMBERS.admin.memberId}');
       UPDATE public.check_ins SET adults_count = 4 WHERE checkin_id = '${STAY_ID}';
-      SELECT string_agg(s.adults_count::text, ',' ORDER BY d.date)
-      FROM   generate_series(current_date + 10, current_date + 12, interval '1 day') AS d(date)
-      CROSS JOIN LATERAL public.check_in_state_on('${STAY_ID}', d.date::date) s;
+      SELECT string_agg(adults_count::text, ',' ORDER BY date) FROM public.v_check_in_nights
+      WHERE checkin_id = '${STAY_ID}';
     `);
     expect(counts).toBe("2,2,4");
+  });
+
+  test("キャンセルした滞在は1泊も出てこない（残枠を専有しない ／ v13 §5.2.2）", () => {
+    const count = query(`
+      ${SEEDED}
+      ${STAY_IN_WINDOW}
+      UPDATE public.check_ins
+      SET status = 'cancelled', cancelled_at = now(), cancel_reason_type = '会員都合',
+          cancel_reason = 'テスト', cancelled_by = '${TEST_MEMBERS.admin.memberId}'
+      WHERE checkin_id = '${STAY_ID}';
+      SELECT count(*)::text FROM public.v_check_in_nights WHERE checkin_id = '${STAY_ID}';
+    `);
+    expect(count).toBe("0");
+  });
+
+  test("★ 一般会員・anon には GRANT していない（行レベルの情報を画面へ出さない）", () => {
+    expect(
+      sqlstateOf(`
+        ${SEEDED}
+        ${STAY_IN_WINDOW}
+        ${asMemberRole}
+        SELECT count(*) FROM public.v_check_in_nights;
+      `),
+    ).toBe("42501");
+
+    expect(
+      sqlstateOf(`${SEEDED} SET ROLE anon; SELECT count(*) FROM public.v_check_in_nights;`),
+    ).toBe("42501");
   });
 });
 

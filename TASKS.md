@@ -25,7 +25,7 @@
 
 | 層 | 成果物 |
 | --- | --- |
-| DB | `supabase/migrations/0041_check_in_changes.sql` — 変更履歴 `check_in_changes`（追記専用・理由必須・staff のみ）／`check_in_state_on(checkin_id, date)`／`v_room_availability` の差し替え／`rooms.room_type` 不変トリガー |
+| DB | `supabase/migrations/0041_check_in_changes.sql` — 変更履歴 `check_in_changes`（追記専用・理由必須・staff のみ）／`v_check_in_nights`／`v_room_availability` の差し替え／`rooms.room_type` 不変トリガー |
 | 判定 | `src/lib/lodging/stay-changes.ts`（純関数）— 変更可否・残枠の再判定・**夜ごとの形態の復元**・泊単位の宿泊費 |
 | 読み書き | `src/lib/lodging/stay-change-store.ts` — 変更できる滞在／他人の占有の展開／履歴 ／ 履歴→本体→部屋割当の順で書く |
 | 画面 | `src/components/customers/StayChangeSection.tsx` ＋ 顧客詳細（`/admin/customers/[memberId]`）に「滞在の変更」節。Server Action は `changeStayAction` |
@@ -40,7 +40,7 @@
 
 **実測（ローカル PostgreSQL 16 に `0006`・`0014`・`0015`・`0041` を適用）**:
 キャンプサイト2名の滞在（+10〜+13）に「+12 からコテージ」の変更を入れると、
-占有は **+10・+11 = キャンプサイト2 ／ +12 = コテージ1棟**。`check_in_state_on()` は `campsite,campsite,cottage` を返す。
+占有は **+10・+11 = キャンプサイト2 ／ +12 = コテージ1棟**。`v_check_in_nights` は `campsite,campsite,cottage` を返す。
 理由が空白だけ・変更が1つも無い・変更前=変更後 の3種はいずれも `23514` で拒否。
 `rooms.room_type` の UPDATE は `42501`、`status` の変更は通る。
 

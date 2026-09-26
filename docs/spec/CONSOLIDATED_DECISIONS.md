@@ -1973,10 +1973,10 @@ CREATE FUNCTION rag.redact_known_names(p_text text)
     訂正は新しい変更行を理由つきで積む（`stay_ticket_transactions`〔`0016`〕・`member_notes`〔`0034`〕と同じ作法）
   - 反映先: `DB物理設計.md` §3-15（新設）、`src/lib/lodging/stay-changes.ts`、`tests/stay-change.test.ts`
 
-### 25-3. 残枠は「その夜に効いている形態・人数」で数える（`check_in_state_on()`）
+### 25-3. 残枠は「その夜に効いている形態・人数」で数える（`v_check_in_nights`）
 
 - **決定**: `v_room_availability`（`0015`）の占有の数え方を差し替え、`check_ins` の現在値ではなく
-  `check_in_state_on(checkin_id, date)`（`0041`）が返す**その夜の形態・人数**で数える
+  `v_check_in_nights`（`0041`）が返す**その夜の形態・人数**で数える
   - 決定日: 2026-09-26 ／ 決定者: 実装判断（同上）
   - 理由: 差し替え前は「明日からコテージへ移る」変更を入れた瞬間に**今夜のキャンプサイトが空き枠として返り**、
     同じ枠へ別の予約を通してしまう（ダブルブッキング）。逆にコテージは今夜も埋まった扱いになり、

@@ -294,7 +294,7 @@ function asOccupying(night: NightlyStay) {
 }
 
 /**
- * ★ 夜ごとの宿泊形態を復元する（`0041` の `check_in_state_on()` の TypeScript 版）。
+ * ★ 夜ごとの宿泊形態を復元する（`0041` の `v_check_in_nights` の TypeScript 版）。
  *
  * 優先順は3段で、SQL 側と揃えてある：
  *

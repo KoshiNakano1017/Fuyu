@@ -881,7 +881,7 @@ LEFT JOIN booked b ON b.room_type = t.room_type AND b.date = cal.date;
 > 滞在の全泊を数えると、**「明日からコテージへ移る」変更を入れた瞬間に今夜のキャンプサイトが空き枠として返る**。
 > 同じ枠へ別の予約を通してしまい、ダブルブッキングになる。
 >
-> `0041_check_in_changes.sql` がビューを差し替え、`public.check_in_state_on(checkin_id, date)` が返す
+> `0041_check_in_changes.sql` がビューを差し替え、内部ビュー `public.v_check_in_nights` が返す
 > **その夜の形態・人数**で数えるようにした（§3-15）。変更履歴が無い滞在では `check_ins` の現在値に落ちるため、
 > 本節の式・GRANT・`security_invoker = false` の判断はいずれも変わらない。
 
@@ -1254,7 +1254,7 @@ WHERE  p.full_name_normalized = i.name_norm;
 - CHECK で守っていること: 理由が空白だけの行を作れない／変更が1つも無い行を作れない／
   「変更前 = 変更後」の行を作れない（＝「変えていない項目は NULL」の規約を DB 側で守らせる）
 
-**`check_in_state_on(checkin_id, date)`**（`0041`）がその夜の形態・人数を返す。優先順は
+**`v_check_in_nights`**（`0041`）がその夜の形態・人数を返す。優先順は
 ① その夜までに効いた変更の最後の `*_after` ② 1件も無ければ最初の変更の `*_before`（＝滞在開始時の値）
 ③ 変更履歴が無ければ `check_ins` の現在値。
 ⚠️ **項目ごとに最後の非NULLを引く。** 1行が変わった項目だけを持つため、「最後の変更行を1行選んでその列を読む」
@@ -2587,4 +2587,4 @@ CREATE INDEX ix_escalation_unresolved ON unanswered_escalations (escalated_at)
 | **2026-08-23** | **Googleフォーム廃止・公開予約ページ化に伴うスキーマ改訂（v13 §9 #46〜#49）**。①**§3-6 を全面改訂**：中間テーブル `reservation_form_submissions` の構想を**撤回**（外部フォームの生回答が存在しなくなったため）。代わりに **`meal_reservations`**（カフェ事前予約注文。提供時に `orders` へ変換し、予約時点では伝票を作らない）と **`reservation_otps`**（公開予約ページの本人確認。平文コードを保存せずハッシュのみ）を新設。②**§3-11 `reservation_source` に `web_public` を追加**し既定値を変更。`google_form` は過去データ用に残す。③**§3-12 残枠ビューを全面改訂**：算出元を `room_assignments` → **`check_ins`（宿泊形態単位）**へ変更し、**`accommodation_types.allocation_mode`（`per_person` / `per_unit`）による2モード算出**を導入（コテージを人数で数えると1名予約3件で実質満室なのに「残り3名」と表示される問題を解消）。④**`menu_items` に `is_pre_orderable` / `meal_slot` を追加**し、カテゴリに「送迎・オプション」を追加（送迎 1,900円＝1,520Uii・片道は専用マスタを作らず本テーブルで扱う）。 |
 | **2026-08-20（v13 v1.15.0 反映）** | **8/13レビュー未反映分の一括反映（v13 §9 #33〜#43）に伴うスキーマ改訂**。①**§3-1 二段階承認**：`work_logs.approval_status` を `報告済み/コアメンバー確認済/承認完了/差戻し` へ変更し、`reviewed_by`（確認者）と `approved_by`（最終承認者＝admin）を**別カラムで保持**。`review_skipped`・差戻し理由の CHECK 制約・`work_log_reviews`（2人目以降の確認ログ）を追加。②**§3-2 提供ステータス**：`orders.serving_status`（未提供／提供済み）・`served_at`・`served_by` を追加し、決済ステータスと独立した2軸に。「精算済みだが未提供」検出用の部分インデックスも新設。③**§3-7 メディア**：`visibility`（公開／運営のみ）・`deleted_at`（論理削除・運営措置）・`place_id`・`taken_at`・`geo_location` を追加。**用途タグ最低1つ必須**の CHECK 制約を新設（Phase 2 の検索精度を担保）。`ai_*` 系は Phase 2 用にカラムのみ用意。④**§3-8 `eumo_grants` を新設**：`未送付→送付済→受領確認済` を追跡。送付と受領を別状態で保持。⑤**§3-9 `menu_items` / §3-10 `accommodation_rates` を新設**：Uii価格は保存せず都度算出。宿泊料金は `EXCLUDE USING gist` で適用期間の重複を防止し、過去予約を当時の料金で再計算可能に。⑥**§3-11 `check_ins.reservation_source` を追加**：アプリ内予約とフォーム経由を同一テーブルで扱い経路のみ区別。⑦**§3-12 `v_room_availability` ビューを新設**：残枠を**保存せず都度算出**（ダブルブッキング防止）。§7突合表に15〜20番を追加。 |
 | **2026-09-25** | **§3-5 街人登録申込を実装に合わせて改訂**（`0037_membership_applications.sql` ／ WBS 12-2 ／ Issue #110）。本節の DDL が**正本 v13 §7 の6項目を落としていた**ため、正本に合わせて追加した（`CLAUDE.md` §1.1）。①**`payment_method` / `paid_at` / `received_by`**（§5.10.7・§9 #52。これが無いと**現金で受け取ったときの記録先が無い**＝承認を押すだけで何で払われたかが残らない）②**`rejection_reason`**（§5.10.4 の却下理由）③**`stay_tickets_granted_at`**（§7 の項目一覧）④**`plan_id`**（`membership_plans` への FK。旧 DDL は `billed_amount_yen integer DEFAULT 30000` と**金額を直書き**しており、正本の「直書き禁止」と食い違っていた）。あわせて**金額・付与泊数をトリガーがプランから写す**形にし（本人 INSERT を開ける表であるため、RLS では列を絞れず「0円で申し込んで自分で承認済みにする」を止められない）、**二重申請を部分一意索引で防ぐ**（アプリ側の存在チェックは同時タップをすり抜ける）。「登録種別」は Phase 1 の値が `街人` 1種のみのため独立した列にせず `plan_id` で表す。§7突合表の12番を実装済みへ更新。 |
-| **2026-09-26** | **§3-15「滞在の変更履歴（`check_in_changes`）」を新設**（v13 §5.6.9 ／ WBS `3-10` ／ `0041_check_in_changes.sql` ／ 決定ログ §25-2〜§25-5）。①滞在の変更は**履歴表を正本**にし、`check_ins` は現在値として扱う（上書きだけでは「3泊目から移った」事実が消え、滞在全体が新しい単価で塗り替わる）。②`check_in_state_on(checkin_id, date)` を新設し、**§3-12 の残枠ビューが「その夜に効いている形態・人数」で占有を数える**ようにした（差し替え前は「明日から移る」変更で今夜の旧形態が空き枠として返り、ダブルブッキングになった）。③`trg_rooms_room_type_immutable` で `rooms.room_type` の UPDATE を `42501` として拒む（v13 §5.6.9 の [!important] を DB 側で担保。`service_role` も対象）。④宿泊費の差額には**独自の精算経路を作らない**（請求経路が Phase 1 に無いため、泊単位の内訳と合計を画面へ返すまで）。⚠️ `0041` は **dev / prod へ未適用**（CLAUDE.md §6.3 により自動適用しない）。 |
+| **2026-09-26** | **§3-15「滞在の変更履歴（`check_in_changes`）」を新設**（v13 §5.6.9 ／ WBS `3-10` ／ `0041_check_in_changes.sql` ／ 決定ログ §25-2〜§25-5）。①滞在の変更は**履歴表を正本**にし、`check_ins` は現在値として扱う（上書きだけでは「3泊目から移った」事実が消え、滞在全体が新しい単価で塗り替わる）。②`v_check_in_nights` を新設し、**§3-12 の残枠ビューが「その夜に効いている形態・人数」で占有を数える**ようにした（差し替え前は「明日から移る」変更で今夜の旧形態が空き枠として返り、ダブルブッキングになった）。③`trg_rooms_room_type_immutable` で `rooms.room_type` の UPDATE を `42501` として拒む（v13 §5.6.9 の [!important] を DB 側で担保。`service_role` も対象）。④宿泊費の差額には**独自の精算経路を作らない**（請求経路が Phase 1 に無いため、泊単位の内訳と合計を画面へ返すまで）。⚠️ `0041` は **dev / prod へ未適用**（CLAUDE.md §6.3 により自動適用しない）。 |

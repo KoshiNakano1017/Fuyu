@@ -278,7 +278,7 @@ export async function fetchOtherStayNights(params: {
       date: night.date,
       roomType: night.roomType,
       // ⚠️ 人数は現在値で数える。夜ごとの人数まで遡ると、残枠の判定が
-      //    `check_in_state_on()`（DB 側）と一致していることを試験で固定しにくくなるため、
+      //    `v_check_in_nights`（DB 側）と一致していることを試験で固定しにくくなるため、
       //    ここは**安全側（増えた人数で数える）**に倒す。
       adultsCount: row.adults_count,
       childrenCount: row.children_count,
