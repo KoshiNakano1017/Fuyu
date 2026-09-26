@@ -13,6 +13,7 @@ import {
   countUnhandledQuestCandidates,
   isMorningMeetingRecorded,
   morningMeetingLabel,
+  sumCirculatedUii,
 } from "@/lib/dashboard/today-summary";
 import { fetchGrants } from "@/lib/eumo/store";
 import { fetchRevisitAlerts } from "@/lib/customers/fetch-revisit";
@@ -95,6 +96,8 @@ export default async function AdminDashboardPage() {
   const pendingGrants = countPendingGrants(grants);
   const morningRecorded = isMorningMeetingRecorded(meetings, today);
   const unhandledCandidates = countUnhandledQuestCandidates(meetings);
+  // ★ ここだけ集計の窓が「累計」である（v13 §9 #69 ／ 2026-09-26 オーナー確定）。
+  const circulatedUii = sumCirculatedUii(orders);
 
   return (
     <main className="mx-auto flex max-w-4xl flex-col gap-6 p-6">
@@ -165,6 +168,13 @@ export default async function AdminDashboardPage() {
           href="/staff/eumo"
           linkLabel="Eumo給付一覧へ（送付・受領確認）"
           note="滞留（14日超）の判定は一覧側が持つ"
+        />
+        <SummaryCard
+          title="Uii流通量（累計）"
+          value={`${circulatedUii.toLocaleString("ja-JP")} Uii`}
+          href="/admin/customers"
+          linkLabel="顧客管理へ（伝票の明細を見る）"
+          note="全期間の会計額の累計。今日の実数ではない／会員の残高合計でもない"
         />
         <SummaryCard
           title="朝会議事録"
