@@ -2,10 +2,14 @@ import { ReservationForm } from "@/components/lodging/ReservationForm";
 import { MasterDataShortcut } from "@/components/nav/MasterDataShortcut";
 import { requireSignedIn } from "@/lib/auth/guard";
 import {
+  fetchAccommodationRates,
   fetchAccommodationTypes,
   fetchAvailability,
   fetchMyStays,
 } from "@/lib/lodging/fetch-lodging";
+import { prefillFromStays } from "@/lib/lodging/reservation-intake";
+import { fetchStayTicketBalance } from "@/lib/lodging/stay-tickets";
+import { todayInJapan } from "@/lib/today";
 
 import { createReservationAction } from "./actions";
 
@@ -28,6 +32,11 @@ import { createReservationAction } from "./actions";
  * OTP 検証・`service_role` 読み出しの経路ごと引き取る必要があり、本画面へ
  * 未ログイン向けの入力欄だけを足し増すと二重実装が3つ目に増える。
  *
+ * ## 会員だから出せるもの（2026-09-26 ／ WBS 3-7 の残り）
+ *
+ * **会員料金**（`accommodation_rates` ／ Uii 主・円 副）と**保有宿泊券の充当**を画面に出す。
+ * どちらも `/reserve`（未ログイン）には無い振る舞いで、v13 §5.2.4 が会員向けに定めている差分である。
+ *
  * ## 残枠は都度算出
  *
  * 本日分の残枠を `v_room_availability`（`0015`）から読んで選択肢へ添える。
@@ -37,11 +46,16 @@ import { createReservationAction } from "./actions";
 export default async function ReservationsPage() {
   const viewer = await requireSignedIn();
 
-  const today = new Date().toISOString().slice(0, 10);
-  const [types, todayAvailability, myStays] = await Promise.all([
+  // 基準日は日本時間で決める（`src/lib/today.ts`）。UTC で切ると深夜帯に前日の残枠が出る。
+  const today = todayInJapan();
+  const [types, todayAvailability, myStays, rates, stayTicketBalance] = await Promise.all([
     fetchAccommodationTypes(),
     fetchAvailability({ fromDate: today, toDate: today }),
     fetchMyStays(viewer.memberId),
+    // 会員料金の表示（v13 §5.2.4「各形態の料金は料金マスタから取得して表示」）
+    fetchAccommodationRates(),
+    // 宿泊券の充当（同節。**予約時点では消費しない**）
+    fetchStayTicketBalance(viewer.memberId),
   ]);
 
   const displayNameOf = new Map(types.map((type) => [type.roomType, type.displayName]));
@@ -54,9 +68,17 @@ export default async function ReservationsPage() {
           {/* 料金を出している画面からマスタへ直接飛ぶ（§5.9.5「入口の重複を許す」）。管理者にだけ出る。 */}
           <MasterDataShortcut role={viewer.role} label="料金マスタ" />
         </div>
+        {/*
+          `prefill` は前回の滞在から作る（v13 §5.2.4「既知情報の再入力を求めない」）。
+          ★ PII（氏名・住所）はフォームへ書き戻さない — **尋ねないこと**で再入力を無くしている。
+        */}
         <ReservationForm
           types={types}
           todayAvailability={todayAvailability}
+          rates={rates}
+          stayTicketBalance={stayTicketBalance}
+          prefill={prefillFromStays(myStays)}
+          today={today}
           action={createReservationAction}
         />
       </section>

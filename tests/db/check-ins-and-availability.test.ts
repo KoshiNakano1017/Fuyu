@@ -368,3 +368,64 @@ describeDb("v_room_availability（残枠ビュー ／ WBS 3-8 ／ v13 §5.2.5）
     expect(state).toBe("42501");
   });
 });
+
+describeDb("宿泊券の充当（`0042` ／ WBS 3-7 ／ v13 §5.2.4）", () => {
+  // ★ 充当は「意思」であって消費ではない。消費（`stay_ticket_transactions` の `consume`）は
+  //   チェックアウト時に起きる（WBS 3-4）。ここで固定するのは**列が予約の範囲を超えられない**ことだけ。
+
+  test("既定は0泊（充当なし）", () => {
+    const applied = query(`
+      ${asStaff}
+      INSERT INTO public.check_ins (member_id, room_type, check_in_date, check_out_date, adults_count)
+      VALUES ('${TEST_MEMBERS.self.memberId}', 'dormitory', current_date + 10, current_date + 12, 1);
+      SELECT stay_tickets_applied_nights::text FROM public.check_ins
+      WHERE member_id = '${TEST_MEMBERS.self.memberId}' AND check_in_date = current_date + 10;
+    `);
+    expect(applied).toBe("0");
+  });
+
+  test("泊数ぶんまでは充当できる（2泊の予約に2泊）", () => {
+    const applied = query(`
+      ${asStaff}
+      INSERT INTO public.check_ins
+        (member_id, room_type, check_in_date, check_out_date, adults_count, stay_tickets_applied_nights)
+      VALUES ('${TEST_MEMBERS.self.memberId}', 'dormitory', current_date + 10, current_date + 12, 1, 2);
+      SELECT stay_tickets_applied_nights::text FROM public.check_ins
+      WHERE member_id = '${TEST_MEMBERS.self.memberId}' AND check_in_date = current_date + 10;
+    `);
+    expect(applied).toBe("2");
+  });
+
+  test("★ 泊数を超える充当は入らない（2泊の予約に3泊ぶん）", () => {
+    const state = sqlstateOf(`
+      ${asStaff}
+      INSERT INTO public.check_ins
+        (member_id, room_type, check_in_date, check_out_date, adults_count, stay_tickets_applied_nights)
+      VALUES ('${TEST_MEMBERS.self.memberId}', 'dormitory', current_date + 10, current_date + 12, 1, 3);
+    `);
+    expect(state).toBe("23514");
+  });
+
+  test("負の充当は入らない", () => {
+    const state = sqlstateOf(`
+      ${asStaff}
+      INSERT INTO public.check_ins
+        (member_id, room_type, check_in_date, check_out_date, adults_count, stay_tickets_applied_nights)
+      VALUES ('${TEST_MEMBERS.self.memberId}', 'dormitory', current_date + 10, current_date + 12, 1, -1);
+    `);
+    expect(state).toBe("23514");
+  });
+
+  test("★ 日程を短縮して充当が泊数を超える更新も弾く（予約の変更経路 ／ WBS 3-10）", () => {
+    const state = sqlstateOf(`
+      ${asStaff}
+      INSERT INTO public.check_ins
+        (checkin_id, member_id, room_type, check_in_date, check_out_date, adults_count, stay_tickets_applied_nights)
+      VALUES ('00000000-0000-0000-0000-0000000000f1', '${TEST_MEMBERS.self.memberId}',
+              'dormitory', current_date + 10, current_date + 13, 1, 3);
+      UPDATE public.check_ins SET check_out_date = current_date + 11
+      WHERE checkin_id = '00000000-0000-0000-0000-0000000000f1';
+    `);
+    expect(state).toBe("23514");
+  });
+});
