@@ -311,8 +311,19 @@ jobs:
               exit 1
             fi
           done
-          if git diff --quiet && [ -z "$(git ls-files --others --exclude-standard)" ]; then
-            echo "修正なし。push しません"
+          # ⚠️ 2026-09-26 修正（Issue #147 の暴走）: automation/state/ だけの差分では push しない。
+          #   このステップは `if: always()` であり、レビューが基盤エラー（session limit 等）で
+          #   落ちた場合も実行される。そのとき dirty なのは review.mjs が必ず書く
+          #   automation/state/issue-<n>.json（試行回数）**だけ**である。
+          #   それを push すると pull_request(synchronize) で本ワークフローが再起動し、
+          #   また同じ基盤エラーで落ちて、また state を push する——という自己再起動になる。
+          #   実測: 2026-09-22 14:36Z〜09-23 00:48Z に 94 周（3.4分間隔）、空コミット97件、
+          #   session limit エラーコメント277件。`auto:retry` の冷却60分（§6.4）は
+          #   **ラベル経路の再開しか見ていない**ため、この経路には効かない。
+          #   auto-02 は 2026-09-14 に同じ理由で automation/state/ を別扱いにしている（§3 #3 のガード）。
+          REAL="$(git status --porcelain | sed 's/^...//' | grep -v '^automation/state/' || true)"
+          if [ -z "$REAL" ]; then
+            echo "修正なし（automation/state/ の記録だけ）。push しません"
             exit 0
           fi
           git add -A
@@ -342,12 +353,13 @@ jobs:
           set -euo pipefail
           # 2026-09-16: spec → auto:blocked（オーナー判断）／ infra・credit → auto:retry（自動再開）
           # 個人情報の検出（review-privacy）は必ず spec 側に落ちるため、人間の目を通る。
+          # 2026-09-26 追加: infra-exhausted（同一の基盤エラーが3回続いた）も auto:blocked へ落とす。
+          #   自動再開を続けても同じ所で落ちるだけで、セッション枠だけが減る（Issue #147）。
           KIND="${KIND:-spec}"
-          if [ "$KIND" = "spec" ]; then
-            NEW_LABEL="auto:blocked"
-          else
-            NEW_LABEL="auto:retry"
-          fi
+          case "$KIND" in
+            spec|infra-exhausted) NEW_LABEL="auto:blocked" ;;
+            *)                    NEW_LABEL="auto:retry" ;;
+          esac
           gh issue edit "$ISSUE" --repo "$REPO" \
             --remove-label "auto:review" --add-label "$NEW_LABEL" || true
 

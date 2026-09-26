@@ -34,3 +34,24 @@ export interface TextAiClient {
    */
   generateStructured<T>(request: StructuredTextRequest): Promise<T>;
 }
+
+/**
+ * 埋め込み（ベクトル化）専用のクライアント。`TextAiClient` と分けてある。
+ *
+ * 分ける理由は、**呼び出し側が必要とする能力が違う**ことである。投影（WBS 9-1）が要るのは
+ * 「テキスト → 固定次元のベクトル」だけで、構造化生成は要らない。1つのインタフェースに
+ * まとめると、埋め込みしか使わない箇所が構造化生成の実装まで抱えることになる。
+ */
+export interface EmbeddingAiClient {
+  /** 埋め込みの次元。`knowledge_chunks.embedding` の型と一致していなければならない。 */
+  readonly dimensions: number;
+  /** モデル名。`knowledge_chunks.embedding_model` へそのまま保存する。 */
+  readonly model: string;
+  /**
+   * 複数のテキストをまとめてベクトル化する。返る順序は入力と同じ。
+   *
+   * **1件ずつ呼ぶ口にしない。** 投影は1件の議事録から複数チャンクを作るため、
+   * 1件ずつだと API 呼び出し回数がチャンク数に比例する（v13 §8 の応答時間・課金の両方に響く）。
+   */
+  embed(texts: readonly string[]): Promise<number[][]>;
+}
