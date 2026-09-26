@@ -43,7 +43,12 @@ type CheckInRow = {
   adults_count: number;
   children_count: number;
   status: StayForChange["status"];
+  stay_tickets_applied_nights: number;
 };
+
+/** `check_ins` から読む列。滞在の変更（`3-10`）と残枠の展開で同じ形を使う。 */
+const CHECK_IN_COLUMNS =
+  "checkin_id, member_id, room_type, check_in_date, check_out_date, adults_count, children_count, status, stay_tickets_applied_nights";
 
 /** 選択肢に出す部屋（`rooms` の `status = '利用可'` のみ）。 */
 export type RoomOption = {
@@ -64,9 +69,7 @@ export async function fetchChangeableStays(memberId: string): Promise<StayForCha
 
   const { data, error } = await supabase
     .from("check_ins")
-    .select(
-      "checkin_id, member_id, room_type, check_in_date, check_out_date, adults_count, children_count, status",
-    )
+    .select(CHECK_IN_COLUMNS)
     .eq("member_id", memberId)
     .is("cancelled_at", null)
     .in("status", CHANGEABLE_STATUSES)
@@ -91,6 +94,7 @@ export async function fetchChangeableStays(memberId: string): Promise<StayForCha
       childrenCount: row.children_count,
       roomId: assignment?.roomId ?? null,
       roomName: assignment?.roomName ?? null,
+      stayTicketsAppliedNights: row.stay_tickets_applied_nights,
     };
   });
 }
@@ -101,9 +105,7 @@ export async function fetchStayForChange(checkinId: string): Promise<StayForChan
 
   const { data, error } = await supabase
     .from("check_ins")
-    .select(
-      "checkin_id, member_id, room_type, check_in_date, check_out_date, adults_count, children_count, status",
-    )
+    .select(CHECK_IN_COLUMNS)
     .eq("checkin_id", checkinId)
     .maybeSingle();
 
@@ -124,6 +126,7 @@ export async function fetchStayForChange(checkinId: string): Promise<StayForChan
     childrenCount: row.children_count,
     roomId: assignment?.roomId ?? null,
     roomName: assignment?.roomName ?? null,
+    stayTicketsAppliedNights: row.stay_tickets_applied_nights,
   };
 }
 
@@ -249,9 +252,7 @@ export async function fetchOtherStayNights(params: {
 
   const query = supabase
     .from("check_ins")
-    .select(
-      "checkin_id, member_id, room_type, check_in_date, check_out_date, adults_count, children_count, status",
-    )
+    .select(CHECK_IN_COLUMNS)
     .gt("check_out_date", params.fromDate)
     .lte("check_in_date", params.toDate)
     .is("cancelled_at", null)
