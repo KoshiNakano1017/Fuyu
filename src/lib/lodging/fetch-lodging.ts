@@ -7,7 +7,7 @@
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 import type { AllocationMode } from "./availability";
-import type { AccommodationRate } from "./rates";
+import { memberCategoryOf, type AccommodationRate } from "./rates";
 
 /** 宿泊形態（`accommodation_types`）。並び順は `display_order`。 */
 export type AccommodationType = {
@@ -26,6 +26,16 @@ export type DailyAvailability = {
   available: number;
 };
 
+/**
+ * 会員区分の表示語（v13 §5.2.3「表示内容」＝ …大人/子供人数・**会員区分**）。
+ *
+ * ★ **料金区分（`accommodation_rates.member_category`）と同じ2値を日本語にしただけ**である。
+ *   正本が定める会員区分はこの料金の2値しか無く（v13 §5.4.2②・§7）、判定は
+ *   「自己申告を使わずログイン状態から行う」（v13 §5.2.3 の warning）。
+ *   別系統の判定（`member_type` からの導出など）をここに作らない。
+ */
+export type MemberCategoryLabel = "会員" | "非会員";
+
 /** カレンダーに並べる滞在（`check_ins`）。**個人情報は持たない。** */
 export type StayEntry = {
   checkinId: string;
@@ -37,6 +47,34 @@ export type StayEntry = {
   adultsCount: number;
   childrenCount: number;
   status: string;
+  /**
+   * 備考（`check_ins.note`）。**「要確認」予約の判定に使う唯一の材料**である
+   * （v13 §5.2.3 TO-BE④ ／ §9 #30-④：空と見なすのは完全な空欄のみ）。
+   *
+   * ⚠️ 本人が書いた自由記述であり、氏名・連絡先が混じりうる。
+   * 一覧に出すのは運営画面（C10）に限り、他者向けの画面へ載せない（CLAUDE.md §7.1）。
+   */
+  note?: string | null;
+  /**
+   * 割当部屋の名前（`room_assignments.room_name_snapshot`）。未割当なら `null`。
+   *
+   * 現在名（`rooms.room_name`）ではなく**割当時のスナップショット**を引く。
+   * 部屋はリネームされうるため（`0006` の COMMENT ／ v13 §5.6.8）。
+   */
+  assignedRoomName?: string | null;
+  /** 会員区分の表示語。引けなければ `null`（別の値で埋めない）。 */
+  memberCategory?: MemberCategoryLabel | null;
+  /**
+   * キャンセル日時（`check_ins.cancelled_at`）。`null`／未設定なら有効な予約。
+   *
+   * キャンセルは**物理削除しない**（v13 §5.2.2 ／ §9 #27）。本人向けには
+   * 「運営によりキャンセル（日時・理由）」として残すため、取得側で行ごと落とさない。
+   */
+  cancelledAt?: string | null;
+  /** キャンセル理由の区分（`会員都合` / `ノーショー` / `運営都合` ／ `0014` L155-157）。 */
+  cancelReasonType?: string | null;
+  /** キャンセル理由の自由記述（`check_ins.cancel_reason`。キャンセル時は必須）。 */
+  cancelReason?: string | null;
 };
 
 export async function fetchAccommodationTypes(): Promise<AccommodationType[]> {
@@ -118,7 +156,7 @@ export async function fetchStaysOverlapping(params: {
   const { data, error } = await supabase
     .from("check_ins")
     .select(
-      "checkin_id, member_id, room_type, check_in_date, check_out_date, adults_count, children_count, status",
+      "checkin_id, member_id, room_type, check_in_date, check_out_date, adults_count, children_count, status, note, reservation_source",
     )
     // 退去日は専有しないので、境界は `check_out_date > fromDate`（`>=` にすると
     // 前日に発った予約まで拾ってしまう）。
@@ -140,31 +178,50 @@ export async function fetchStaysOverlapping(params: {
     adults_count: number;
     children_count: number;
     status: string;
+    note: string | null;
+    reservation_source: string;
   }[];
 
-  const labels = await fetchMemberLabels(rows.map((row) => row.member_id));
+  const [displayNames, assignedRoomNames] = await Promise.all([
+    fetchMemberDisplayNames(rows.map((row) => row.member_id)),
+    fetchAssignedRoomNames(rows.map((row) => row.checkin_id)),
+  ]);
 
   return rows.map((row) => ({
     checkinId: row.checkin_id,
     memberId: row.member_id,
-    memberLabel: labels.get(row.member_id) ?? "（表示名なし）",
+    memberLabel: displayNames.get(row.member_id) ?? "（表示名なし）",
     roomType: row.room_type,
     checkInDate: row.check_in_date,
     checkOutDate: row.check_out_date,
     adultsCount: row.adults_count,
     childrenCount: row.children_count,
     status: row.status,
+    note: row.note,
+    assignedRoomName: assignedRoomNames.get(row.checkin_id) ?? null,
+    memberCategory: memberCategoryLabelOfReservation(row.reservation_source),
   }));
 }
 
-/** 本人の予約（マイページの宿泊タブ ／ 画面ID A12 ／ WBS 3-8）。RLS が行を絞る。 */
+/**
+ * 本人の予約（マイページの宿泊タブ ／ 画面ID A12 ／ WBS 3-8）。RLS が行を絞る。
+ *
+ * ★ **キャンセル済みも返す。** v13 §5.2.2「本人への表示」は、キャンセル／ノーショーを
+ * 「マイログの宿泊履歴に『運営によりキャンセル（日時・理由）』と表示し、**相互確認できる
+ * 状態にする**」と定める。本人向けにキャンセルを知らせる画面は他に無いため、ここで
+ * `cancelled_at IS NULL` を掛けると、**取り消された事実が本人からだけ見えなくなる**。
+ *
+ * 運営の `fetchStaysOverlapping()` と残枠ビュー `v_room_availability`（`0015`）が
+ * キャンセルを除くのは**残枠を専有させないため**（§5.2.5①）であり、本人への表示とは目的が違う。
+ * 「予定」として描かない手当ては `buildMyStayCalendar()` 側で行う。
+ */
 export async function fetchMyStays(memberId: string): Promise<StayEntry[]> {
   const supabase = await createServerSupabaseClient();
 
   const { data, error } = await supabase
     .from("check_ins")
     .select(
-      "checkin_id, member_id, room_type, check_in_date, check_out_date, adults_count, children_count, status",
+      "checkin_id, member_id, room_type, check_in_date, check_out_date, adults_count, children_count, status, note, cancelled_at, cancel_reason_type, cancel_reason",
     )
     .eq("member_id", memberId)
     .order("check_in_date", { ascending: false });
@@ -183,6 +240,10 @@ export async function fetchMyStays(memberId: string): Promise<StayEntry[]> {
       adults_count: number;
       children_count: number;
       status: string;
+      note: string | null;
+      cancelled_at: string | null;
+      cancel_reason_type: string | null;
+      cancel_reason: string | null;
     }[]
   ).map((row) => ({
     checkinId: row.checkin_id,
@@ -194,11 +255,89 @@ export async function fetchMyStays(memberId: string): Promise<StayEntry[]> {
     adultsCount: row.adults_count,
     childrenCount: row.children_count,
     status: row.status,
+    note: row.note,
+    cancelledAt: row.cancelled_at,
+    cancelReasonType: row.cancel_reason_type,
+    cancelReason: row.cancel_reason,
   }));
 }
 
-/** 表示名をまとめて引く。他者向けの表示規則（v13 §5.9.5）はビュー側が持っている。 */
-async function fetchMemberLabels(memberIds: readonly string[]): Promise<Map<string, string>> {
+/**
+ * 本人の滞在を1件読む（画面ID A12 の遷移先 `/me/stays/[checkinId]` ／ WBS 3-8）。
+ *
+ * ⚠️ **`member_id` の条件をここで必ず付ける。** RLS も同じ境界を引いているが、
+ * URL の `checkinId` は利用者が書き換えられる。他人の滞在IDを入れられたときに
+ * 「RLS が弾くはず」に頼ると、ポリシーを1つ緩めた瞬間に他人の滞在が読める
+ * （v13 §5.9.4「認可は多層で持つ」）。見つからなければ `null`。
+ *
+ * キャンセル済みの滞在も返す。404 にすると、古いブックマークから開いた本人が
+ * 「予約が消えた」としか分からない。画面側で `cancellationNoticeOf()` を出して
+ * 取り消された事実・日時・理由を読ませる（v13 §5.2.2「本人への表示」）。
+ */
+export async function fetchMyStay(params: {
+  memberId: string;
+  checkinId: string;
+}): Promise<StayEntry | null> {
+  const supabase = await createServerSupabaseClient();
+
+  const { data, error } = await supabase
+    .from("check_ins")
+    .select(
+      "checkin_id, member_id, room_type, check_in_date, check_out_date, adults_count, children_count, status, note, cancelled_at, cancel_reason_type, cancel_reason",
+    )
+    .eq("member_id", params.memberId)
+    .eq("checkin_id", params.checkinId)
+    .maybeSingle();
+
+  if (error || !data) {
+    return null;
+  }
+
+  const row = data as {
+    checkin_id: string;
+    member_id: string;
+    room_type: string;
+    check_in_date: string;
+    check_out_date: string;
+    adults_count: number;
+    children_count: number;
+    status: string;
+    note: string | null;
+    cancelled_at: string | null;
+    cancel_reason_type: string | null;
+    cancel_reason: string | null;
+  };
+
+  const assignedRoomNames = await fetchAssignedRoomNames([row.checkin_id]);
+
+  return {
+    checkinId: row.checkin_id,
+    memberId: row.member_id,
+    memberLabel: "自分",
+    roomType: row.room_type,
+    checkInDate: row.check_in_date,
+    checkOutDate: row.check_out_date,
+    adultsCount: row.adults_count,
+    childrenCount: row.children_count,
+    status: row.status,
+    note: row.note,
+    assignedRoomName: assignedRoomNames.get(row.checkin_id) ?? null,
+    cancelledAt: row.cancelled_at,
+    cancelReasonType: row.cancel_reason_type,
+    cancelReason: row.cancel_reason,
+  };
+}
+
+/**
+ * 表示名をまとめて引く。他者向けの表示規則（v13 §5.9.5）はビュー側が持っている。
+ *
+ * ⚠️ **`member_type`（立場）をここで読まない。** 画面へ出す会員区分は料金区分から導く
+ * （`memberCategoryLabelOfReservation()`）。認可に使わないとしても、`member_type` から
+ * 別系統の区分を作ると料金と食い違う（下記の理由）。
+ */
+async function fetchMemberDisplayNames(
+  memberIds: readonly string[],
+): Promise<Map<string, string>> {
   const unique = [...new Set(memberIds)];
   if (unique.length === 0) {
     return new Map();
@@ -210,13 +349,80 @@ async function fetchMemberLabels(memberIds: readonly string[]): Promise<Map<stri
     .select("member_id, display_name")
     .in("member_id", unique);
 
-  const labels = new Map<string, string>();
+  const names = new Map<string, string>();
   for (const row of (data ?? []) as { member_id: string; display_name: string | null }[]) {
     if (row.display_name !== null) {
-      labels.set(row.member_id, row.display_name);
+      names.set(row.member_id, row.display_name);
     }
   }
-  return labels;
+  return names;
+}
+
+/**
+ * 予約1件の会員区分（C10 の表示 ／ v13 §5.2.3「表示内容」）。
+ *
+ * ## 何から導くか ― 予約経路（`check_ins.reservation_source` ／ `0014` L144-146）
+ *
+ * 正本が定める会員区分は**料金の2値**（会員／非会員 ／ v13 §5.4.2②）だけで、
+ * その判定は「**自己申告を使わずログイン状態から行う**」（v13 §5.2.3 の warning）。
+ * 予約時点のログイン状態を残している列は `reservation_source` である
+ * （`web_public` ＝ 公開予約ページ・**未ログイン** ／ v13 §5.2.4 の note）。
+ * そして同じ warning が「**未ログインの予約は常に非会員料金**」と定めている。
+ * したがって `web_public` は非会員、ログインが前提の `in_app` は会員になる。
+ *
+ * ## なぜ `member_type` から導かないのか
+ *
+ * `member_type`（親方／街人（コア）／街人（一般）／ゲスト ＝ `0001` の CHECK）から別に導くと、
+ * ゲストロールの会員に「非会員」と表示しながら**会員料金を請求する**食い違いが生まれる。
+ * 課金に使う唯一の規則は `rates.ts` の `memberCategoryOf(signedIn)` であり、ここもそれを通す。
+ *
+ * ⚠️ `staff_manual`（運営の手入力）と `google_form`（廃止済みフォームの過去データ）は、
+ *    予約者がログインしていたかを残していない。**推測で会員／非会員のどちらかに寄せず `null`**
+ *    にする（`StayEntry.memberCategory` の「引けなければ `null`」）。
+ *    この2経路の表し方は正本に無く、`QUESTIONS.md`
+ *    「[2026-09-25] C10 の会員区分を予約経路から導けない2経路（`staff_manual`・`google_form`）をどう表示するか」
+ *    に仮決定として起票してある。
+ */
+function memberCategoryLabelOfReservation(
+  reservationSource: string,
+): MemberCategoryLabel | null {
+  if (reservationSource === "web_public") {
+    return memberCategoryOf(false) === "member" ? "会員" : "非会員";
+  }
+  if (reservationSource === "in_app") {
+    return memberCategoryOf(true) === "member" ? "会員" : "非会員";
+  }
+  return null;
+}
+
+/**
+ * 滞在中の割当部屋名をまとめて引く（`room_assignments` ／ 画面ID C10 の「割当部屋」）。
+ *
+ * **終了していない割当（`ended_at IS NULL`）だけ**を見る。部屋移動は既存行を終了して
+ * 新規行を足す形なので（`0006`）、終了済みを含めると移動前の部屋名が混ざる。
+ */
+async function fetchAssignedRoomNames(
+  checkinIds: readonly string[],
+): Promise<Map<string, string>> {
+  const unique = [...new Set(checkinIds)];
+  if (unique.length === 0) {
+    return new Map();
+  }
+
+  const supabase = await createServerSupabaseClient();
+  const { data } = await supabase
+    .from("room_assignments")
+    .select("check_in_id, room_name_snapshot")
+    .in("check_in_id", unique)
+    .is("ended_at", null);
+
+  const names = new Map<string, string>();
+  for (const row of (data ?? []) as { check_in_id: string; room_name_snapshot: string | null }[]) {
+    if (row.room_name_snapshot !== null) {
+      names.set(row.check_in_id, row.room_name_snapshot);
+    }
+  }
+  return names;
 }
 
 /**
