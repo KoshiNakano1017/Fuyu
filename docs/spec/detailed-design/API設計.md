@@ -598,7 +598,19 @@ paths:
                 is_representative:
                   type: boolean
                   default: true
-                  description: "false = 同伴者の名簿行（代表者と別の1名簿行として保存する）"
+                  description: >
+                    false = 同伴者の名簿行（代表者と別の1名簿行として保存する）。
+                    **false と明示されたときだけ同伴者として扱う**（未指定は代表者）。
+                entry_id:
+                  type: string
+                  format: uuid
+                  nullable: true
+                  description: >
+                    同伴者の名簿行を訂正するときに、対象の lodging_register_entries.entry_id を指定する
+                    （2026-09-26 追加 ／ WBS 3-2）。代表者の行は「そのチェックインの最新の1行」で一意に
+                    決まるが、同伴者は同じチェックインに複数並ぶため対象が決まらない。未指定なら新規作成。
+                    ⚠️ サーバは entry_id が **そのチェックインの同伴者行であること**を必ず確かめてから
+                    更新する（確かめないと代表者の行・別のチェックインの名簿を上書きできる＝法定記録の改変）。
       responses:
         "201":
           description: 名簿行を新規作成した
@@ -606,9 +618,22 @@ paths:
           description: 既存の名簿行を更新した（チェックアウト前の訂正。DB物理設計.md §3-13② [!danger] 参照）
         "403":
           description: "core_member・admin 以外からの呼び出し"
+        "404":
+          description: >
+            checkin_id が存在しない、または entry_id がそのチェックインの同伴者行ではない。
+            **403 ではなく 404 を返す**（403 にすると「存在はするが権限が無い」と読めて、
+            他人の名簿の存在を当てられる）
         "422":
           description: "address・previous_location が空、または full_name_confirmed が false"
 ```
+
+> [!note] 同伴者の名簿行に `member_id` を入れない（2026-09-26 ／ WBS 3-2）
+> 同伴者は会員とは限らず、仮に代表者の `member_id` を写すと `lodging_register_entries` の
+> `lre_select_self`（`member_id = current_member_id()`）により**代表者が同伴者の氏名・住所を
+> 読める**ようになる。`DB物理設計.md` §3-13①が「`check_ins` に住所を足すと同伴者の住所が
+> 予約者へ返る」として専用テーブルにした理由と同じであり、**同伴者行は `member_id = NULL`** とする
+> （`0010` のコメントもこの前提で書かれている）。名簿の削除は API・画面のどちらにも口を作らない
+> （`0010` は DELETE のポリシーも GRANT も与えていない。3年経過分は定期ジョブだけが消す）。
 
 ⚠️ **本エンドポイントの認可を `本人` に広げない。** `lodging_register_entries` の INSERT/UPDATE RLS
 （`DB物理設計.md` §3-13②）は staff 限定であり、これは意図的である。旅館業法対応の法定記録を
