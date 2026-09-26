@@ -16,6 +16,46 @@
 
 ## バックログ
 
+## [2026-09-26] 自律ループが同じ基盤エラーで自分を再起動し続けた（Issue #147 の暴走） — DONE
+
+インタラクティブセッションでの調査・修正。オーナー報告「`You've hit your session limit` で
+何度もループしていて Issue #147 のコメントが多すぎた」から着手した。
+
+**実測（2026-09-25 集計）**
+
+| 指標 | 値 |
+| --- | ---: |
+| 暴走時間 | 2026-09-22 14:36Z 〜 09-23 00:48Z（**約10時間・94周・3.4分間隔**） |
+| #147 の総コメント | 427件（**うちループ由来 371件＝87%**） |
+| `session limit` エラーコメント | 277件（review-spec 92 / review-privacy 92 / review-quality 93） |
+| 空コミット（`fix: レビュー指摘への対応`） | **97件**（中身は `automation/state/issue-147.json` の3行だけ） |
+| 焼いたセッション枠 | **3枠連続**（`resets 5:20pm` → `10:20pm` → `3:20am`） |
+| 同期間の run | auto-03 **125回** ／ Claude コードレビュー **597回** ／ CI 220回 |
+| `state` の最終値 | **`attempts.infra: 249` ／ `repeatedFingerprint.infra: 122`** |
+
+**原因**: `auto-03` の「修正を push する」ステップが `if: always()` であり、レビューが
+基盤エラーで落ちても実行される。そのとき dirty なのは `review.mjs` が必ず書く
+`automation/state/issue-<n>.json`（試行回数）**だけ**で、それを push すると
+`pull_request(synchronize)` で auto-03 自身が再起動する。
+**失敗の記録を、再実行の起爆点へ commit していた。**
+`auto:retry` の冷却60分（設計 §6.4）は**ラベル経路の再開しか見ておらず**、PR 経路に効かない。
+`repeatedFingerprint` は数えてはいたが**停止条件に使われていなかった**（入口で state を見ていない）。
+⚠️ 同型の欠陥は `auto-02` が 2026-09-14 に修正済みだったが、`auto-03` へ横展開されていなかった。
+
+**対処（2026-09-26 ／ ブランチ `fix/loop-self-retrigger`）**
+
+1. `auto-03`: `automation/state/` だけの差分では push しない（再入の燃料を切る）
+2. `lib/state.mjs`: 入口ゲート `infraLoopExhausted()`（同一指紋3回で真）＋ `resetAttempts()` を新設し、
+   `plan`/`implement`/`review` の3本で**エージェント起動前**に判定する
+3. `classifyBlock()`: 反復した基盤エラーを **`infra-exhausted`** とし、`auto:retry`（自動再開）ではなく
+   `auto:blocked`（オーナー判断）へ。`session limit` の語で `credit` に落ちないよう順序を入れ替えた
+4. 基盤エラーの Issue コメントを並列3体で3件出していたのを1件に絞った
+5. 回帰テスト `tests/loop-infra-retry-gate.test.ts`（12ケース）
+6. 設計書 v1.14（§6.3 に実測と対処を追記）
+
+**残（オーナー判断）**: #147 に残る 371件のループコメントを畳むか（GitHub は一括削除の API を持たない。
+`gh api -X DELETE` を回せば消せるが、記録として残す判断もある）。
+
 ## [2026-09-26] 同伴者の宿泊者名簿UI（Issue #156 ／ WBS `3-2` チェックイン／チェックアウト操作（QR）の残り） — DONE
 
 v13 §5.2.7「同伴者も1名につき1名簿行」の UI。これで `3-2` の残作業が無くなった

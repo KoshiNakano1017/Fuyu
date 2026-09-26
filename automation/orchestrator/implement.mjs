@@ -25,7 +25,16 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { loadAgent } from './lib/agents.mjs';
 import { runAgent } from './lib/runAgent.mjs';
-import { loadState, saveState, addUsage, recordAttempt, classifyBlock } from './lib/state.mjs';
+import {
+  loadState,
+  saveState,
+  addUsage,
+  recordAttempt,
+  classifyBlock,
+  infraLoopExhausted,
+  resetAttempts,
+  INFRA_REPEAT_LIMIT,
+} from './lib/state.mjs';
 import * as gh from './lib/gh.mjs';
 import { IMPLEMENT_SCHEMA, validate, outputInstruction, extractJson } from './lib/schema.mjs';
 import { section, stripTemplate, hasDerived, formatApproved, acceptanceRows } from './lib/acceptance.mjs';
@@ -78,6 +87,22 @@ async function fatal(message, detail) {
   await saveState(state);
   gh.error(message);
   await stop('基盤エラー', `${message}\n\nリトライしません（設計 §12.1.2）。`, detail);
+}
+
+// 入口ゲート: 同じ基盤エラーでの再入を止める（2026-09-26 新設・Issue #147）。
+// スイーパーの自動再開（冷却60分）は回数を見ていないため、原因が解消するまで無限に枠を焼く。
+if (infraLoopExhausted(state)) {
+  await stop(
+    '基盤エラーの反復',
+    [
+      `同一の基盤エラーが ${state.repeatedFingerprint.infra + 1} 回続いています` +
+        `（上限 ${INFRA_REPEAT_LIMIT + 1} 回 ／ 累計 ${state.attempts.infra} 回）。`,
+      'エージェントを起動せずに停止しました。自動再開（`auto:retry`）の対象から外します。',
+      '',
+      '**オーナーの操作**: 原因（セッション枠・クレジット・認証）を解消したうえで、',
+      '`auto:blocked` を外して直前のフェーズラベルを付け直してください。',
+    ].join('\n'),
+  );
 }
 
 async function step(agentName, userPrompt, schema) {
@@ -339,6 +364,8 @@ for (let attempt = 1; attempt <= MAX_FIX + 1; attempt++) {
 }
 
 // ── 3. 結果 ──────────────────────────────────────────────────
+// フェーズが最後まで通った。基盤エラーの記録を消す（残すと次回が入口ゲートで止まる）。
+resetAttempts(state, 'infra');
 await saveState(state);
 await gh.setOutput('blocked', 'false');
 await gh.setOutput('verify_ok', String(Boolean(verifyReport?.ok)));
