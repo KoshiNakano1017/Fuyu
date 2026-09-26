@@ -15,7 +15,16 @@ import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { loadAgent } from './lib/agents.mjs';
 import { runAgent } from './lib/runAgent.mjs';
-import { loadState, saveState, addUsage, recordAttempt, classifyBlock } from './lib/state.mjs';
+import {
+  loadState,
+  saveState,
+  addUsage,
+  recordAttempt,
+  classifyBlock,
+  infraLoopExhausted,
+  resetAttempts,
+  INFRA_REPEAT_LIMIT,
+} from './lib/state.mjs';
 import * as gh from './lib/gh.mjs';
 import {
   REVIEW_SCHEMA, IMPLEMENT_SCHEMA, validate, outputInstruction, extractJson,
@@ -57,10 +66,38 @@ ${detail ?? ''}`));
   process.exit(0);
 }
 
+// 2026-09-26: レビュー3体は並列で走るため、基盤エラーでは3体が同時に落ちる。
+// 旧実装は1体ごとに Issue コメントを出しており、1周で3件・94周で計277件を積んだ（Issue #147）。
+// 最初の1件だけ Issue へ出し、後続は run のログにだけ残す。
+let infraReported = false;
+
 async function fatal(message, detail) {
   recordAttempt(state, 'infra', detail ?? message);
   gh.error(message);
+  if (infraReported) {
+    await saveState(state);
+    process.exit(0);
+  }
+  infraReported = true;
   await stop('基盤エラー', `${message}\n\nリトライしません（設計 §12.1.2）。`, detail);
+}
+
+// 入口ゲート: 同じ基盤エラーでの再入を止める（2026-09-26 新設・Issue #147）。
+// recordAttempt は run の中ではリトライしないが、run をまたいだ再入は誰も見ていなかった。
+// ここで止めればエージェントを1体も起動しないため、セッション枠を消費しない。
+if (infraLoopExhausted(state)) {
+  await stop(
+    '基盤エラーの反復',
+    [
+      `同一の基盤エラーが ${state.repeatedFingerprint.infra + 1} 回続いています` +
+        `（上限 ${INFRA_REPEAT_LIMIT + 1} 回 ／ 累計 ${state.attempts.infra} 回）。`,
+      'エージェントを起動せずに停止しました。自動再開（`auto:retry`）の対象から外します。',
+      '',
+      '**オーナーの操作**: 原因（セッション枠・クレジット・認証）を解消したうえで、',
+      '`auto:blocked` を外して `auto:review` を付け直してください。',
+      `試行の記録は automation/state/issue-${ISSUE}.json にあります。`,
+    ].join('\n'),
+  );
 }
 
 async function step(agentName, userPrompt, schema) {
@@ -277,6 +314,9 @@ if (specDrift.length) {
 }
 
 // ── 4. 判定の出力（ゲート3・マージは YAML が持つ）───────────────
+// ここまで来たらレビューは通っている。基盤エラーの記録を消す。
+// 残すと、過去の障害の記録だけで次回以降が入口ゲートで止まる。
+resetAttempts(state, 'infra');
 await saveState(state);
 const noRequired = requiredFindings.length === 0 && !unreadable;
 await gh.setOutput('blocked', 'false');

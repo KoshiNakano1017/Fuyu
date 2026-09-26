@@ -13,6 +13,12 @@ import {
   fetchAvailability,
   fetchStaysOverlapping,
 } from "@/lib/lodging/fetch-lodging";
+import { fetchMealReservationsBetween } from "@/lib/lodging/meal-reservation-store";
+import {
+  MEAL_SLOT_LABELS,
+  summarizeMealCounts,
+  totalMeals,
+} from "@/lib/lodging/meal-reservations";
 
 /**
  * 宿泊予定カレンダー（画面ID C10 ／ WBS 3-6・3-8）。
@@ -36,6 +42,12 @@ import {
  *
  * ⚠️ **実名を出さない。** カレンダーは運営PCに開きっぱなしになるため、
  * 表示名（ニックネーム／会員番号）に留める（CLAUDE.md §7.1）。
+ *
+ * ## 日別の食数サマリー（2026-09-26 ／ WBS 3-5c ／ v13 §5.4.1b）
+ *
+ * 朝・昼・夜の**食数**（数量の合計）を日ごとに併記する。前日の時点で翌日の仕込み数が出せることが
+ * カフェ事前予約の実質的な価値であり、この画面がその出口である。
+ * ⚠️ 誰が予約したかは出さない（食数だけで足り、行レベルの情報を増やさない）。
  */
 export default async function StaffCalendarPage({
   searchParams,
@@ -60,14 +72,18 @@ export default async function StaffCalendarPage({
   const view = normalizeView(requestedView);
   const anchorDate = normalizeAnchorDate(requestedDate, requestedMonth);
 
-  const [types, availability, stays] = await Promise.all([
+  const [types, availability, stays, meals] = await Promise.all([
     fetchAccommodationTypes(),
     fetchAvailability(rangeOf(view, anchorDate)),
     fetchStaysOverlapping(rangeOf(view, anchorDate)),
+    // 日別の食数サマリー（v13 §5.4.1b「管理画面」／ WBS 3-5c）。
+    // **前日の時点で翌日の仕込み数が出せること**が事前予約の実質的な価値である。
+    fetchMealReservationsBetween(rangeOf(view, anchorDate)),
   ]);
 
   const displayNameOf = new Map(types.map((type) => [type.roomType, type.displayName]));
   const days = stayCalendar.buildStaffCalendar({ view, anchorDate, stays, availability });
+  const mealCounts = summarizeMealCounts(meals);
   // 連泊の予約は泊数ぶん日セルに現れるため、`checkinId` で一意化してから数える。
   // 行数のまま数えると「3泊の要確認予約1件」が「3件」になり、見出しの「予約が N件」と食い違う。
   const attentionCheckinIds = new Set(
@@ -149,6 +165,21 @@ export default async function StaffCalendarPage({
                   滞在 {headcount}名 / {day.entries.length}件
                 </span>
               </div>
+
+              {/*
+                食数サマリー（v13 §5.4.1b）。★ **数量の合計**で出す（件数ではない）。
+                4人分1件と1人分1件を同じ「1」にすると仕込みが足りない。
+              */}
+              <p className="mt-1 text-xs text-neutral-700">
+                {totalMeals(mealCounts.get(day.date)) === 0
+                  ? "食事の事前予約なし"
+                  : (["breakfast", "lunch", "dinner"] as const)
+                      .map(
+                        (slot) =>
+                          `${MEAL_SLOT_LABELS[slot]} ${mealCounts.get(day.date)?.[slot] ?? 0}食`,
+                      )
+                      .join(" ／ ")}
+              </p>
 
               <ul className="mt-2 flex flex-wrap gap-2 text-xs">
                 {day.availability.map((row) => (

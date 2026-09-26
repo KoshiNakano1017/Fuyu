@@ -2,6 +2,7 @@ import { AccessDenied } from "@/components/auth/AccessDenied";
 import { CheckInBoard } from "@/components/lodging/CheckInBoard";
 import { AccessDeniedError, requireStaff } from "@/lib/auth/guard";
 import { fetchCheckInBoard } from "@/lib/lodging/fetch-checkin-board";
+import { todayInJapan } from "@/lib/japan-time";
 
 import { cancelStayAction, checkInAction, checkOutAction } from "./actions";
 
@@ -12,7 +13,7 @@ import { cancelStayAction, checkInAction, checkOutAction } from "./actions";
  *
  * サーバのタイムゾーンで `toISOString()` を切ると、深夜帯に**前日の板**が出る。
  * 朝会も入退館も日本時間で回っているので、基準は運営の所在地に固定する
- * （`src/app/admin/morning-meetings/page.tsx` と同じ作法）。
+ * （実体は `src/lib/japan-time.ts` の `todayInJapan()`）。
  *
  * ## QR は未実装
  *
@@ -20,10 +21,6 @@ import { cancelStayAction, checkInAction, checkOutAction } from "./actions";
  * QR での本人特定は**発行・読み取り・失効の基盤**（精算QR と同じ作りが要る）であり、
  * 本画面は一覧からの操作で先に成立させている。QR 導線は残作業である。
  */
-function todayInJapan(): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo" }).format(new Date());
-}
-
 export default async function StaffCheckInsPage() {
   try {
     await requireStaff();

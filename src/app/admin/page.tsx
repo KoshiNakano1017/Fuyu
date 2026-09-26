@@ -6,10 +6,22 @@ import { RevisitAlerts } from "@/components/customers/RevisitAlerts";
 import { Money } from "@/components/ui/Money";
 import { AccessDeniedError, requireAdmin } from "@/lib/auth/guard";
 import { sumUnsettled } from "@/lib/billing/unsettled";
+import {
+  countArrivalsAndDepartures,
+  countOpenQuests,
+  countPendingGrants,
+  countUnhandledQuestCandidates,
+  isMorningMeetingRecorded,
+  morningMeetingLabel,
+  sumCirculatedUii,
+} from "@/lib/dashboard/today-summary";
+import { fetchGrants } from "@/lib/eumo/store";
 import { fetchRevisitAlerts } from "@/lib/customers/fetch-revisit";
 import { fetchAvailability, fetchStaysOverlapping } from "@/lib/lodging/fetch-lodging";
+import { fetchRecentMeetings } from "@/lib/morning-meetings/store";
 import { fetchOpenOrders } from "@/lib/orders/fetch-orders";
 import { fetchPendingApplications, fetchPendingWorkLogs } from "@/lib/quests/applications";
+import { fetchQuestBoardRows } from "@/lib/quests/fetch-board";
 
 import { ShoppingRegisterForm } from "../shopping/ShoppingRegisterForm";
 
@@ -58,15 +70,20 @@ export default async function AdminDashboardPage() {
   }
 
   const today = new Date().toISOString().slice(0, 10);
-  const [orders, stays, availability, applications, workLogs, revisitAlerts] = await Promise.all([
-    fetchOpenOrders(),
-    fetchStaysOverlapping({ fromDate: today, toDate: today }),
-    fetchAvailability({ fromDate: today, toDate: today }),
-    fetchPendingApplications(),
-    fetchPendingWorkLogs(),
-    // 未処理の差額を持つ方が滞在中なら、サマリーより先に出す（v13 §5.6.6 ／ WBS 10-3）
-    fetchRevisitAlerts(),
-  ]);
+  const [orders, stays, availability, applications, workLogs, revisitAlerts, quests, grants, meetings] =
+    await Promise.all([
+      fetchOpenOrders(),
+      fetchStaysOverlapping({ fromDate: today, toDate: today }),
+      fetchAvailability({ fromDate: today, toDate: today }),
+      fetchPendingApplications(),
+      fetchPendingWorkLogs(),
+      // 未処理の差額を持つ方が滞在中なら、サマリーより先に出す（v13 §5.6.6 ／ WBS 10-3）
+      fetchRevisitAlerts(),
+      fetchQuestBoardRows(),
+      fetchGrants(),
+      // 朝会は「今日の分があるか」を見るだけなので少数でよい。全文は読まない（PII-A）。
+      fetchRecentMeetings(7),
+    ]);
 
   const unsettled = sumUnsettled(orders);
   const unserved = orders.filter((order) => order.servingStatus === "未提供").length;
@@ -74,6 +91,13 @@ export default async function AdminDashboardPage() {
     (total, stay) => total + stay.adultsCount + stay.childrenCount,
     0,
   );
+  const { arrivals, departures } = countArrivalsAndDepartures(stays, today);
+  const openQuestSlots = countOpenQuests(quests);
+  const pendingGrants = countPendingGrants(grants);
+  const morningRecorded = isMorningMeetingRecorded(meetings, today);
+  const unhandledCandidates = countUnhandledQuestCandidates(meetings);
+  // ★ ここだけ集計の窓が「累計」である（v13 §9 #69 ／ 2026-09-26 オーナー確定）。
+  const circulatedUii = sumCirculatedUii(orders);
 
   return (
     <main className="mx-auto flex max-w-4xl flex-col gap-6 p-6">
@@ -120,6 +144,44 @@ export default async function AdminDashboardPage() {
           value={`申請 ${applications.length}件 / 報告 ${workLogs.length}件`}
           href="/staff/quests"
           linkLabel="クエスト承認・査定へ"
+        />
+        {/*
+          ここから下はモック ⑫「本日のオペレーション状況」の4枚（WBS 13-1 の残り）。
+          どれも**数えるだけ**で、対応の要否は行き先の画面が判断する。
+        */}
+        <SummaryCard
+          title="チェックイン／アウト予定"
+          value={`到着 ${arrivals}件 / 出発 ${departures}件`}
+          href="/staff/checkins"
+          linkLabel="チェックイン／チェックアウトへ"
+          note="日帰りは両方に数える（フロントの仕事が2回あるため）"
+        />
+        <SummaryCard
+          title="募集中クエスト枠"
+          value={`${openQuestSlots}件`}
+          href="/staff/quests"
+          linkLabel="クエスト承認・査定へ"
+        />
+        <SummaryCard
+          title="未送付の Eumo 給付"
+          value={`${pendingGrants}件`}
+          href="/staff/eumo"
+          linkLabel="Eumo給付一覧へ（送付・受領確認）"
+          note="滞留（14日超）の判定は一覧側が持つ"
+        />
+        <SummaryCard
+          title="Uii流通量（累計）"
+          value={`${circulatedUii.toLocaleString("ja-JP")} Uii`}
+          href="/admin/customers"
+          linkLabel="顧客管理へ（伝票の明細を見る）"
+          note="全期間の会計額の累計。今日の実数ではない／会員の残高合計でもない"
+        />
+        <SummaryCard
+          title="朝会議事録"
+          value={morningMeetingLabel(morningRecorded)}
+          href="/admin/morning-meetings"
+          linkLabel="朝会モジュールへ"
+          note={`未処理の AI 起案候補 ${unhandledCandidates}件`}
         />
       </div>
 
@@ -175,16 +237,20 @@ function SummaryCard({
   value,
   href,
   linkLabel,
+  note,
 }: {
   title: string;
   value: React.ReactNode;
   href: string;
   linkLabel: string;
+  /** 数え方の断り書き。**判断ではなく数え方の説明**だけを置く。 */
+  note?: string;
 }) {
   return (
     <section className="flex flex-col gap-1 rounded border border-neutral-200 bg-white p-4">
       <h2 className="text-sm text-neutral-600">{title}</h2>
       <p className="text-xl font-bold">{value}</p>
+      {note ? <p className="text-xs text-neutral-500">{note}</p> : null}
       <Link href={href} className="text-sm underline underline-offset-4">
         {linkLabel}
       </Link>

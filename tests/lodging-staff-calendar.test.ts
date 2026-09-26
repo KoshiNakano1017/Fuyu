@@ -19,7 +19,7 @@ import {
 } from "@/lib/lodging/calendar";
 import type { DailyAvailability, StayEntry } from "@/lib/lodging/fetch-lodging";
 
-import { listTypeScriptFiles, SRC_DIR } from "./helpers/ai-sources";
+import { SRC_DIR } from "./helpers/ai-sources";
 
 const CALENDAR_PATH = "/staff/calendar";
 const C10_PAGE = join(SRC_DIR, "app", "staff", "calendar", "page.tsx");
@@ -187,7 +187,18 @@ describe("C10 は管理者・コアメンバーのみ（完了条件22 ／ v13 �
 });
 
 describe("C10 に会員の実名を出さない（完了条件23 ／ CLAUDE.md §7.1）", () => {
-  const sources = [...listTypeScriptFiles(join(SRC_DIR, "lib", "lodging")), C10_PAGE];
+  // ★ 走査するのは **C10 が実際に読む経路**だけである（2026-09-26 に範囲を絞った）。
+  //   `src/lib/lodging/` 一式を対象にすると `register.ts`（宿泊者名簿 ／ WBS 3-2）が引っかかる。
+  //   あれは**旅館業法の法定記録として氏名・住所を扱うのが役目**（v13 §5.2.7 ／ PII-A）であり、
+  //   C10 とは別の画面・別のテーブルである。無関係なモジュールを混ぜると、
+  //   「C10 に実名を出さない」という本来の性質が**別の理由で落ちる試験**になってしまう。
+  const sources = [
+    C10_PAGE,
+    join(SRC_DIR, "lib", "lodging", "fetch-lodging.ts"),
+    join(SRC_DIR, "lib", "lodging", "calendar.ts"),
+    join(SRC_DIR, "lib", "lodging", "meal-reservations.ts"),
+    join(SRC_DIR, "lib", "lodging", "meal-reservation-store.ts"),
+  ];
 
   test("走査対象のソースが存在する（0件で素通りさせない）", () => {
     expect(sources.length).toBeGreaterThan(1);

@@ -78,9 +78,27 @@ function listSourceFiles(root: string, prefix = ""): string[] {
   });
 }
 
+/**
+ * 走査から外す層。**朝会の投入経路ではないが、目印の語を持つ**ものを除く。
+ *
+ * `src/lib/knowledge/` と `src/components/knowledge/` は横断セマンティック検索（WBS 9-1）の
+ * 実装で、投影元の種別を日本語へ直す変換表に「朝会議事録」という**表示名**を持つ。
+ * これは議事録を扱っているのではなく**索引の行の種別を表示している**だけである。
+ *
+ * ⚠️ この層は `service_role` を使うのが設計である。索引 `public.knowledge_chunks` は
+ * `0100` が **`service_role` にしか GRANT を与えていない**（RLS はポリシー0本）ため、
+ * 利用者のセッションでは1行も読めない。したがって下の「service_role を使っていない」試験の
+ * 対象に含めると、**正しい実装が落ちる**。
+ *
+ * 朝会の投入経路そのもの（`src/app/admin/morning-meetings/`・`src/lib/morning-meetings/`）は
+ * 除外していないので、この試験の目的は保たれる。
+ */
+const EXCLUDED_PREFIXES = ["lib/knowledge/", "components/knowledge/"];
+
 /** 朝会議事録そのものを扱っている実装ファイル。コメントだけの言及は拾わない。 */
 function findMorningMeetingSources(): SourceFile[] {
   return listSourceFiles(SOURCE_ROOT)
+    .filter((path) => !EXCLUDED_PREFIXES.some((prefix) => path.startsWith(prefix)))
     .map((path) => ({ path, code: stripComments(readFileSync(join(SOURCE_ROOT, path), "utf8")) }))
     .filter((file) => MORNING_MEETING_MARKERS.some((marker) => file.code.includes(marker)));
 }
@@ -106,6 +124,13 @@ describe("完了条件4: サーバサイドのガードを併置する（v13 §5
   test("朝会の実装がサーバ側ロールガード（requireStaff）を参照している", () => {
     const guarded = pathsContaining(findMorningMeetingSources(), ["requireStaff"]);
     expect(guarded.length).toBeGreaterThan(0);
+  });
+
+  test("★ 除外した層に朝会の投入経路が含まれていない（除外が効きすぎていない）", () => {
+    // 除外を広げすぎると、この試験全体が空振りで緑になる。投入経路の実装が
+    // 除外の外に居ることを明示的に確かめる。
+    const paths = findMorningMeetingSources().map((file) => file.path);
+    expect(paths.some((path) => path.startsWith("lib/morning-meetings/"))).toBe(true);
   });
 
   test("朝会の実装が service_role クライアントを使っていない", () => {

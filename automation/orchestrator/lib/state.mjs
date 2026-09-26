@@ -127,6 +127,36 @@ export function recordAttempt(state, kind, errorText, { max = 5 } = {}) {
   return { ok: true, reason: null, attempts: state.attempts[kind] };
 }
 
+/**
+ * 同一の基盤エラーが何回続いたら「自動では解けない」と見なすか。
+ *
+ * ⚠️ 2026-09-26 新設（Issue #147 の暴走）。`recordAttempt` は基盤エラーを
+ * **その run の中では**リトライしない（即 ok:false）が、**run をまたいだ再入**は
+ * 誰も見ていなかった。実測で `attempts.infra: 249` / `repeatedFingerprint.infra: 122`
+ * まで積み上がっており、「数えてはいたが停止条件に使っていなかった」。
+ */
+export const INFRA_REPEAT_LIMIT = 2;
+
+/**
+ * 同じ基盤エラーで再入を繰り返しているか（= もう起動しても無駄か）を返す。
+ * 起動直後に呼び、true なら**エージェントを1体も起こさずに**停止する。
+ */
+export function infraLoopExhausted(state) {
+  return (state?.repeatedFingerprint?.infra ?? 0) >= INFRA_REPEAT_LIMIT;
+}
+
+/**
+ * 種別の試行記録を消す。フェーズが最後まで通ったときに呼ぶ。
+ * リセットしないと、過去の基盤障害の記録だけで次回以降が入口で止まる。
+ */
+export function resetAttempts(state, kind) {
+  if (!(kind in state.attempts)) throw new Error(`未知のリトライ種別: ${kind}`);
+  state.attempts[kind] = 0;
+  state.repeatedFingerprint[kind] = 0;
+  state.lastFingerprint[kind] = null;
+  return state;
+}
+
 /** トークン消費を積む（設計 §10.9 #6 の素材）。 */
 export function addUsage(state, usage) {
   if (!usage) return state;
@@ -150,12 +180,17 @@ const CREDIT_PATTERNS =
 /**
  * 停止事由を、スイーパーが機械的に扱える種別へ落とす。
  *
- * @returns {'credit'|'infra'|'spec'} credit = 時間をおいて自動再開（クレジット・上限）
+ * @returns {'infra-exhausted'|'credit'|'infra'|'spec'}
+ *   infra-exhausted = 同じ基盤エラーの反復。自動再開を打ち切りオーナー判断へ回す（2026-09-26 追加）
+ *   credit = 時間をおいて自動再開（クレジット・上限）
  *                                    infra  = 基盤側の障害。自動再開の対象
  *                                    spec   = 仕様が未確定。オーナー判断が要る
  */
 export function classifyBlock(kind, text) {
   const s = `${kind ?? ''}\n${text ?? ''}`;
+  // 2026-09-26: 反復した基盤エラーは「自動再開しても同じ所で落ちる」ため、
+  // credit/infra（スイーパーが再開する）ではなくオーナー判断へ落とす（Issue #147）。
+  if (String(kind ?? '').includes('基盤エラーの反復')) return 'infra-exhausted';
   if (CREDIT_PATTERNS.test(s)) return 'credit';
   if (String(kind ?? '').includes('基盤エラー')) return 'infra';
   return 'spec';

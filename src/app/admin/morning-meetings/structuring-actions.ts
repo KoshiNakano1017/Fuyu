@@ -2,6 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 
+import { projectToKnowledgeChunksQuietly } from "@/lib/knowledge/projection-store";
+
 import { createGeminiTextClient } from "@/lib/ai/gemini";
 import { isStaff, readViewer } from "@/lib/auth/session";
 import type { SubmitState } from "@/lib/forms/submit-state";
@@ -109,6 +111,20 @@ export async function structureMinutesAction(
     return error("save_failed");
   }
 
+  // 索引へ投影する（WBS 9-1）。**失敗しても構造化の結果は返す** — 索引は投影であって
+  // マスタではなく、ここで失敗扱いにすると運営は「保存できなかった」と読んでもう一度押す。
+  // 伏字化は DB 側の走査が行うので、生の要約をそのまま渡してよい（`0103`）。
+  // 公開範囲は「運営のみ」にする。議事録は Tier 2（個人に紐づく実績）であり、
+  // LINE 経路へ出す資格を持たせない（`0100` の Tier の定義 ／ §17-6 #5）。
+  await projectToKnowledgeChunksQuietly({
+    sourceType: "morning_meeting",
+    sourceId: meetingId,
+    contentType: "morning_meeting",
+    text: knowledgeText === "" ? minutesText : `${minutesText}
+${knowledgeText}`,
+    visibility: "運営のみ",
+  });
+
   revalidatePath("/admin/morning-meetings");
   return {
     status: "done",
@@ -171,6 +187,24 @@ export async function publishQuestCandidateAction(
   if (questId === null) {
     return error("quest_failed");
   }
+
+  // 起票したクエストを索引へ投影する（WBS 9-1）。**クエストは Tier 1** — 題名・手順は
+  // 「やり方の知識」であって特定の誰かの実績ではないため、LINE 経路へ出す資格を持てる
+  // （`0100` の Tier の定義 ／ `projection.ts` の `tierFor()`）。
+  // ⚠️ 報酬額を本文へ混ぜない。`0102` は金額を伏字化しないので、混ぜると索引から読める
+  //    （金額の非開示は投影側の規律で守る、という §17-6 #6 の前提）。
+  await projectToKnowledgeChunksQuietly({
+    sourceType: "quest",
+    sourceId: questId,
+    contentType: "quest",
+    // ★ 投影するのは**題名だけ**である。
+    //   `sourceQuote`（候補の根拠になった発言）は混ぜない。朝会の発言には人名が出るため
+    //   Tier 1 のチャンクへ入れると、走査で `blocked` になって索引に入らないか、
+    //   伏字化されて根拠として読めないかのどちらかになる（`0102` の判断）。
+    //   報酬額も混ぜない — `0102` は金額を伏字化しないので、混ぜると索引から読める
+    //   （金額の非開示は投影側の規律で守る、という §17-6 #6 の前提）。
+    text: parsed.correction.title ?? candidate.title,
+  });
 
   const saved = await saveCandidates({
     meetingId,
