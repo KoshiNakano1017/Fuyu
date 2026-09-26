@@ -1,4 +1,5 @@
 import { ReservationForm } from "@/components/lodging/ReservationForm";
+import { MasterDataShortcut } from "@/components/nav/MasterDataShortcut";
 import { requireSignedIn } from "@/lib/auth/guard";
 import {
   fetchAccommodationTypes,
@@ -48,7 +49,11 @@ export default async function ReservationsPage() {
   return (
     <main className="mx-auto flex max-w-2xl flex-col gap-8 p-6">
       <section className="flex flex-col gap-3">
-        <h1 className="text-2xl font-bold">宿泊予約</h1>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h1 className="text-2xl font-bold">宿泊予約</h1>
+          {/* 料金を出している画面からマスタへ直接飛ぶ（§5.9.5「入口の重複を許す」）。管理者にだけ出る。 */}
+          <MasterDataShortcut role={viewer.role} label="料金マスタ" />
+        </div>
         <ReservationForm
           types={types}
           todayAvailability={todayAvailability}

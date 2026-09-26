@@ -1,4 +1,5 @@
 import { MenuBoard } from "@/components/orders/MenuBoard";
+import { MasterDataShortcut } from "@/components/nav/MasterDataShortcut";
 import { Money } from "@/components/ui/Money";
 import { requireSignedIn } from "@/lib/auth/guard";
 import {
@@ -60,7 +61,11 @@ export default async function OrdersPage() {
 
   return (
     <main className="mx-auto flex max-w-2xl flex-col gap-6 p-6">
-      <h1 className="text-2xl font-bold">カフェ注文</h1>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-2xl font-bold">カフェ注文</h1>
+        {/* 価格を出している画面からマスタへ直接飛ぶ（§5.9.5「入口の重複を許す」）。管理者にだけ出る。 */}
+        <MasterDataShortcut role={viewer.role} label="メニュー・価格を編集" />
+      </div>
 
       {categories.length === 0 ? (
         <p className="text-sm text-neutral-600">本日ご用意している商品はありません。</p>
