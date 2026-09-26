@@ -21,7 +21,12 @@
  * 時刻で切らないのは、単価が1泊いくらであり、夜の途中で切り替える意味が無いためである。
  */
 
-import { countOccupancy, datesOfStay, type AccommodationCapacity } from "./availability";
+import {
+  countNights,
+  countOccupancy,
+  datesOfStay,
+  type AccommodationCapacity,
+} from "./availability";
 import type { CheckInStatus } from "./checkin-ops";
 import { rateOn, type AccommodationRate } from "./rates";
 
@@ -38,6 +43,8 @@ export type StayForChange = {
   /** 現在の割当部屋（`room_assignments` の `ended_at IS NULL` の行）。未割当なら null */
   roomId: string | null;
   roomName: string | null;
+  /** 宿泊券の充当泊数（`0042` ／ WBS 3-7）。日程の短縮がこれを下回れないための材料 */
+  stayTicketsAppliedNights: number;
 };
 
 /** 画面から届く変更後の内容。 */
@@ -72,6 +79,7 @@ export type StayChangeRejection =
   | "effective_date_outside_stay"
   | "invalid_check_out_date"
   | "invalid_counts"
+  | "tickets_exceed_nights"
   | "full";
 
 export type StayChangeDecision =
@@ -166,6 +174,19 @@ export function decideStayChange(params: {
   // 退去日は専有しないため、退去日を境界に選ぶと1泊も効かない変更になる（`0041` の effective_date）。
   if (input.effectiveDate < stay.checkInDate || input.effectiveDate >= input.checkOutDate) {
     return { allowed: false, reason: "effective_date_outside_stay" };
+  }
+
+  // ★ 宿泊券の充当泊数を下回る短縮を先に断る（`0042` の `chk_check_ins_stay_tickets_within_nights`）。
+  //   DB の CHECK に任せると、**変更履歴だけが積まれて本体の更新が落ちる**
+  //   （`applyStayChange()` は履歴 → 本体の順に書く）。利用者には何が起きたか分からない。
+  const nightsAfter = countNights({
+    checkInDate: stay.checkInDate,
+    checkOutDate: input.checkOutDate,
+    adultsCount: input.adultsCount,
+    childrenCount: input.childrenCount,
+  });
+  if (stay.stayTicketsAppliedNights > nightsAfter) {
+    return { allowed: false, reason: "tickets_exceed_nights" };
   }
 
   const diff = diffStayChange(stay, input);
@@ -414,6 +435,8 @@ export function stayChangeDenialMessage(
       return "退去日は宿泊初日より後の日付にしてください。";
     case "invalid_counts":
       return "人数は0以上の整数で、合計1名以上にしてください。";
+    case "tickets_exceed_nights":
+      return "宿泊券の充当泊数より短い日程には変更できません。先に食事や宿泊券の充当を見直してください。";
     case "full":
       return fullNight === undefined
         ? "変更後の日程・形態に空きがありません。"
