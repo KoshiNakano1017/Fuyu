@@ -90,6 +90,45 @@
 - 関連ファイル: v13 §5.3.2（L938）・§5.3.1（L892）・§6（L2352）、
   `supabase/migrations/0017_quest_applications_and_work_logs.sql`、`src/app/staff/quests/actions.ts`、Issue #201
 <!--blocked-->
+## 🔴 [2026-09-26] 完了報告の提出に公開 HTTP エンドポイント（`POST /api/quest-applications/{id}/work-logs`）を置くか（v13 §5.11.2・§8 L2699 ／ `API設計.md` §2-4 L145 ／ WBS `5-3` ／ Issue #200）
+- ステータス: 未回答
+- 優先度: 高（**Issue #200（WBS `5-3` 完了報告（Before/After写真・作業時間））のタスク定義を止めている。**
+  残作業が「受入テストの追加だけ」か「認可を持つ公開エンドポイントの新設」かで規模も risk も変わる）
+- 背景: `5-3` は WBS 上 実装進捗 95%（✅ 画面まで実装 ／ 2026-09-22）で、完了報告の提出は
+  **Server Action**（`src/app/reports/actions.ts` の `submitWorkLogAction`）で実装されている。
+  `member_id` をセッションから取り、フォームからは受け取らない（代筆させない）。
+  一方 Issue #200 の完了条件は `API設計.md` §2-4 L145 を根拠に
+  **「`POST /api/quest-applications/{id}/work-logs` が存在し、申請者本人の呼び出しだけが成功する」**
+  と書かれており、この公開 HTTP エンドポイントは実装されていない。
+  - `API設計.md` は同じ食い違いを**3箇所で「実装は Server Action であり公開 HTTP エンドポイントは
+    置いていない」と注記して解消済み**（§2-2 `PATCH /api/checkins/{id}`（滞在の変更）、
+    §2-2b `POST /api/reservations`（アプリ内予約）、`POST /api/reservations/{id}/meals`（事前予約注文）／
+    いずれも 2026-09-26 の改訂履歴）。§2-4 L145 にはこの注記が無い
+  - 対になる `5-2`（受注申請・運営審査・実行指示）は公開ルート（`src/app/api/quests/[questId]/applications/route.ts`）を
+    持つが、これは **v13 §5.10.6 末尾が「サーバ側でもゲストの受注申請APIを拒否する」と明示的に要求している**ためである。
+    完了報告には正本側に同種の要求が無い
+- なぜ導出で進めないか: 提出経路は**認可の実装箇所そのもの**である（本人以外が代筆できない、という事実の担保）。
+  v13 §8 L2699 は「ロール判定の実装箇所を1箇所に限定する」（§5.11.2 の不可侵ルール）と定めており、
+  経路を増やすか否かは**セキュリティ境界の設計判断**になる。加えて解消方法の推奨案は
+  `docs/spec/` 配下（`API設計.md`）への注記追加を伴い、**自律ループは `docs/spec/` を編集できない**
+  （設計 §8.2 ／ `automation/settings/pm.json` の `deny`）。よって高リスク範囲での導出は行わない
+- 選択肢:
+  - **A. Server Action（`submitWorkLogAction`）をもって完了条件を満たしたとみなす。**
+    `API設計.md` §2-4 L145 に既存3箇所と同じ注記（「実装は Server Action ／公開 HTTP エンドポイントは置かない」）を
+    付ける（注記はオーナーまたは対話セッションが行う ／ CLAUDE.md §7.0.1）。
+    `5-3` の残作業は **`work_logs_insert_self` の DB 受入テスト追加**だけになる
+  - B. 公開 HTTP エンドポイントを新設し、本人判定をルート側にも置く（`POST /api/quests/{questId}/applications` と同じ形）。
+    `API設計.md` は変更不要になるが、提出経路と認可判定が2本になる
+  - C. どちらも変えず、完了条件 #7 を「提出経路がサーバ側で本人以外の提出を拒否する」と読み替えて閉じる
+    （実装も派生文書も触らない）
+- 推奨: **A**（理由: ①`API設計.md` は Server Action 実装を正規の履行として扱う前例を既に3件持ち、
+  本件はその4件目にあたる。新しい判断ではなく既存の作法の適用である。②B は認可判定の実装箇所を2つにし、
+  v13 §8 L2699・§5.11.2 の「ロール判定を1箇所に限定する」に正面から反する。
+  ③C は文書と実装の食い違いを残すため、次に `5-3` を読む人が同じ論点を再発見する）
+- 関連ファイル: `docs/spec/detailed-design/API設計.md` §2-4 L145、v13 §5.3-4・§5.11.2・§8 L2699、
+  `src/app/reports/actions.ts`、`src/app/api/quests/[questId]/applications/route.ts`、
+  `supabase/migrations/0017_quest_applications_and_work_logs.sql`（`work_logs_insert_self`）、
+  `docs/spec/WBS_Phase1.md` `5-3`（L559）、Issue #200
 
 ## 🔴 [2026-09-26] チェックインQR の読み取りで `check_ins` を `staying` へ進めるのは誰の権限か（v13 §5.2.8 ／ `API設計.md` §3-6 ／ WBS `3-2b` ／ Issue #199）
 - ステータス: 未回答
