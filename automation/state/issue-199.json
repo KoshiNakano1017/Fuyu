@@ -4,7 +4,7 @@
   "pr": null,
   "branch": null,
   "phase": "plan",
-  "risk": null,
+  "risk": "high",
   "attempts": {
     "infra": 1,
     "verify": 0,
@@ -21,13 +21,13 @@
     "review": 0
   },
   "tokens": {
-    "input": 8,
-    "output": 1864,
-    "costUsd": 0.4453985
+    "input": 38,
+    "output": 18002,
+    "costUsd": 1.9716835000000001
   },
   "testHashes": {},
   "specRefs": [],
   "acceptance": [],
   "acceptanceDerived": false,
-  "updatedAt": "2026-09-26T10:45:45.456Z"
+  "updatedAt": "2026-09-26T12:26:37.615Z"
 }
