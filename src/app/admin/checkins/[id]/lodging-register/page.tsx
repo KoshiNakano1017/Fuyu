@@ -1,7 +1,11 @@
 import { AccessDenied } from "@/components/auth/AccessDenied";
 import { AccessDeniedError, requireStaff } from "@/lib/auth/guard";
-import { fetchLodgingRegisterPrefill } from "@/lib/lodging/register";
+import {
+  fetchCompanionRegisterEntries,
+  fetchLodgingRegisterPrefill,
+} from "@/lib/lodging/register";
 
+import { CompanionRegisterSection } from "./CompanionRegisterSection";
 import { LodgingRegisterForm } from "./LodgingRegisterForm";
 
 /**
@@ -30,7 +34,10 @@ export default async function LodgingRegisterPage({
   }
 
   const { id: checkinId } = await params;
-  const prefill = await fetchLodgingRegisterPrefill(checkinId);
+  const [prefill, companions] = await Promise.all([
+    fetchLodgingRegisterPrefill(checkinId),
+    fetchCompanionRegisterEntries(checkinId),
+  ]);
 
   if (prefill === null) {
     return (
@@ -53,9 +60,16 @@ export default async function LodgingRegisterPage({
       <p className="text-sm text-neutral-600">
         氏名・住所は<strong>紐づく予約・会員情報からの下書き</strong>です。
         本人に提示して内容を確認し、必要なら訂正のうえ確定してください。
+        <strong>同伴者も1名につき1名簿行</strong>が必要です（v13 §5.2.7）。
       </p>
 
       <LodgingRegisterForm checkinId={checkinId} prefill={prefill} />
+
+      <CompanionRegisterSection
+        checkinId={checkinId}
+        companions={companions}
+        bookedHeadcount={prefill.bookedHeadcount}
+      />
     </main>
   );
 }
