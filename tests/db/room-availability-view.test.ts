@@ -50,14 +50,25 @@ describeDb("残枠ビューの形（完了条件1 ／ v13 §5.2.5① 算出式�
 describeDb("占有量の算出元（完了条件2 ／ v13 §9 #47）", () => {
   // 旧設計は `room_assignments` の件数から数えており、自動確定した予約が残枠を
   // 1つも減らさなかった（DB物理設計 §3-12 の important）。算出元が戻っていないことを見る。
-  test("ビュー定義が check_ins を参照する", () => {
-    const definition = query("SELECT pg_get_viewdef('public.v_room_availability'::regclass);");
-    expect(definition).toContain("check_ins");
+  // ⚠️ 2026-09-26（WBS 3-10 ／ `0041_check_in_changes.sql`）から、占有は
+  //    「**その夜に効いている**宿泊形態・人数」で数えるため、残枠ビューは内部ビュー
+  //    `v_check_in_nights` を経由して `check_ins` を読む。**算出元が `check_ins` である**
+  //    という性質は変わらないので、鎖の両方を見て固定する。
+  test("ビュー定義が check_ins を（内部ビュー経由で）参照する", () => {
+    const availability = query("SELECT pg_get_viewdef('public.v_room_availability'::regclass);");
+    expect(availability).toContain("v_check_in_nights");
+
+    const nights = query("SELECT pg_get_viewdef('public.v_check_in_nights'::regclass);");
+    expect(nights).toContain("check_ins");
   });
 
   test("ビュー定義が room_assignments を参照しない", () => {
-    const definition = query("SELECT pg_get_viewdef('public.v_room_availability'::regclass);");
-    expect(definition).not.toContain("room_assignments");
+    const availability = query("SELECT pg_get_viewdef('public.v_room_availability'::regclass);");
+    expect(availability).not.toContain("room_assignments");
+
+    // 内部ビュー側も同じ約束である（ここへ割当を混ぜると旧設計へ戻る）。
+    const nights = query("SELECT pg_get_viewdef('public.v_check_in_nights'::regclass);");
+    expect(nights).not.toContain("room_assignments");
   });
 });
 
