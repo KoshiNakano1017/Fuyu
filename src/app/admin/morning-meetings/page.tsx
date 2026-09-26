@@ -2,6 +2,7 @@ import { AccessDenied } from "@/components/auth/AccessDenied";
 import { MinutesBoard } from "@/components/morning-meetings/MinutesBoard";
 import { AccessDeniedError, requireStaff } from "@/lib/auth/guard";
 import { fetchRecentMeetings } from "@/lib/morning-meetings/store";
+import { todayInJapan } from "@/lib/today";
 
 import { MorningMeetingForm } from "./MorningMeetingForm";
 import {
@@ -10,16 +11,9 @@ import {
   structureMinutesAction,
 } from "./structuring-actions";
 
-/**
- * 実施日の初期値（日本時間の今日）。
- *
- * サーバで決めてクライアントへ渡す。クライアント側で `new Date()` から組み立てると
- * 端末のタイムゾーンで値が変わり、ハイドレーションの結果も揺れる。
- * 朝会は日本時間の朝に行われるので、基準は運営の所在地に固定する。
- */
-function todayInJapan(): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo" }).format(new Date());
-}
+// 実施日の初期値は**サーバで決めてクライアントへ渡す**（`todayInJapan()`）。
+// クライアント側で `new Date()` から組み立てると端末のタイムゾーンで値が変わり、
+// ハイドレーションの結果も揺れる。
 
 /**
  * 朝会テキストの投入 ＋ 構造化・クエスト候補の起案（WBS 4-1・4-2・4-3 ／ v13 §9 #63）。運営専用。

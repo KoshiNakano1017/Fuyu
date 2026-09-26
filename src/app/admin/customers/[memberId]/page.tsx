@@ -5,12 +5,30 @@ import { AccessDenied } from "@/components/auth/AccessDenied";
 import { AdjustmentResolver } from "@/components/customers/AdjustmentResolver";
 import { CashbackPanel } from "@/components/customers/CashbackPanel";
 import { SlipEditor } from "@/components/customers/SlipEditor";
+import { StayChangeSection, type StayChangeView } from "@/components/customers/StayChangeSection";
+import { MealPreOrderSection } from "@/components/lodging/MealPreOrderSection";
 import { StayHistorySection } from "@/components/customers/StayHistorySection";
 import { StayTicketAdjuster } from "@/components/customers/StayTicketAdjuster";
 import { AccessDeniedError, requireAdmin } from "@/lib/auth/guard";
 import { sumUnsettled } from "@/lib/billing/unsettled";
 import { fetchCustomerDetail } from "@/lib/customers/fetch-customers";
 import { fetchStayHistory } from "@/lib/customers/fetch-stay-history";
+import { fetchAccommodationRates, fetchAccommodationTypes } from "@/lib/lodging/fetch-lodging";
+import {
+  fetchMealReservations,
+  fetchPreOrderableItems,
+} from "@/lib/lodging/meal-reservation-store";
+import { memberCategoryOf } from "@/lib/lodging/rates";
+import {
+  fetchChangeableStays,
+  fetchRoomOptions,
+  fetchStayChangeHistory,
+} from "@/lib/lodging/stay-change-store";
+import {
+  defaultEffectiveDate,
+  nightlyLodgingCharge,
+  nightlyRoomTypes,
+} from "@/lib/lodging/stay-changes";
 import { STAY_TICKET_ADJUST_MAX_NIGHTS } from "@/lib/lodging/stay-ticket-adjust";
 import {
   fetchStayTicketBalance,
@@ -25,11 +43,14 @@ import {
   fetchMemberOrigin,
 } from "@/lib/eumo/store";
 import { fetchStayingCheckIns } from "@/lib/orders/fetch-orders";
+import { saveMealPreOrdersAction } from "@/app/reservations/actions";
+import { todayInJapan } from "@/lib/today";
 
 import {
   adjustStayTicketsAction,
   cancelOrderAction,
   cancelStayAction,
+  changeStayAction,
   editSlipAction,
   issueFirstVisitCashbackAction,
   issueSettlementQrAction,
@@ -45,8 +66,6 @@ import {
  *
  * - **氏名・住所・電話番号**（PII-A）。表示名は `v_member_public` のニックネーム／会員番号。
  *   宿泊法の申告項目は専用画面（WBS 2-4・3-2）が扱う
- * - **宿泊形態の変更（§5.6.9）**。WBS `3-10` の担当であり、要件のみ確定・詳細設計が未整備の段階にある
- *   （宿泊履歴の表示＝§5.6.8 ／ WBS `8-6` は実装済み）
  * - **手動調整行（まかない補助・割引 ／ §5.6.2）**。物理設計が存在せず、
  *   `QUESTIONS.md`「[2026-09-20] 伝票の編集履歴ログ・精算グループ・手動調整行の
  *   物理設計が存在しない」でオーナー判断待ち
@@ -81,6 +100,11 @@ export default async function CustomerDetailPage({
     stayHistory,
     stayTicketBalance,
     stayTicketHistory,
+    changeableStays,
+    roomOptions,
+    accommodationTypes,
+    accommodationRates,
+    mealItems,
   ] = await Promise.all([
       fetchCustomerDetail(memberId),
       fetchStayingCheckIns(),
@@ -95,6 +119,13 @@ export default async function CustomerDetailPage({
       fetchStayTicketBalance(memberId),
       // 調整ログ（v13 §5.8.5「誰が・いつ・いくつからいくつへ・なぜ」）
       fetchStayTicketHistory(memberId),
+      // 滞在の変更（v13 §5.6.9 ／ WBS 3-10）。対象は予約済み・滞在中の滞在だけ
+      fetchChangeableStays(memberId),
+      fetchRoomOptions(),
+      fetchAccommodationTypes(),
+      fetchAccommodationRates(),
+      // カフェの事前予約の選択肢（運営の代理編集 ／ v13 §5.4.1b の権限行 ／ WBS 3-5c）
+      fetchPreOrderableItems(),
     ]);
   if (customer === null) {
     notFound();
@@ -109,6 +140,35 @@ export default async function CustomerDetailPage({
     isImportedMember: origin?.isImportedMember ?? true,
     planCashbackUii,
   });
+
+  // 滞在の変更（WBS 3-10 ／ v13 §5.6.9）の表示材料。
+  // ★ 夜ごとの形態は**変更履歴から復元する**。`check_ins.room_type`（現在の形態）で全泊を埋めると、
+  //   滞在の途中で形態が変わった場合に滞在全体が新しい単価で塗り替わる（同節が禁じる振る舞い）。
+  const [changeHistory, mealReservations] = await Promise.all([
+    fetchStayChangeHistory(changeableStays.map((stay) => stay.checkinId)),
+    fetchMealReservations(changeableStays.map((stay) => stay.checkinId)),
+  ]);
+  const today = todayInJapan();
+  const stayChangeViews: StayChangeView[] = changeableStays.map((stay) => {
+    const history = changeHistory.get(stay.checkinId) ?? [];
+    const charge = nightlyLodgingCharge({
+      nights: nightlyRoomTypes({ stay, changes: history }),
+      rates: accommodationRates,
+      // 滞在の持ち主は `members` に行がある＝会員料金（`rates.ts` の `memberCategoryOf()`）。
+      memberCategory: memberCategoryOf(true),
+    });
+    return {
+      stay,
+      defaultEffectiveDate: defaultEffectiveDate(stay, today),
+      nights: charge.lines,
+      totalYen: charge.totalYen,
+      missingRateNights: charge.missingRateNights,
+      history,
+    };
+  });
+  const roomTypeLabels = Object.fromEntries(
+    accommodationTypes.map((type) => [type.roomType, type.displayName]),
+  );
 
   const unsettled = sumUnsettled(customer.orders);
   // 付け替え先は「滞在中のユーザー」を既定とする（v13 §5.6.2）。本人は候補から外す。
@@ -205,6 +265,44 @@ export default async function CustomerDetailPage({
         正本が定める**操作場所は顧客管理画面**である（§5.2.2「操作場所」／ §6 L2344）。
       */}
       <StayHistorySection history={stayHistory} cancelStay={cancelStayAction} />
+
+      {/*
+        滞在中の宿泊形態・部屋・日程・人数の変更（WBS 3-10 ／ v13 §5.6.9）。
+        宿泊履歴（§5.6.8）の直下に置く — 「どこに泊まっていたか」を見た流れで
+        「どこへ移すか」を決めるのが現場の順序である。
+      */}
+      <StayChangeSection
+        memberId={customer.memberId}
+        views={stayChangeViews}
+        roomOptions={roomOptions}
+        roomTypeLabels={roomTypeLabels}
+        change={changeStayAction}
+      />
+
+      {/*
+        カフェの事前予約（v13 §5.4.1b ／ WBS 3-5c）。運営は**滞在中も代理で直せる**（同節の権限行）。
+        本人の経路はチェックインまでで閉じるため、現地での追加・取消はここから行う。
+      */}
+      {changeableStays.length === 0 ? null : (
+        <section className="flex flex-col gap-3">
+          <h2 className="text-xl font-bold">食事の事前予約</h2>
+          {changeableStays.map((stay) => (
+            <MealPreOrderSection
+              key={stay.checkinId}
+              view={{
+                checkinId: stay.checkinId,
+                checkInDate: stay.checkInDate,
+                checkOutDate: stay.checkOutDate,
+                status: stay.status,
+                reservations: mealReservations.get(stay.checkinId) ?? [],
+              }}
+              items={mealItems}
+              canEdit
+              save={saveMealPreOrdersAction}
+            />
+          ))}
+        </section>
+      )}
 
       <section className="flex flex-col gap-3">
         <h2 className="text-xl font-bold">注文履歴</h2>

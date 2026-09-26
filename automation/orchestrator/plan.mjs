@@ -19,7 +19,15 @@
 
 import { loadAgent } from './lib/agents.mjs';
 import { runAgent } from './lib/runAgent.mjs';
-import { loadState, saveState, addUsage, recordAttempt, classifyBlock } from './lib/state.mjs';
+import {
+  loadState,
+  saveState,
+  addUsage,
+  recordAttempt,
+  classifyBlock,
+  infraLoopExhausted,
+  resetAttempts,
+} from './lib/state.mjs';
 import * as gh from './lib/gh.mjs';
 import {
   PLAN_SCHEMA, RISK_SCHEMA, validate, outputInstruction, maxRisk,
@@ -91,8 +99,19 @@ async function fatal(message, detail) {
   await gh.setOutput('blocked', 'true');
   await gh.setOutput('risk', 'high');
   // クレジット切れと基盤障害はオーナー判断を要しない。スイーパーが後で再開する。
-  await gh.setOutput('blocked_kind', classifyBlock('基盤エラー', detail ?? message));
+  // 反復（入口ゲート）なら infra-exhausted へ落として自動再開の対象から外す。
+  const kindLabel = infraLoopExhausted(state) ? '基盤エラーの反復' : '基盤エラー';
+  await gh.setOutput('blocked_kind', classifyBlock(kindLabel, detail ?? message));
   process.exit(1);
+}
+
+// 入口ゲート: 同じ基盤エラーでの再入を止める（2026-09-26 新設・Issue #147）。
+// スイーパーの自動再開（冷却60分）は回数を見ていないため、原因が解消するまで無限に枠を焼く。
+if (infraLoopExhausted(state)) {
+  await fatal(
+    `同一の基盤エラーが ${state.repeatedFingerprint.infra + 1} 回続いたため、` + `エージェントを起動せずに停止しました（累計 ${state.attempts.infra} 回）。`,
+    '基盤エラーの反復: 原因（セッション枠・クレジット・認証）の解消後に、' + '`auto:blocked` を外して `auto:planning` を付け直してください。',
+  );
 }
 
 /** 1体を走らせ、構造化出力を取り出す。失敗は安全側（高リスク）へ倒す。 */
@@ -321,6 +340,8 @@ if (state.acceptance.length === 0) {
 state.risk = risk;
 state.provisional = provisional;
 state.specRefs = plan.json.specRefs ?? research.json?.specRefs ?? [];
+// フェーズが最後まで通った。基盤エラーの記録を消す（残すと次回が入口ゲートで止まる）。
+resetAttempts(state, 'infra');
 await saveState(state);
 
 // auto-03 の `risk` ジョブは今も Issue コメントから `<!--risk:X-->` を読む。

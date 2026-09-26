@@ -26,6 +26,11 @@ export type LodgingRegisterPrefill = {
   checkInDate: string;
   checkOutDate: string;
   roomTypeLabel: string;
+  /**
+   * 予約人数（大人＋子ども）。**名簿の枚数が足りているかを店員が目で確かめるために出す。**
+   * 一致を強制はしない（乳幼児・当日の人数変更があり、名簿の側を正とは決められない）。
+   */
+  bookedHeadcount: number;
   /** 既存の名簿行があればその値、無ければ会員プロフィールの現在値。どちらも無ければ null（初回客扱い） */
   fullNameSnapshot: string | null;
   fullNameKanaSnapshot: string | null;
@@ -50,7 +55,9 @@ export async function fetchLodgingRegisterPrefill(
 
   const { data: checkIn, error: checkInError } = await supabase
     .from("check_ins")
-    .select("checkin_id, member_id, check_in_date, check_out_date, accommodation_types(display_name)")
+    .select(
+      "checkin_id, member_id, check_in_date, check_out_date, adults_count, children_count, accommodation_types(display_name)",
+    )
     .eq("checkin_id", checkinId)
     .maybeSingle();
 
@@ -92,6 +99,9 @@ export async function fetchLodgingRegisterPrefill(
     checkInDate: checkIn.check_in_date as string,
     checkOutDate: checkIn.check_out_date as string,
     roomTypeLabel: accommodationType?.display_name ?? "不明",
+    bookedHeadcount:
+      ((checkIn.adults_count as number | null) ?? 0) +
+      ((checkIn.children_count as number | null) ?? 0),
     fullNameSnapshot: existingEntry?.full_name_snapshot ?? profile?.full_name ?? null,
     fullNameKanaSnapshot: existingEntry?.full_name_kana_snapshot ?? profile?.full_name_kana ?? null,
     address: existingEntry?.address_snapshot ?? profile?.address ?? null,
@@ -237,4 +247,171 @@ function emptyToNull(value: string | null): string | null {
   }
   const trimmed = value.trim();
   return trimmed === "" ? null : trimmed;
+}
+
+/**
+ * 同伴者の名簿行（`is_representative = false` ／ v13 §5.2.7「同伴者も1名につき1名簿行」）。
+ *
+ * ⚠️ **`memberId` を持たせない。** 同伴者は会員とは限らず、仮に代表者の `member_id` を
+ * 入れると `lre_select_self`（`member_id = current_member_id()`）により
+ * **代表者が同伴者の氏名・住所を読める**ようになる。PII-A を予約者へ開く経路を作らない
+ * （`0010` の RLS ／ `DB物理設計.md` §3-13①「check_ins に住所を足すと同伴者の住所が予約者へ返る」
+ * と同じ理由である）。
+ */
+export type CompanionRegisterEntry = {
+  entryId: string;
+  fullNameSnapshot: string;
+  fullNameKanaSnapshot: string | null;
+  address: string;
+  previousLocation: string | null;
+  nextDestination: string | null;
+};
+
+/** そのチェックインに紐づく同伴者の名簿行。古い順（登録した並びで読めるようにする）。 */
+export async function fetchCompanionRegisterEntries(
+  checkinId: string,
+): Promise<CompanionRegisterEntry[]> {
+  const supabase = await createServerSupabaseClient();
+
+  const { data, error } = await supabase
+    .from("lodging_register_entries")
+    .select(
+      "entry_id, full_name_snapshot, full_name_kana_snapshot, address_snapshot, previous_location, next_destination",
+    )
+    .eq("checkin_id", checkinId)
+    .eq("is_representative", false)
+    .order("recorded_at", { ascending: true });
+
+  if (error || !data) {
+    return [];
+  }
+
+  return data.map((row) => ({
+    entryId: row.entry_id as string,
+    fullNameSnapshot: row.full_name_snapshot as string,
+    fullNameKanaSnapshot: (row.full_name_kana_snapshot as string | null) ?? null,
+    address: row.address_snapshot as string,
+    previousLocation: (row.previous_location as string | null) ?? null,
+    nextDestination: (row.next_destination as string | null) ?? null,
+  }));
+}
+
+export type SubmitCompanionResult =
+  | { ok: true; created: boolean; entryId: string }
+  | {
+      ok: false;
+      reason:
+        | LodgingRegisterValidationReason
+        | "checkin_not_found"
+        | "entry_not_found"
+        | "denied"
+        | "failed";
+    };
+
+/**
+ * 同伴者の名簿行を1件作成・訂正する（`API設計.md` §3-5 の `is_representative: false`）。
+ *
+ * ## 代表者の行と独立に訂正する
+ *
+ * 訂正の対象は `entryId` で明示させる。同伴者は同じチェックインに複数並ぶので、
+ * 代表者のように「最新の1行」では対象が決まらない。
+ *
+ * ⚠️ **`entryId` が指す行が「このチェックインの同伴者行」であることを必ず確かめる。**
+ * 確かめないと、細工した `entryId` で**代表者の行**や**別のチェックインの名簿**を
+ * 上書きできる（どちらも法定記録の改変になる）。RLS は staff なら全行を書けるので、
+ * ここが唯一の関門である。
+ *
+ * ## 必須項目は代表者と同じ
+ *
+ * `validateLodgingRegisterInput()` を共用する。同伴者だけ氏名確認や住所を省けるようにすると、
+ * 「同伴者として登録すれば必須項目を飛ばせる」抜け道になる（v13 §5.2.7「全宿泊者」）。
+ */
+export async function submitCompanionRegisterEntry(params: {
+  checkinId: string;
+  recordedByMemberId: string;
+  /** 訂正するときだけ渡す。未指定なら新規の同伴者として作る。 */
+  entryId?: string | null;
+  fullNameConfirmed: boolean;
+  fullNameSnapshot: string;
+  fullNameKanaSnapshot: string | null;
+  address: string;
+  previousLocation: string;
+  nextDestination: string | null;
+}): Promise<SubmitCompanionResult> {
+  const validation = validateLodgingRegisterInput(params);
+  if (!validation.ok) {
+    return { ok: false, reason: validation.reason };
+  }
+
+  const supabase = await createServerSupabaseClient();
+
+  const { data: checkIn, error: checkInError } = await supabase
+    .from("check_ins")
+    .select("checkin_id, check_in_date")
+    .eq("checkin_id", params.checkinId)
+    .maybeSingle();
+
+  if (checkInError) {
+    return { ok: false, reason: checkInError.code === "42501" ? "denied" : "failed" };
+  }
+  if (!checkIn) {
+    return { ok: false, reason: "checkin_not_found" };
+  }
+
+  const snapshot = {
+    checkin_id: checkIn.checkin_id,
+    // 同伴者は会員に紐づけない（上の型コメントの理由）。
+    member_id: null,
+    full_name_snapshot: params.fullNameSnapshot.trim(),
+    full_name_kana_snapshot: emptyToNull(params.fullNameKanaSnapshot),
+    address_snapshot: params.address.trim(),
+    previous_location: params.previousLocation.trim(),
+    next_destination: emptyToNull(params.nextDestination),
+    checked_in_on: checkIn.check_in_date,
+    is_representative: false,
+    recorded_by: params.recordedByMemberId,
+    source: "checkin" as const,
+    updated_at: new Date().toISOString(),
+  };
+
+  const entryId = params.entryId?.trim() ?? "";
+  if (entryId === "") {
+    const { data: inserted, error: insertError } = await supabase
+      .from("lodging_register_entries")
+      .insert(snapshot)
+      .select("entry_id")
+      .single();
+
+    if (insertError || !inserted) {
+      return { ok: false, reason: insertError?.code === "42501" ? "denied" : "failed" };
+    }
+    return { ok: true, created: true, entryId: inserted.entry_id as string };
+  }
+
+  // ★ 対象が「このチェックインの同伴者行」であることを確かめてから更新する。
+  //   `update().eq(...)` の条件に混ぜるだけでは、0件更新と権限拒否を区別できない。
+  const { data: target, error: targetError } = await supabase
+    .from("lodging_register_entries")
+    .select("entry_id")
+    .eq("entry_id", entryId)
+    .eq("checkin_id", params.checkinId)
+    .eq("is_representative", false)
+    .maybeSingle();
+
+  if (targetError) {
+    return { ok: false, reason: targetError.code === "42501" ? "denied" : "failed" };
+  }
+  if (!target) {
+    return { ok: false, reason: "entry_not_found" };
+  }
+
+  const { error: updateError } = await supabase
+    .from("lodging_register_entries")
+    .update(snapshot)
+    .eq("entry_id", entryId);
+
+  if (updateError) {
+    return { ok: false, reason: updateError.code === "42501" ? "denied" : "failed" };
+  }
+  return { ok: true, created: false, entryId };
 }

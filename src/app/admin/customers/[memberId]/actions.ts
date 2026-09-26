@@ -40,6 +40,25 @@ import {
   fetchStayTicketBalance,
   insertStayTicketAdjustment,
 } from "@/lib/lodging/stay-tickets";
+import { fetchAccommodationRates, fetchAccommodationTypes } from "@/lib/lodging/fetch-lodging";
+import { memberCategoryOf } from "@/lib/lodging/rates";
+import {
+  applyStayChange,
+  fetchCapacities,
+  fetchOtherStayNights,
+  fetchStayChangeHistory,
+  fetchStayForChange,
+  fetchStayOwner,
+} from "@/lib/lodging/stay-change-store";
+import {
+  decideStayChange,
+  describeStayChange,
+  nightlyLodgingCharge,
+  nightlyRoomTypes,
+  stayChangeDenialMessage,
+  type StayChangeDiff,
+  type StayForChange,
+} from "@/lib/lodging/stay-changes";
 import {
   countVisits,
   fetchCashbackStatus,
@@ -73,12 +92,9 @@ const MESSAGE: Record<string, string> = {
   invalid_price: "単価は0以上の整数で入力してください。",
   same_purchaser: "付け替え先を選んでください。",
   not_found: "伝票が見つかりません。",
+  not_unsettled: "未会計の伝票にだけ精算QRを発行できます。",
   stay_not_found: "予約が見つかりません。",
   stay_already_arrived: "入館済みの滞在は取り消せません。途中退去はチェックアウトで記録してください。",
-  invalid_reason_type: "キャンセル種別を選んでください。",
-  already_cancelled: "この予約は既にキャンセル済みです。",
-  denied: "この操作を行う権限がありません。",
-  not_unsettled: "未会計の伝票にだけ精算QRを発行できます。",
   failed: "処理できませんでした。時間をおいて再試行してください。",
 };
 
@@ -557,6 +573,162 @@ export async function resolveAdjustmentAction(
     status: "done",
     message: resolution === "settle" ? "精算済みにしました。" : "免除しました。",
   };
+}
+
+/**
+ * 滞在中の宿泊形態・部屋・日程・人数の変更（WBS 3-10 ／ v13 §5.6.9）。
+ *
+ * ## 画面から届いた値を信じない
+ *
+ * 変更前の内容は `fetchStayForChange()` で引き直す。画面が描かれてから押されるまでの間に
+ * 別の端末で変更されているかもしれず、**画面が持っていた「変更前」で履歴を書くと
+ * 実際には起きていない差分が記録される**（`check_in_changes` は追記専用なので後から直せない）。
+ *
+ * ## 満室判定は自分を除いて数える
+ *
+ * `fetchOtherStayNights()` が自分の滞在を除外する。含めたまま数えると、
+ * 人数を減らす変更さえ「満室」で弾かれる（自分の旧占有と新占有を二重に数えるため）。
+ */
+export async function changeStayAction(
+  _prev: SubmitState,
+  formData: FormData,
+): Promise<SubmitState> {
+  const viewer = await readStaffViewer();
+  if (viewer === null) {
+    return fail("not_staff");
+  }
+
+  const checkinId = String(formData.get("checkinId") ?? "").trim();
+  const stay = await fetchStayForChange(checkinId);
+  if (stay === null) {
+    return { status: "error", message: "対象の滞在が見つかりません。" };
+  }
+
+  const roomId = String(formData.get("roomId") ?? "").trim();
+  const input = {
+    roomType: String(formData.get("roomType") ?? "").trim(),
+    roomId: roomId === "" ? null : roomId,
+    checkOutDate: String(formData.get("checkOutDate") ?? "").trim(),
+    adultsCount: Number(formData.get("adultsCount") ?? Number.NaN),
+    childrenCount: Number(formData.get("childrenCount") ?? Number.NaN),
+    effectiveDate: String(formData.get("effectiveDate") ?? "").trim(),
+    reason: String(formData.get("reason") ?? ""),
+  };
+
+  // 残枠を数える窓。**滞在の初日から、新旧どちらか遅い退去日まで**を見る
+  // （短縮だけの変更でも、旧い日程に他人が入っていないかは判定に要らないが、
+  //   窓を広く取っておくほうが「延泊 ＋ 形態変更」を1回で判定できる）。
+  const toDate =
+    ISO_DATE.test(input.checkOutDate) && input.checkOutDate > stay.checkOutDate
+      ? input.checkOutDate
+      : stay.checkOutDate;
+
+  let others;
+  try {
+    others = await fetchOtherStayNights({
+      excludeCheckinId: stay.checkinId,
+      fromDate: stay.checkInDate,
+      toDate,
+    });
+  } catch {
+    // 他の滞在が読めないときに「空いている」と見なすとダブルブッキングを作る。操作を止める。
+    return { status: "error", message: "残枠を確認できませんでした。時間をおいて再試行してください。" };
+  }
+
+  const [types, capacities] = await Promise.all([fetchAccommodationTypes(), fetchCapacities()]);
+
+  const decision = decideStayChange({
+    actorRole: viewer.role,
+    stay,
+    input,
+    knownRoomTypes: types.map((type) => type.roomType),
+    others,
+    capacities,
+  });
+  if (!decision.allowed) {
+    return { status: "error", message: stayChangeDenialMessage(decision.reason, decision.fullNight) };
+  }
+
+  const saved = await applyStayChange({
+    stay,
+    input,
+    diff: decision.diff,
+    operatorId: viewer.memberId,
+  });
+  if (!saved.logged || !saved.updated) {
+    return {
+      status: "error",
+      message: saved.logged
+        ? "変更履歴は記録できましたが、滞在の内容を更新できませんでした。画面を再読み込みして、もう一度実行してください。"
+        : MESSAGE.failed,
+    };
+  }
+
+  const memberId = (await fetchStayOwner(stay.checkinId)) ?? String(formData.get("memberId") ?? "");
+  revalidatePath(`/admin/customers/${memberId}`);
+  // 残枠と当日の板が変わる（v13 §5.2.5・§5.2.2）。本人のマイページの宿泊タブも変わる。
+  revalidatePath("/staff/calendar");
+  revalidatePath("/staff/checkins");
+  revalidatePath("/reservations");
+
+  return {
+    status: "done",
+    message: await describeStayChangeResult({
+      stay,
+      input,
+      diff: decision.diff,
+      roomMoved: saved.roomMoved,
+    }),
+  };
+}
+
+/** `YYYY-MM-DD` だけを日付として扱う（`<input type="date">` 以外から呼ばれても窓を壊さないため）。 */
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * 変更後の宿泊費まで含めて報告する。
+ *
+ * ★ **泊単位で、その夜の形態の単価を積んだ額**である（v13 §5.6.9）。
+ * 差額が出た場合の消し込みは §5.6.5／§5.6.6 の未処理差額の経路に載せる。
+ * ⚠️ 宿泊費を伝票として起こす経路は Phase 1 にまだ無いため（`orders` は注文のみ）、
+ *    ここでは額を**運営へ伝える**ところまでを担う（`0041` の冒頭「含まないもの」）。
+ */
+async function describeStayChangeResult(params: {
+  stay: StayForChange;
+  input: { roomType: string; checkOutDate: string };
+  diff: StayChangeDiff;
+  roomMoved: boolean;
+}): Promise<string> {
+  const { stay, input, diff } = params;
+  const parts = [`滞在を変更しました（${describeStayChange(diff)}）。`];
+
+  const [history, rates] = await Promise.all([
+    fetchStayChangeHistory([stay.checkinId]),
+    fetchAccommodationRates(),
+  ]);
+  const charge = nightlyLodgingCharge({
+    nights: nightlyRoomTypes({
+      stay: {
+        checkInDate: stay.checkInDate,
+        checkOutDate: input.checkOutDate,
+        roomType: input.roomType,
+      },
+      changes: history.get(stay.checkinId) ?? [],
+    }),
+    rates,
+    // 滞在の持ち主は `members` に行がある＝会員料金（`rates.ts` の `memberCategoryOf()` の規則）。
+    memberCategory: memberCategoryOf(true),
+  });
+  parts.push(`宿泊費は ¥${charge.totalYen.toLocaleString("ja-JP")}（${charge.lines.length}泊）です。`);
+  if (charge.missingRateNights > 0) {
+    parts.push(
+      `⚠️ ${charge.missingRateNights}泊は宿泊料金マスタに該当行が無く、合計に含めていません（マスタ管理で登録してください）。`,
+    );
+  }
+  if (diff.room !== null && !params.roomMoved) {
+    parts.push("⚠️ 部屋の割当は更新できませんでした。部屋割当をやり直してください。");
+  }
+  return parts.join(" ");
 }
 
 /**

@@ -115,10 +115,14 @@ up: "[[浮遊街アプリ 総合要件定義・設計書_v13]]"
 | ~~POST~~ | ~~`/api/reservations/webhook`~~ | ~~宿泊予約フォーム送信トリガー~~ → ❌ **廃止（2026-08-23 ／ v13 §9 #46）**：Googleフォームを廃止し公開予約ページへ置換したため、Webhook 自体が不要になった（§3-4 参照） | — | — |
 | POST | `/api/checkins` | チェックイン（QR/画面タップ） | core_member, admin, 本人 | `check_ins` |
 | POST | `/api/checkins/{id}/lodging-register` | 宿泊者名簿の登録・確定（チェックイン時の店員タブレット操作／v13 §5.2.7・詳細は §3-5） | core_member, admin | `lodging_register_entries` |
+| POST | `/api/admin/checkin-qr` | チェックインQR の発行（現地掲示用・有効期限1週間／v13 §5.2.8・詳細は §3-6） | **admin のみ** | `checkin_qr_tokens` |
+| DELETE | `/api/admin/checkin-qr` | チェックインQR の手失効（掲示物の紛失・流出時／§3-6） | **admin のみ** | `checkin_qr_tokens` |
+| POST | `/api/checkins/qr/{token}` | 掲示QRの読み取り（本人が自分の滞在をチェックインへ進める／§3-6） | ログイン済み全ロール | `check_ins` |
 | PATCH | `/api/checkins/{id}/checkout` | チェックアウト | core_member, admin, 本人 | `check_ins`, `stay_ticket_transactions`（consume） |
 | DELETE | `/api/checkins/{id}` | 予約キャンセル・ノーショー（論理削除、理由必須） | core_member, admin | `check_ins`, `room_assignments` |
 | POST | `/api/checkins/{id}/room-assignments` | 部屋割当 | core_member, admin | `room_assignments` |
 | PATCH | `/api/room-assignments/{id}/move` | 部屋移動（既存終了＋新規追加） | core_member, admin | `room_assignments` |
+| PATCH | `/api/checkins/{id}` | **滞在の変更**（宿泊形態・部屋・退去日・大人／子ども ／ v13 §5.6.9・WBS `3-10`。**理由必須**・変更後の残枠を再判定し満室なら 409）。**実装は Server Action**（`changeStayAction` ／ 顧客管理画面から呼ぶ）であり、公開 HTTP エンドポイントは置いていない | core_member, admin | `check_in_changes`（追記）、`check_ins`（現在値）、`room_assignments`（旧割当を終了し新規追加） |
 | GET | `/api/rooms?status=available` | 空き部屋一覧 | core_member, admin | `rooms` |
 | GET | `/api/admin/stay-calendar` | 宿泊予定カレンダー（**2026-08-20：ドラフト保留を解除**。§9 #30-⑤ 決着によりGoogleカレンダー同等の操作感で確定）。**2026-08-23：日別の食数サマリー（朝/昼/夜）を含める**（v13 §5.4.1b） | core_member, admin | `check_ins`×`room_assignments`×`rooms`×`meal_reservations` |
 
@@ -185,7 +189,7 @@ up: "[[浮遊街アプリ 総合要件定義・設計書_v13]]"
 | メソッド | パス | 概要 | 権限 | 主な対象テーブル |
 | --- | --- | --- | --- | --- |
 | GET | `/api/availability?from=&to=&room_type=` | **宿泊枠の残数**（`v_room_availability` から都度算出。保存値ではない） | 全員 | `v_room_availability` |
-| POST | `/api/reservations` | **アプリ内予約**。氏名・連絡先・住所は会員マスタから自動補完。備考欄が空なら自動確定、記載があれば「要確認」 | `active` の全ロール | `check_ins`（`reservation_source='in_app'`） |
+| POST | `/api/reservations` | **アプリ内予約**。氏名・連絡先・住所は**尋ねない**（会員行にあるため ／ v13 §5.2.4）。備考欄が空なら自動確定、記載があれば「要確認」。受け取るのは 宿泊形態／日程／到着予定時刻（`HH:MM`）／交通手段（`car`・`taxi`・`shuttle`・`other`）／大人・子供／**宿泊券の充当泊数**／備考。⚠️ **実装は Server Action**（`createReservationAction`）であり公開 HTTP エンドポイントは置いていない。予約できるのは**今日から180日先まで**（残枠ビューの窓と同じ） | `active` の全ロール | `check_ins`（`reservation_source='in_app'`・`stay_tickets_applied_nights`） |
 | GET | `/api/me/stay-calendar` | **本人の宿泊予定・履歴カレンダー** | 本人 | `check_ins`×`room_assignments` |
 
 **★ 公開予約ページ関連（2026-08-23 新設 ／ v13 §5.2.3 ／ §9 #46）**
@@ -238,8 +242,8 @@ up: "[[浮遊街アプリ 総合要件定義・設計書_v13]]"
 > 本項の `fuyuugai.com` は**メールの送信ドメイン**であって、アプリのURLではない（両者は独立）。
 | GET | `/api/public/availability?from=&to=` | 未認証で参照できる残枠。**非会員料金**で表示する | **公開（未認証）** | `v_room_availability` |
 | GET | `/api/public/rates` | 宿泊料金・送迎料金の公開表示（Uii 主・円 副） | **公開（未認証）** | `accommodation_rates`, `menu_items` |
-| POST | `/api/reservations/{id}/meals` | 事前予約注文の登録・変更（滞在日別・朝/昼/夜／**任意**） | 本人, core_member, admin | `meal_reservations` |
-| GET | `/api/admin/meal-summary?date=` | **日別の食数サマリー**（仕込み数量の把握用） | core_member, admin | `meal_reservations` |
+| POST | `/api/reservations/{id}/meals` | 事前予約注文の登録・変更（滞在日別・朝/昼/夜／**任意**）。⚠️ **実装は Server Action**（`saveMealPreOrdersAction`）であり公開 HTTP エンドポイントは置いていない。枠（滞在 × 日付 × 区分）ごとに1行を UPDATE で持ち回す（`0019` は DELETE を与えていないため、取消 → 同じメニューの再選択を INSERT で表すと `uq_meal_res_slot` に当たる）。**本人はチェックインまで／運営は滞在中も代理編集可**（v13 §5.4.1b） | 本人, core_member, admin | `meal_reservations` |
+| GET | `/api/admin/meal-summary?date=` | **日別の食数サマリー**（仕込み数量の把握用）。⚠️ 実装は画面ID C10（`/staff/calendar`）が月ぶんをまとめて読み、**数量の合計**で日別に集計する（件数ではない）。誰が予約したかは返さない | core_member, admin | `meal_reservations` |
 
 > [!warning] 公開エンドポイントは anon キーで直接DBを触らせない
 > `/api/public/*` は未認証で到達できるため、**クライアントから Supabase へ直接 INSERT させてはならない**。
@@ -598,7 +602,19 @@ paths:
                 is_representative:
                   type: boolean
                   default: true
-                  description: "false = 同伴者の名簿行（代表者と別の1名簿行として保存する）"
+                  description: >
+                    false = 同伴者の名簿行（代表者と別の1名簿行として保存する）。
+                    **false と明示されたときだけ同伴者として扱う**（未指定は代表者）。
+                entry_id:
+                  type: string
+                  format: uuid
+                  nullable: true
+                  description: >
+                    同伴者の名簿行を訂正するときに、対象の lodging_register_entries.entry_id を指定する
+                    （2026-09-26 追加 ／ WBS 3-2）。代表者の行は「そのチェックインの最新の1行」で一意に
+                    決まるが、同伴者は同じチェックインに複数並ぶため対象が決まらない。未指定なら新規作成。
+                    ⚠️ サーバは entry_id が **そのチェックインの同伴者行であること**を必ず確かめてから
+                    更新する（確かめないと代表者の行・別のチェックインの名簿を上書きできる＝法定記録の改変）。
       responses:
         "201":
           description: 名簿行を新規作成した
@@ -606,9 +622,22 @@ paths:
           description: 既存の名簿行を更新した（チェックアウト前の訂正。DB物理設計.md §3-13② [!danger] 参照）
         "403":
           description: "core_member・admin 以外からの呼び出し"
+        "404":
+          description: >
+            checkin_id が存在しない、または entry_id がそのチェックインの同伴者行ではない。
+            **403 ではなく 404 を返す**（403 にすると「存在はするが権限が無い」と読めて、
+            他人の名簿の存在を当てられる）
         "422":
           description: "address・previous_location が空、または full_name_confirmed が false"
 ```
+
+> [!note] 同伴者の名簿行に `member_id` を入れない（2026-09-26 ／ WBS 3-2）
+> 同伴者は会員とは限らず、仮に代表者の `member_id` を写すと `lodging_register_entries` の
+> `lre_select_self`（`member_id = current_member_id()`）により**代表者が同伴者の氏名・住所を
+> 読める**ようになる。`DB物理設計.md` §3-13①が「`check_ins` に住所を足すと同伴者の住所が
+> 予約者へ返る」として専用テーブルにした理由と同じであり、**同伴者行は `member_id = NULL`** とする
+> （`0010` のコメントもこの前提で書かれている）。名簿の削除は API・画面のどちらにも口を作らない
+> （`0010` は DELETE のポリシーも GRANT も与えていない。3年経過分は定期ジョブだけが消す）。
 
 ⚠️ **本エンドポイントの認可を `本人` に広げない。** `lodging_register_entries` の INSERT/UPDATE RLS
 （`DB物理設計.md` §3-13②）は staff 限定であり、これは意図的である。旅館業法対応の法定記録を
@@ -616,6 +645,100 @@ paths:
 > 予約時点で確定させるのは**宿泊枠であって人物の同定ではない**、という切り分けを守ること。
 
 ---
+
+### 3-6. チェックインQR（v13 §5.2.8・2026-09-26 新設 ／ WBS `3-2b`）
+
+**発行者は管理者（`admin`）、有効期限は発行から1週間**（v13 §9 #68 ／ 決定ログ §25-1）。
+QR は個人でも滞在でもなく**拠点と発行期間**を指す、現地掲示の共通の入口である。
+したがって**単回使用にしない**（精算QR〈§3 の伝票系〉・入金QRと異なる点）。
+
+> [!danger] QR を読めたことを本人確認として扱わない
+> 現地に掲示するため撮影・共有は起こりうる。**読み取りの成功はチェックインの十分条件ではない。**
+> 状態遷移の API（`3-2` で実装済みの経路）が要求する条件を QR で置き換えてはならない:
+> ①**ログイン済みの本人** ②その本人に**当日の滞在予定がある**（`check_ins` が
+> `pre_registered` / `confirmed`）③**状態遷移の向きが正しい**（`checked_out` からの再開を許さない）。
+> 置き換えると、掲示物を撮影した第三者が遠隔から他人の滞在をチェックインできる。
+
+トークン規格は精算QR・入金QRと同一である（`DB物理設計.md` の `settlement_qr_token_hash` /
+`qr_token_hash` と同じ扱い）: `base64url(gen_random_bytes(32))` ＝ **256bit**、
+**平文はDBに保存せず** `sha256` の16進のみ保持し、**発行APIのレスポンスで1度だけ返す**。
+
+```yaml
+paths:
+  /api/admin/checkin-qr:
+    post:
+      summary: "チェックインQR の発行（管理者のみ・有効期限1週間）"
+      description: >
+        現地掲示用のQRを発行する。既に有効なQRがある場合は失効させてから新しい行を作る
+        （同時に2枚が有効になると、貼り替え漏れの掲示物でチェックインできてしまう）。
+        レスポンスの token は平文で、この1度だけ返す（DBには sha256 のみ保持）。
+      security:
+        - adminSession: []   # admin のみ。core_member は発行できない（v13 §5.2.8）
+      responses:
+        "201":
+          description: 発行した
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token, expires_at]
+                properties:
+                  token:
+                    type: string
+                    description: "掲示するURLに載せる平文トークン。**再取得はできない**"
+                  expires_at:
+                    type: string
+                    format: date-time
+                    description: "発行から1週間後（v13 §5.2.8）"
+        "403":
+          description: "admin 以外からの呼び出し（core_member を含む）"
+
+    delete:
+      summary: "チェックインQR の手失効（掲示物の紛失・撮影の流出時）"
+      description: >
+        期限を待たずに止める。掲示物が流出した時点で有効なQRが残っていると、
+        期限切れまでの最大1週間、第三者が入口URLを開ける状態が続く。
+      security:
+        - adminSession: []
+      responses:
+        "204":
+          description: 失効させた（既に失効済みでも 204。冪等にする）
+        "403":
+          description: "admin 以外からの呼び出し"
+
+  /api/checkins/qr/{token}:
+    post:
+      summary: "掲示QRの読み取り（宿泊者本人が自分の滞在をチェックインへ進める）"
+      description: >
+        token を検証し、**呼び出した本人の**当日の滞在を staying へ進める。
+        token は「どの滞在か」を指さない（拠点と発行期間を指すだけ）ため、
+        対象の滞在はセッションの会員IDから引く。
+      security:
+        - userSession: []   # ログイン済みであること。ロールは問わない
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: チェックインした
+        "401":
+          description: "未ログイン（QR は認証情報ではない）"
+        "404":
+          description: >
+            token が存在しない・失効済み・期限切れ。**403 と区別しない**
+            （掲示物の有効性を当てられるようにしないため）
+        "409":
+          description: >
+            当日の滞在予定が無い、または状態遷移の向きが不正
+            （`checked_out` からの再開など）。⚠️ この判定を QR 側で緩めてはならない
+```
+
+> [!note] DB 側の置き場所
+> `check_ins` に列を足すのではなく**拠点単位の1行**を持つ表（`checkin_qr_tokens` 等）にする。
+> QR が指すのは滞在ではないため、`check_ins` に持たせると「どの滞在の QR か」という
+> 存在しない対応関係を作ることになる。DDL は `3-2b` の実装時に `DB物理設計.md` へ追記する。
 
 ## 4. Webhook・外部トリガー一覧
 
@@ -654,3 +777,6 @@ paths:
 | 2026-08-16（重要変更） | **Streamlit継続方針の確定反映**（2026-08-16オーナー最終判断）。ナレッジ登録・編集は当面line-rag-bot Streamlit で行い、REST API は実装しない決定を反映。§2-6の`POST /api/knowledge`・`PATCH /api/knowledge/{id}/publish`・`POST /api/escalations/{id}/resolve`を削除。`GET /api/escalations`のみ読み取り専用として残す。§5のオーナー確認事項 #4 を「解消済み」に変更。 |
 | 2026-08-16（再確定） | **`GET /api/escalations`も削除**。読み取り専用APIも含めてline-rag-bot連携APIは一切実装しない方針が確定（オーナー最終判断）。§2-6を全面書き換えし、本領域のエンドポイントをゼロ件に。§4 Webhook一覧の line-rag-bot 行を「API連携なし」に変更。 |
 | 2026-08-16（オーナー指示反映） | ①**呼称変更**：§2-6見出しの説明文をline-rag-bot単独表記から「浮遊街コンシェルジュ（line-rag-bot）」表記に統一。②**§2-7 会員一括インポートAPI（`preview`/`confirm`）を実装不要に変更**：画面設計.md C6と連動。③**§2-10 メディアライブラリAPIを新設**：`POST /api/media/signed-upload-url`等6エンドポイント。画面設計.md A10・DB物理設計.md §3-7と連動。 |
+| **2026-09-26** | **§2-2 に `PATCH /api/checkins/{id}`（滞在の変更）を追加**（v13 §5.6.9 ／ WBS `3-10`）。宿泊形態・部屋・退去日・人数の変更で、**理由必須**・変更後の残枠を再判定し満室なら拒否する。⚠️ **実装は Server Action（`changeStayAction`）であり、公開 HTTP エンドポイントは置いていない**（顧客管理画面からのみ呼ぶ）。対応DB は `check_in_changes`（追記）・`check_ins`（現在値）・`room_assignments`（旧割当を終了し新規追加）。 |
+| **2026-09-26（2）** | **§2-2b の `POST /api/reservations` を実装に合わせて具体化**（WBS `3-7` ／ v13 §5.2.4 ／ 決定ログ §27）。受け取る項目（到着予定時刻・交通手段・**宿泊券の充当泊数**・備考）と、**既知情報は自動補完ではなく「尋ねない」**形にしたこと、予約可能な範囲が**今日から180日先まで**（残枠ビュー `0015` の窓）であること、実装が Server Action であり公開 HTTP エンドポイントを置いていないことを明記した。 |
+| **2026-09-26（3）** | **§2-2b の事前予約注文（`POST /api/reservations/{id}/meals`）と日別食数サマリーに実装の所在を注記**（WBS `3-5c` ／ v13 §5.4.1b ／ 決定ログ §28）。枠ごとに1行を UPDATE で持ち回す理由（`0019` は物理削除を許さず、取消 → 再選択を INSERT で表すと一意制約に当たる）、**本人はチェックインまで／運営は滞在中も代理編集可**、サマリーは**数量の合計**で数え誰が予約したかは返さないこと、いずれも Server Action で実装しており公開 HTTP エンドポイントを置いていないことを明記した。 |
