@@ -189,7 +189,7 @@ up: "[[浮遊街アプリ 総合要件定義・設計書_v13]]"
 | メソッド | パス | 概要 | 権限 | 主な対象テーブル |
 | --- | --- | --- | --- | --- |
 | GET | `/api/availability?from=&to=&room_type=` | **宿泊枠の残数**（`v_room_availability` から都度算出。保存値ではない） | 全員 | `v_room_availability` |
-| POST | `/api/reservations` | **アプリ内予約**。氏名・連絡先・住所は会員マスタから自動補完。備考欄が空なら自動確定、記載があれば「要確認」 | `active` の全ロール | `check_ins`（`reservation_source='in_app'`） |
+| POST | `/api/reservations` | **アプリ内予約**。氏名・連絡先・住所は**尋ねない**（会員行にあるため ／ v13 §5.2.4）。備考欄が空なら自動確定、記載があれば「要確認」。受け取るのは 宿泊形態／日程／到着予定時刻（`HH:MM`）／交通手段（`car`・`taxi`・`shuttle`・`other`）／大人・子供／**宿泊券の充当泊数**／備考。⚠️ **実装は Server Action**（`createReservationAction`）であり公開 HTTP エンドポイントは置いていない。予約できるのは**今日から180日先まで**（残枠ビューの窓と同じ） | `active` の全ロール | `check_ins`（`reservation_source='in_app'`・`stay_tickets_applied_nights`） |
 | GET | `/api/me/stay-calendar` | **本人の宿泊予定・履歴カレンダー** | 本人 | `check_ins`×`room_assignments` |
 
 **★ 公開予約ページ関連（2026-08-23 新設 ／ v13 §5.2.3 ／ §9 #46）**
@@ -778,3 +778,4 @@ paths:
 | 2026-08-16（再確定） | **`GET /api/escalations`も削除**。読み取り専用APIも含めてline-rag-bot連携APIは一切実装しない方針が確定（オーナー最終判断）。§2-6を全面書き換えし、本領域のエンドポイントをゼロ件に。§4 Webhook一覧の line-rag-bot 行を「API連携なし」に変更。 |
 | 2026-08-16（オーナー指示反映） | ①**呼称変更**：§2-6見出しの説明文をline-rag-bot単独表記から「浮遊街コンシェルジュ（line-rag-bot）」表記に統一。②**§2-7 会員一括インポートAPI（`preview`/`confirm`）を実装不要に変更**：画面設計.md C6と連動。③**§2-10 メディアライブラリAPIを新設**：`POST /api/media/signed-upload-url`等6エンドポイント。画面設計.md A10・DB物理設計.md §3-7と連動。 |
 | **2026-09-26** | **§2-2 に `PATCH /api/checkins/{id}`（滞在の変更）を追加**（v13 §5.6.9 ／ WBS `3-10`）。宿泊形態・部屋・退去日・人数の変更で、**理由必須**・変更後の残枠を再判定し満室なら拒否する。⚠️ **実装は Server Action（`changeStayAction`）であり、公開 HTTP エンドポイントは置いていない**（顧客管理画面からのみ呼ぶ）。対応DB は `check_in_changes`（追記）・`check_ins`（現在値）・`room_assignments`（旧割当を終了し新規追加）。 |
+| **2026-09-26（2）** | **§2-2b の `POST /api/reservations` を実装に合わせて具体化**（WBS `3-7` ／ v13 §5.2.4 ／ 決定ログ §27）。受け取る項目（到着予定時刻・交通手段・**宿泊券の充当泊数**・備考）と、**既知情報は自動補完ではなく「尋ねない」**形にしたこと、予約可能な範囲が**今日から180日先まで**（残枠ビュー `0015` の窓）であること、実装が Server Action であり公開 HTTP エンドポイントを置いていないことを明記した。 |
