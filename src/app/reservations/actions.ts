@@ -31,7 +31,7 @@ import {
 import { findFullNight } from "@/lib/lodging/stay-changes";
 import { fetchStayTicketBalance } from "@/lib/lodging/stay-tickets";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
-import { todayInJapan } from "@/lib/today";
+import { todayInJapan } from "@/lib/japan-time";
 
 const MESSAGE = {
   denied: "この操作を行う権限がありません。",

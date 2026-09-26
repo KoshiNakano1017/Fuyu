@@ -44,7 +44,7 @@ import {
 } from "@/lib/eumo/store";
 import { fetchStayingCheckIns } from "@/lib/orders/fetch-orders";
 import { saveMealPreOrdersAction } from "@/app/reservations/actions";
-import { todayInJapan } from "@/lib/today";
+import { todayInJapan } from "@/lib/japan-time";
 
 import {
   adjustStayTicketsAction,

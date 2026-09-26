@@ -2,7 +2,7 @@ import { AccessDenied } from "@/components/auth/AccessDenied";
 import { CheckInBoard } from "@/components/lodging/CheckInBoard";
 import { AccessDeniedError, requireStaff } from "@/lib/auth/guard";
 import { fetchCheckInBoard } from "@/lib/lodging/fetch-checkin-board";
-import { todayInJapan } from "@/lib/today";
+import { todayInJapan } from "@/lib/japan-time";
 
 import { cancelStayAction, checkInAction, checkOutAction } from "./actions";
 
@@ -13,7 +13,7 @@ import { cancelStayAction, checkInAction, checkOutAction } from "./actions";
  *
  * サーバのタイムゾーンで `toISOString()` を切ると、深夜帯に**前日の板**が出る。
  * 朝会も入退館も日本時間で回っているので、基準は運営の所在地に固定する
- * （実体は `src/lib/today.ts` の `todayInJapan()`）。
+ * （実体は `src/lib/japan-time.ts` の `todayInJapan()`）。
  *
  * ## QR は未実装
  *

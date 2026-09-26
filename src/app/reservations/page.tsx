@@ -1,8 +1,10 @@
+import Link from "next/link";
+
 import { MealPreOrderSection } from "@/components/lodging/MealPreOrderSection";
 import { ReservationForm } from "@/components/lodging/ReservationForm";
 import { MasterDataShortcut } from "@/components/nav/MasterDataShortcut";
 import { requireSignedIn } from "@/lib/auth/guard";
-import { CANCELLED_BY_OPERATOR_LABEL, formatCancelledAt } from "@/lib/lodging/checkin-ops";
+import { todayInJapan } from "@/lib/japan-time";
 import {
   fetchAccommodationRates,
   fetchAccommodationTypes,
@@ -15,24 +17,14 @@ import {
 } from "@/lib/lodging/meal-reservation-store";
 import { prefillFromStays } from "@/lib/lodging/reservation-intake";
 import { fetchStayTicketBalance } from "@/lib/lodging/stay-tickets";
-import { todayInJapan } from "@/lib/today";
 
 import { createReservationAction, saveMealPreOrdersAction } from "./actions";
 
 /**
- * 状態の表示名。**生の `status` をそのまま出さない** —— `cancelled` と書かれても、
- * 本人には自分が取り消したのか運営が取り消したのかが分からない（v13 §5.2.2「本人への表示」）。
- */
-const STATUS_LABELS: Record<string, string> = {
-  pre_registered: "予約受付",
-  confirmed: "予約確定",
-  staying: "滞在中",
-  checked_out: "退館済み",
-  cancelled: CANCELLED_BY_OPERATOR_LABEL,
-};
-
-/**
- * 宿泊予約（画面ID A11 ／ WBS 3-7）＋ 本人の宿泊予定・履歴（画面ID A12 ／ WBS 3-8）。
+ * 宿泊予約（画面ID A11 ／ WBS 3-7）。
+ *
+ * 本人の宿泊予定・履歴（画面ID A12）は **A6 マイログ（`/me`）内のタブ**にある
+ * （v13 §5.2.5② ／ `画面設計.md` §4 A12）。ここからはそこへ送るだけにする。
  *
  * ## 未ログインの入口はここではない（`/reserve`）
  *
@@ -64,7 +56,7 @@ const STATUS_LABELS: Record<string, string> = {
 export default async function ReservationsPage() {
   const viewer = await requireSignedIn();
 
-  // 基準日は日本時間で決める（`src/lib/today.ts`）。UTC で切ると深夜帯に前日の残枠が出る。
+  // 基準日は日本時間で決める（`src/lib/japan-time.ts`）。UTC で切ると深夜帯に前日の残枠が出る。
   const today = todayInJapan();
   const [types, todayAvailability, myStays, rates, stayTicketBalance, mealItems] =
     await Promise.all([
@@ -78,8 +70,6 @@ export default async function ReservationsPage() {
     // カフェの事前予約（v13 §5.4.1b ／ WBS 3-5c）。選択肢は `is_pre_orderable` の商品だけ
     fetchPreOrderableItems(),
   ]);
-
-  const displayNameOf = new Map(types.map((type) => [type.roomType, type.displayName]));
 
   // 事前予約の枠を出すのは「これから泊まる／泊まっている」滞在だけ（退館済み・取消は出さない）。
   const upcomingStays = myStays.filter(
@@ -146,54 +136,18 @@ export default async function ReservationsPage() {
       )}
 
       <section className="flex flex-col gap-2">
+        {/*
+          予定・履歴の一覧はここに持たない。正本は本人向けカレンダー（画面ID A12）を
+          **A6 マイログ内のタブ**と定めており（v13 §5.2.5② ／ `画面設計.md` §4 A12）、
+          同じ内容を2画面に置くと片方だけ直る。ここからは A6 へ送る。
+        */}
         <h2 className="text-lg font-bold">予定・履歴</h2>
-        {myStays.length === 0 ? (
-          <p className="text-sm text-neutral-600">予約はありません。</p>
-        ) : (
-          <ul className="flex flex-col gap-2">
-            {myStays.map((stay) => (
-              <li
-                key={stay.checkinId}
-                className="flex flex-wrap items-baseline justify-between gap-2 rounded border border-neutral-200 bg-white p-3"
-              >
-                <span className="font-medium">
-                  {stay.checkInDate} 〜 {stay.checkOutDate}
-                </span>
-                <span className="text-sm text-neutral-600">
-                  {displayNameOf.get(stay.roomType) ?? stay.roomType} ／{" "}
-                  {stay.adultsCount + stay.childrenCount}名
-                </span>
-                <span
-                  className={
-                    stay.status === "cancelled"
-                      ? "rounded bg-red-100 px-2 py-0.5 text-xs text-red-800"
-                      : "rounded bg-neutral-100 px-2 py-0.5 text-xs"
-                  }
-                >
-                  {STATUS_LABELS[stay.status] ?? stay.status}
-                </span>
-
-                {/*
-                  取り消された予約は、日時と理由まで本人に見せる（v13 §5.2.2「本人への表示」）。
-                  「いつ・なぜ取り消されたか」が読めないと、本人は運営へ問い合わせるしかない。
-                */}
-                {stay.status === "cancelled" ? (
-                  <p className="w-full text-xs text-red-800">
-                    {CANCELLED_BY_OPERATOR_LABEL}
-                    {stay.cancelledAt === null || stay.cancelledAt === undefined
-                      ? ""
-                      : ` ／ ${formatCancelledAt(stay.cancelledAt)}`}
-                    {stay.cancelReason === null ||
-                    stay.cancelReason === undefined ||
-                    stay.cancelReason === ""
-                      ? ""
-                      : ` ／ 理由：${stay.cancelReason}`}
-                  </p>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        )}
+        <p className="text-sm text-neutral-600">
+          宿泊の予定と履歴は、マイページの「宿泊予定・履歴」カレンダーでご確認いただけます。
+        </p>
+        <Link className="text-sm underline" href="/me">
+          マイページの宿泊予定・履歴へ
+        </Link>
       </section>
     </main>
   );
