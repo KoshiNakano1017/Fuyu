@@ -1,9 +1,9 @@
 {
   "version": 1,
   "issue": 167,
-  "pr": null,
+  "pr": 171,
   "branch": null,
-  "phase": "plan",
+  "phase": "review",
   "risk": "high",
   "attempts": {
     "infra": 0,
@@ -21,11 +21,112 @@
     "review": 0
   },
   "tokens": {
-    "input": 136,
-    "output": 80124,
-    "costUsd": 7.44242
+    "input": 1322,
+    "output": 864077,
+    "costUsd": 92.695058
   },
-  "testHashes": {},
+  "testHashes": {
+    "e2e/TEST_PLAN.md": "9e1ff3682d6cdff6",
+    "e2e/smoke.spec.ts": "ed6ce8db5e0004a2",
+    "e2e/unauthenticated-access.spec.ts": "21a3ebc8b9acfac3",
+    "tests/acceptance.test.ts": "ba0921981b4630b7",
+    "tests/accommodation-rates.test.ts": "c6fe0752abed4c8e",
+    "tests/adjustment-resolution.test.ts": "1a7d3e62b2691cd6",
+    "tests/ai-client.test.ts": "26b0511e481725da",
+    "tests/ai-env.test.ts": "af2ee601c87cfcce",
+    "tests/auth-guard.test.ts": "d5f5764a1a6cd138",
+    "tests/checkin-ops.test.ts": "01bede9045bf2ad5",
+    "tests/concierge-admin-link.test.ts": "9c74468cb3723c2e",
+    "tests/customer-sort.test.ts": "688da7e20b4f533d",
+    "tests/db-test-infra.test.ts": "b4db59cc79914376",
+    "tests/db/accommodation-rates.test.ts": "4580ed3e6630dc91",
+    "tests/db/check-ins-and-availability.test.ts": "dd5b7f024e5723b1",
+    "tests/db/current-operator-id.test.ts": "82e8173ec61178d7",
+    "tests/db/eumo-self-receipt.test.ts": "f714d3bc89bf1e0b",
+    "tests/db/helpers/fixtures.ts": "82faf25409aa0dd6",
+    "tests/db/helpers/psql.ts": "d95bcca15e534a0a",
+    "tests/db/helpers/shopping-list.ts": "865b8e969aaa6e1f",
+    "tests/db/lodging-register.test.ts": "30b65e1be2f195fd",
+    "tests/db/login-binding.test.ts": "951155ad26536214",
+    "tests/db/media-assets.test.ts": "7056a46ab127be72",
+    "tests/db/member-display-name.test.ts": "2523551edafc36af",
+    "tests/db/member-matching.test.ts": "c7ac7ce81a8e102e",
+    "tests/db/members-guard-trigger.test.ts": "c0675285d9d0be31",
+    "tests/db/members-schema.test.ts": "a8be52aaca0f7994",
+    "tests/db/membership-applications.test.ts": "34905163b0ff8cf8",
+    "tests/db/membership-approval.test.ts": "b915b376e2f3d616",
+    "tests/db/morning-meetings-rls.test.ts": "d20220c01e6fa90c",
+    "tests/db/order-items-void.test.ts": "2978314ba8257104",
+    "tests/db/oyakata-member-no-and-nickname.test.ts": "27c798c90b1fb10e",
+    "tests/db/quest-review-guard.test.ts": "64707ab63ba3c3a3",
+    "tests/db/quests-guest-visibility.test.ts": "9114f86497b20d71",
+    "tests/db/rag-pgvector.test.ts": "e1edec2f180986f8",
+    "tests/db/rag-search-scope.test.ts": "f56bb6951c21e46f",
+    "tests/db/rls-and-helper-functions.test.ts": "9ac749d11b2c42ad",
+    "tests/db/rls-policies.test.ts": "3748be28b027dcc3",
+    "tests/db/rooms.test.ts": "593113cb58ea14ca",
+    "tests/db/shopping-list-authz.test.ts": "0e3887e6d43e3aeb",
+    "tests/db/shopping-list-items.test.ts": "d80e80b7733b9ae1",
+    "tests/db/shopping-list-schema.test.ts": "a535e3fd18b27f50",
+    "tests/db/stay-ticket-adjust.test.ts": "1c825debaad36243",
+    "tests/eumo-grants.test.ts": "78634abea96ac68d",
+    "tests/fixtures-are-synthetic.test.ts": "1175f89a51b8831a",
+    "tests/fixtures/quest-board.ts": "b3132956c19479ac",
+    "tests/helpers/ai-sources.ts": "b976105b854a38e2",
+    "tests/helpers/concierge-sources.ts": "a3b2ceefd9c779bf",
+    "tests/home-entry.test.ts": "9077e2c7ff02ef55",
+    "tests/invitation-route-b.test.ts": "4b88c22c9dafa615",
+    "tests/lodging-calendar.test.ts": "1225291bb46635a2",
+    "tests/lodging-cancellation.test.ts": "0b007d98e5ede355",
+    "tests/lodging-register.test.ts": "8da422d56bcbdd87",
+    "tests/login-invitation-gate.test.ts": "3340ab0cb43dcd62",
+    "tests/media-env.test.ts": "342023269f6ec655",
+    "tests/media-exif.test.ts": "5fb355521f9e0529",
+    "tests/media-moderation-screen.test.ts": "8de28a34f77d602b",
+    "tests/media-moderation.test.ts": "f0d2fa33943aa863",
+    "tests/media-signed-url.test.ts": "42e219fc5ae67d82",
+    "tests/media-upload-client.test.ts": "d2a9a4b110a729bb",
+    "tests/media-upload-policy.test.ts": "de1e345c465f6fdc",
+    "tests/member-link-queue-screen.test.ts": "3334ebbb5420fc4e",
+    "tests/member-matching-login.test.ts": "dc368814fb084e1d",
+    "tests/member-matching.test.ts": "dc675b1fccb2bd11",
+    "tests/membership-approval-screen.test.ts": "88cb1faaa806fb9f",
+    "tests/membership-approval.test.ts": "0ac8a684681fe45b",
+    "tests/membership-registration-screen.test.ts": "24f3669b3c24002f",
+    "tests/membership-registration.test.ts": "2ce26839682a3bb0",
+    "tests/middleware-resilience.test.ts": "ffd48fd3af959071",
+    "tests/migrations-baseline.test.ts": "cd1b6e29a043b253",
+    "tests/money-component.test.ts": "490dc6325275fa08",
+    "tests/morning-meeting-intake.test.ts": "9256f65a908066c8",
+    "tests/morning-meeting-structuring.test.ts": "98c410024c211ee6",
+    "tests/nickname.test.ts": "4a2293853eb17903",
+    "tests/no-line-rag-bot-integration.test.ts": "78a9bcd933b7ea04",
+    "tests/order-totals.test.ts": "4ab4cfe04b9eae89",
+    "tests/orders-menu.test.ts": "9597bcd5b03c6a07",
+    "tests/quest-application-gate.test.ts": "daf570f863ab6141",
+    "tests/quest-application-screen.test.ts": "01060d3b4c0a6917",
+    "tests/quest-board.test.ts": "e5bfc002c8c4c8b2",
+    "tests/quest-review.test.ts": "1e04017f5b38bb31",
+    "tests/reservation-otp.test.ts": "746960f1c378a1ab",
+    "tests/revisit-alerts.test.ts": "d98b45a310817310",
+    "tests/role-labels.test.ts": "40883f8cad8dcbaa",
+    "tests/role-navigation.test.ts": "cf16b87575989f3a",
+    "tests/room-availability.test.ts": "5f1e319a1a1878da",
+    "tests/self-order-serving-status-screen.test.ts": "2af6ee9c44fd2ed6",
+    "tests/serving-status.test.ts": "4b3d762719a30c34",
+    "tests/settlement-qr.test.ts": "191a2fb8db6725b8",
+    "tests/shopping-list-acceptance.test.ts": "eeabc950d0bbd08e",
+    "tests/shopping-list-screen.test.ts": "06f2e9c3bf876f6b",
+    "tests/shopping-list.test.ts": "e1bf5282967ab550",
+    "tests/slip-edit.test.ts": "cb9070bb9f9c13d8",
+    "tests/staff-knowledge-page.test.ts": "41e23e6ba5ee51d7",
+    "tests/stay-history.test.ts": "b1af641092cab662",
+    "tests/stay-ticket-adjust.test.ts": "0c216013280676ab",
+    "tests/supabase-env.test.ts": "2e12df77018a4f12",
+    "tests/uii.test.ts": "b5791629644723f4",
+    "tests/unsettled-totals.test.ts": "e90a9b97fa9fb23f",
+    "tests/work-log-report.test.ts": "de6c85fb35ed638c"
+  },
   "specRefs": [
     {
       "ref": "v13 §5.3",
@@ -62,101 +163,101 @@
     {
       "criterion": "role = guest の閲覧者が guest_allowed = false のクエストへ POST /api/quests/{questId}/applications を直接叩くと拒否され、quest_applications に行が増えない",
       "origin": "issue",
-      "basis": "v13 §5.10.6",
-      "test": "ゲストは guest_allowed=false のクエストへ受注申請できない ／ ゲストが API を直接叩いても quest_applications に行が増えない"
+      "basis": "v13 §5.10.6 L1887",
+      "test": "tests/quest-application-recruitment.test.ts:`ゲストは guest_allowed=false のクエストへ受注申請できない` ／ tests/quest-application-server-guard.test.ts:`API ルートが判定関数を呼んでから受注申請を作る（拒否時に行が増えない）`・`拒否は 403 で返る（画面を経由しない直叩きでも止まる）`"
     },
     {
       "criterion": "quests.required_certification の資格を1つでも保有しない会員は、そのクエストへ受注申請できない",
       "origin": "issue",
-      "basis": "v13 §5.3（項目2）",
-      "test": "必要な資格を1つでも欠く会員は受注申請できない ↔ 必要な資格をすべて持つ会員は受注申請できる"
+      "basis": "v13 §5.3（項目2）L837",
+      "test": "tests/quest-application-recruitment.test.ts:`required_certification を保有しない街人は受注申請できない`（対: `資格を保有する街人は受注申請できる`）"
     },
     {
       "criterion": "資格ゲートの判定は guest_allowed から独立している ― role が guest → member に変わっても、未保有資格のクエストは受注申請できないままである",
       "origin": "issue",
-      "basis": "v13 §5.10.6 表3行目",
-      "test": "role が guest から member に変わっても、未保有資格のクエストは受注申請できないままである"
+      "basis": "v13 §5.10.6 L1883（表3行目）",
+      "test": "tests/quest-application-recruitment.test.ts:`role が guest から member に変わっても、資格未保有なら受注申請できないままである`（対: `ゲストは資格未保有のクエストへ受注申請できない`）"
     },
     {
       "criterion": "quests.status が open でないクエストへは受注申請できない",
       "origin": "issue",
       "basis": "0007_quests_schema.sql chk_quests_status ／ v13 §5.10.6",
-      "test": "status が closed のクエストへは受注申請できない"
+      "test": "tests/quest-application-recruitment.test.ts:`status が closed のクエストへは受注申請できない`"
     },
     {
       "criterion": "画面の申請ボタンの活性・POST /api/quests/{questId}/applications・Server Action の3経路が、同一の判定関数の戻り値と一致する",
       "origin": "issue",
-      "basis": "v13 §5.9.3",
-      "test": "画面の申請ボタンの活性と canApplyToQuest() の戻り値が資格ゲートを含めて全件一致する"
+      "basis": "v13 §5.9.3 L1717",
+      "test": "tests/quest-application-recruitment.test.ts:`★ 画面の申請ボタンの活性が、全クエスト × 全閲覧者でサーバ側の判定と一致する`（API・Server Action 側は tests/quest-application-screen.test.ts の `canApplyToQuest(viewer, quest)` 参照テストが既に固定済み）"
     },
     {
       "criterion": "受注申請が成立すると quest_applications.status が 申請中 になる",
       "origin": "issue",
-      "basis": "v13 §5.3（項目2）",
-      "test": "受注申請が成立した行の status は 申請中 である"
+      "basis": "v13 §5.3（項目2）L835",
+      "test": "tests/db/quest-application-capacity.test.ts:`会員が自分名義で入れた受注申請は 申請中 で始まる`"
     },
     {
       "criterion": "同じ会員が同じクエストへ2件目の受注申請を作れない。2度目の操作は画面上「申請済み」として伝わり、処理失敗の文言にならない",
       "origin": "issue",
-      "basis": "0017_quest_applications_and_work_logs.sql uq_quest_app_per_member",
-      "test": "生きている申請がある会員の2度目の申請は「申請済み」として伝わる ／ キャンセル済みの申請がある会員の再申請も「申請済み」として伝わり処理失敗の文言にならない ／ uq_quest_app_per_member により DB が2行目を 23505 で拒否する"
+      "basis": "0017_quest_applications_and_work_logs.sql L78-80 uq_quest_app_per_member",
+      "test": "tests/db/quest-application-capacity.test.ts:`同じ会員の2件目は一意制約違反になる（23505）`・`★ 取り下げ（キャンセル）を経た再申請も一意制約違反になる（全ステータスが対象）` ／ tests/quest-application-server-guard.test.ts:`一意制約違反（23505）を重複として扱う`・`「DB に一意制約が無い」という前提の注記が残っていない`"
     },
     {
       "criterion": "受注申請が quests.recruit_count に達したクエストへは、さらに受注申請できない",
       "origin": "issue",
-      "basis": "v13 §5.3 note（L844） ／ 0017 の member_id 列コメント",
-      "test": "募集人数に達したクエストへは受注申請できない ／ service_role で INSERT してもトリガーが拒否する ／ キャンセルされた申請は募集枠を占有しない"
+      "basis": "v13 §5.3 note L844 ／ 0017 の member_id 列コメント L46-48",
+      "test": "tests/db/quest-application-capacity.test.ts:`募集1名のクエストへ2人目は受注申請できない（境界値: 上限ちょうどで閉じる）`・`募集2名のクエストへは2人目も受注申請できる（境界値: 上限の直前は開く）`・`募集2名のクエストへ3人目は受注申請できない`・`募集1名のクエストへ1人目は受注申請できる` ／ tests/quest-application-recruitment.test.ts:`募集人数に達したクエストへは受注申請できない（境界値: 上限ちょうど）`・`募集人数を超えているクエストへは受注申請できない（境界値: 上限の超過）`・`募集人数に達していないクエストへは受注申請できる（境界値: 上限の直前）`・`募集が埋まっていても、まだ0件のクエストは受注申請できる（境界値: 0件）`"
     },
     {
       "criterion": "拒否されたとき、理由（施錠・資格・募集終了）を区別した文言を返さない",
       "origin": "issue",
-      "basis": "v13 §5.10.6 末尾",
-      "test": "施錠・資格不足・募集満了のいずれで拒否されても返る文言が同一である ／ v_quest_board は申請件数を返さず is_recruit_full の真偽値だけを返す"
+      "basis": "v13 §5.10.6 L1893",
+      "test": "tests/quest-application-server-guard.test.ts:`API ルートが施錠・資格・募集終了を区別した文言を返さない`・`Server Action が施錠・資格・募集終了を区別した文言を返さない`"
     },
     {
       "criterion": "role が admin / core_member のいずれでもない操作者は、quest_applications.status を 指示済み へ遷移させられない",
       "origin": "issue",
-      "basis": "v13 §6 権限マトリクス（管理者〇・コアメンバー〇・会員−・ゲスト−）",
-      "test": "role が member の操作者は 指示済み へ遷移させられない ／ member_type が親方でも role が member なら遷移させられない ↔ admin・core_member は遷移できる"
+      "basis": "v13 §6 権限マトリクス L2307",
+      "test": "tests/quest-instruction.test.ts:`一般会員は実行指示を出せない`・`ゲストは実行指示を出せない`・`custom ロールは実行指示を出せない（運営2値に含まれないため）`（対: `管理者は実行指示を出せる`・`コアメンバーは実行指示を出せる`） ／ tests/db/quest-instruction.test.ts:`受注者本人（一般会員）は自分の申請を 指示済み へ遷移させられない（42501）`・`ゲストの実行指示は 0 行で終わる（RLS の USING で対象外）`・`member_type が親方でも role が一般会員なら 0 行で終わる（v13 §2）`（対: `管理者は 申請中 を 指示済み へ遷移させられる`）"
     },
     {
       "criterion": "B1 の拒否は、画面のボタンを外して service_role 経由で UPDATE しても成立する",
       "origin": "issue",
-      "basis": "0017 quest_applications_guard_review() ／ v13 §5.9.3",
-      "test": "service_role から 指示済み へ UPDATE してもトリガーが 42501 で拒否する"
+      "basis": "0017 L322-356 quest_applications_guard_review() ／ v13 §5.9.3 L1713",
+      "test": "tests/db/quest-instruction.test.ts:`service_role 相当（RLS 迂回）で一般会員を操作者として申告しても拒否される（42501）`・`操作者を申告しない UPDATE も拒否される（42501）`"
     },
     {
       "criterion": "実行指示の「いつ・どこで・何を」が scheduled_start_at / instruction_place / instruction_body として保存される",
       "origin": "issue",
-      "basis": "v13 §5.3（項目3）",
-      "test": "実行指示を出すと scheduled_start_at / instruction_place / instruction_body が保存される"
+      "basis": "v13 §5.3（項目3）L838",
+      "test": "tests/db/quest-instruction.test.ts:`いつ（scheduled_start_at）が保存される`・`どこで（instruction_place）が保存される`・`何を（instruction_body）が保存される`"
     },
     {
       "criterion": "指示の内容（何を＝instruction_body）が空のままでは 指示済み へ遷移できない",
       "origin": "issue",
-      "basis": "v13 §5.3（項目3）",
-      "test": "instruction_body が空のままでは 指示済み へ遷移できない"
+      "basis": "v13 §5.3（項目3）L838",
+      "test": "tests/quest-instruction.test.ts:`指示内容が空文字なら運営でも指示済みにできない`・`指示内容が改行・タブだけでも指示済みにできない`"
     },
     {
       "criterion": "受注者本人が、自分の受注申請に対して出された実行指示（いつ・どこで・何を）を自分の画面で読める",
       "origin": "issue",
-      "basis": "v13 §5.3（項目3） ／ 0017 の RLS quest_applications_select_self",
-      "test": "受注者本人は自分の受注申請に出された実行指示を読める ↔ 受注者以外の一般会員は他人の受注申請の実行指示を読めない"
+      "basis": "v13 §5.3（項目3）L838 ／ 0017 L367-374 RLS quest_applications_select_self",
+      "test": "tests/db/quest-instruction.test.ts:`受注者本人は指示の内容（何を）を読める`・`受注者本人は指示の場所（どこで）を読める`・`受注者本人は指示の日時（いつ）を読める`（対: `他人に出された指示は読めない（誰がどのクエストに入るかは PII-B）`）"
     },
     {
       "criterion": "申請中 の受注申請が審査待ちとして一覧に並び、指示済み へ遷移したものは待ち行列から外れる",
       "origin": "issue",
-      "basis": "v13 §5.3.2 の遷移図 申請中 → 指示済み ／ 画面設計.md §2 画面ID B5",
-      "test": "審査待ち一覧には 申請中 だけが並び、指示済み は外れる"
+      "basis": "v13 §5.3.2 L892 遷移図 申請中 → 指示済み ／ 画面設計.md §2 画面ID B5",
+      "test": "tests/db/quest-instruction.test.ts:`申請中 の受注申請は運営から審査待ちとして見える`・`指示済み へ遷移した受注申請は審査待ちから外れる`"
     },
     {
       "criterion": "実行指示を出した運営の member_id と日時が reviewed_by / reviewed_at に記録される",
       "origin": "issue",
-      "basis": "0017 chk_quest_app_reviewed_has_operator",
-      "test": "実行指示を出すと reviewed_by と reviewed_at が記録される ／ reviewed_at があるのに reviewed_by が無い行は DB が拒否する"
+      "basis": "0017 L82-85 chk_quest_app_reviewed_has_operator",
+      "test": "tests/db/quest-instruction.test.ts:`指示を出した運営の member_id が reviewed_by に入る`・`指示を出した日時が reviewed_at に入る`・`審査者のいない 指示済み は作れない（23514）`"
     }
   ],
   "acceptanceDerived": false,
-  "updatedAt": "2026-09-25T12:04:14.652Z",
+  "updatedAt": "2026-09-26T02:25:32.225Z",
   "provisional": []
 }

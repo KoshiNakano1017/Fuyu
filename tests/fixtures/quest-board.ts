@@ -7,6 +7,13 @@
 // 列の対応: DB物理設計 §2-1 の `quests` DDL
 //   （`origin_type` / `guest_allowed` / `required_certification` / `status` / `reward_uii`）。
 //   TS 側の綴りは既存コードの作法に合わせて camelCase とする。
+//
+// ▼ 2026-09-25（WBS `5-2` ／ Issue #167）追加: `recruitCount` / `applicationCount`
+//   v13 §5.3 note（L844）「1クエスト＝運営が指定した**募集人数の範囲で**受注可」を判定するには、
+//   募集人数（`quests.recruit_count`）と現在の受注申請の件数の**両方**が判定関数へ渡る必要がある。
+//   判定点を増やさない（v13 §5.9.3）ため、件数はクエスト側の属性として持たせ、
+//   画面・API・Server Action は従来どおり同じ判定関数だけを呼ぶ。
+//   `applicationCount` は**有効な受注申請の件数**（取り下げ済みを枠として数え続けないため）。
 
 /** 一覧に並ぶ順序をそのまま固定する。ここを並べ替えるとテストの期待値も変わる。 */
 
@@ -21,6 +28,8 @@ export const MANUAL_OPEN_QUEST = {
   coreOnlyReward: false,
   requiredCertification: [] as string[],
   rewardUii: 800,
+  recruitCount: 1,
+  applicationCount: 0,
   /** 指示内容。ゲストには返さない（v13 §5.10.6 L1800） */
   description: "9時に薪棚前集合。積み方はその場で指示する",
   /** 担当者情報。ゲストには返さない（同上） */
@@ -38,6 +47,8 @@ export const MORNING_MEETING_LOCKED_QUEST = {
   coreOnlyReward: false,
   requiredCertification: [] as string[],
   rewardUii: 1200,
+  recruitCount: 1,
+  applicationCount: 0,
   description: "切り返しの回数と水分量は当日の指示に従う",
   assigneeName: "テスト管理者",
 };
@@ -56,6 +67,8 @@ export const LOCKED_ZERO_REWARD_QUEST = {
   coreOnlyReward: false,
   requiredCertification: [] as string[],
   rewardUii: 0,
+  recruitCount: 1,
+  applicationCount: 0,
   description: "母屋前の落ち葉を掃く",
   assigneeName: "テスト街人",
 };
@@ -71,6 +84,8 @@ export const LOCKED_CLOSED_QUEST = {
   coreOnlyReward: false,
   requiredCertification: [] as string[],
   rewardUii: 500,
+  recruitCount: 1,
+  applicationCount: 0,
   description: "受付は終了している",
   assigneeName: "テスト街人",
 };
@@ -89,6 +104,8 @@ export const CERTIFICATION_REQUIRED_QUEST = {
   coreOnlyReward: false,
   requiredCertification: ["チェーンソー"],
   rewardUii: 1500,
+  recruitCount: 1,
+  applicationCount: 0,
   description: "伐倒方向の指示を受けてから着手する",
   assigneeName: "テスト管理者",
 };
@@ -107,8 +124,67 @@ export const CORE_ONLY_LOCKED_QUEST = {
   coreOnlyReward: true,
   requiredCertification: [] as string[],
   rewardUii: 5000,
+  recruitCount: 1,
+  applicationCount: 0,
   description: "詳細は口頭のみで共有する。名簿記載は最小限に留める",
   assigneeName: "テストコア",
+};
+
+/**
+ * 募集3名のうち2名が受注済み（境界値: **上限の直前**）。まだ1枠ある。
+ * v13 §5.3 note L844「募集人数の**範囲で**受注可」の「範囲内」側。
+ */
+export const PARTIALLY_RECRUITED_QUEST = {
+  questId: "11111111-1111-4111-8111-111111111107",
+  title: "母屋前の草刈り（3人募集）",
+  categoryId: "22222222-2222-4222-8222-222222222207",
+  originType: "manual" as const,
+  status: "open" as const,
+  guestAllowed: true,
+  coreOnlyReward: false,
+  requiredCertification: [] as string[],
+  rewardUii: 900,
+  recruitCount: 3,
+  applicationCount: 2,
+  description: "刈った草は堆肥場へ運ぶ",
+  assigneeName: "テスト街人",
+};
+
+/** 募集3名に受注申請が3件（境界値: **上限ちょうど**）。ここで閉じる。 */
+export const FULLY_RECRUITED_QUEST = {
+  questId: "11111111-1111-4111-8111-111111111108",
+  title: "薪割り（3人募集・充足）",
+  categoryId: "22222222-2222-4222-8222-222222222208",
+  originType: "manual" as const,
+  status: "open" as const,
+  guestAllowed: true,
+  coreOnlyReward: false,
+  requiredCertification: [] as string[],
+  rewardUii: 1100,
+  recruitCount: 3,
+  applicationCount: 3,
+  description: "薪の長さは現場で指示する",
+  assigneeName: "テスト街人",
+};
+
+/**
+ * 募集1名に受注申請が2件（境界値: **上限の超過**）。
+ * 上限判定を `=== recruitCount` で書くとここだけすり抜け、既に溢れているクエストが開く。
+ */
+export const OVER_RECRUITED_QUEST = {
+  questId: "11111111-1111-4111-8111-111111111109",
+  title: "鶏小屋の掃除（1人募集・溢れている）",
+  categoryId: "22222222-2222-4222-8222-222222222209",
+  originType: "manual" as const,
+  status: "open" as const,
+  guestAllowed: true,
+  coreOnlyReward: false,
+  requiredCertification: [] as string[],
+  rewardUii: 700,
+  recruitCount: 1,
+  applicationCount: 2,
+  description: "床の敷料を入れ替える",
+  assigneeName: "テスト街人",
 };
 
 /** クエストボードへ渡す全件。手動起案と朝会自動抽出が混在している（v13 §5.3 L754）。 */
@@ -119,6 +195,9 @@ export const ALL_QUESTS = [
   LOCKED_CLOSED_QUEST,
   CERTIFICATION_REQUIRED_QUEST,
   CORE_ONLY_LOCKED_QUEST,
+  PARTIALLY_RECRUITED_QUEST,
+  FULLY_RECRUITED_QUEST,
+  OVER_RECRUITED_QUEST,
 ];
 
 /** `guest_allowed = false` かつ `status = 'open'` の件数。解放件数バナーの N の期待値。 */

@@ -13,16 +13,64 @@ import type { QuestApplicationStatus, WorkLogApprovalStatus } from "./review";
 
 export type CreateApplicationResult =
   | { ok: true; applicationId: string }
-  | { ok: false; reason: "duplicate" | "failed" };
+  // `unavailable` は受け付けの条件を満たさなかった場合（現状は枠が無いとき）。
+  // 呼び出し側はゲート拒否と同じ一律の文言を返す（v13 §5.10.6 末尾）。
+  | { ok: false; reason: "duplicate" | "unavailable" | "failed" };
+
+/** 一意制約違反（`uq_quest_app_per_member`）。 */
+const UNIQUE_VIOLATION = "23505";
+
+/** CHECK 相当の拒否。0043 の上限ガードがこの SQLSTATE で落とす。 */
+const CHECK_VIOLATION = "23514";
+
+/**
+ * その会員が、そのクエストへ既に受注申請しているか。
+ *
+ * ## 認可の判定ではない（判定点は増えていない）
+ *
+ * 可否を決めるのは `canApplyToQuest()` ただ1箇所のままである（v13 §5.9.3）。
+ * ここが引くのは**本人が自分の申請行の有無を確かめる**ことだけで、他人の行も件数も返さない
+ * （`0017` の `quest_applications_select_self` が行を本人に絞る）。
+ *
+ * ## 呼び出し側は、これを枠の判定より先に置く
+ *
+ * 逆順にすると、`recruit_count` の既定値が 1（`0007` L73-74）であるため
+ * **申請者自身の行でそのクエストが満了になり**、2度目の操作が「すでに申請済み」ではなく
+ * 一律の拒否文言（「このクエストは受注できません」）になる。これは完了条件7 後半
+ * 「2度目の操作は画面上『申請済み』として伝わり、処理失敗の文言にならない」を満たさない。
+ *
+ * 判定の規則は `uq_quest_app_per_member UNIQUE (quest_id, member_id)`（`0017` L78-80）と
+ * 同じで、**ステータスを問わず全行が対象**である。ここでステータスを絞ると、
+ * 事前照会が素通りした INSERT が一意制約に当たる。
+ */
+export async function hasAppliedToQuest(params: {
+  questId: string;
+  memberId: string;
+}): Promise<boolean> {
+  const supabase = await createServerSupabaseClient();
+
+  const { data } = await supabase
+    .from("quest_applications")
+    .select("application_id")
+    .eq("quest_id", params.questId)
+    .eq("member_id", params.memberId)
+    .limit(1);
+
+  return data !== null && data.length > 0;
+}
 
 /**
  * 受注申請を1件作る。
  *
  * ## 二重申請を弾く
  *
- * 同じクエストに対して生きている申請（`申請中` / `指示済み` / `承認`）があれば作らない。
- * DB に一意制約が無いため**アプリ側で見る**。競合すると2件入りうるが、
- * その場合は運営の審査画面（画面ID B5）で同じ人の申請が並んで見えるため気づける。
+ * 判定の正本は DB の `uq_quest_app_per_member UNIQUE (quest_id, member_id)`
+ * （`0017` L78-80）であり、**ステータスを問わず全行が対象**である。アプリ側の事前照会も
+ * 同じ規則で書き、取り下げ（`キャンセル`）や `差戻し` を経た再申請も「申請済み」として扱う。
+ * ここでステータスを絞ると、事前照会が素通りした INSERT が一意制約に当たり、
+ * 利用者には「時間をおいて再試行してください」と表示される（本来は申請済みである）。
+ *
+ * 事前照会と INSERT の間で競合したときのために、`23505` も同じ `duplicate` へ写す。
  */
 export async function createQuestApplication(params: {
   questId: string;
@@ -30,15 +78,7 @@ export async function createQuestApplication(params: {
 }): Promise<CreateApplicationResult> {
   const supabase = await createServerSupabaseClient();
 
-  const { data: existing } = await supabase
-    .from("quest_applications")
-    .select("application_id")
-    .eq("quest_id", params.questId)
-    .eq("member_id", params.memberId)
-    .in("status", ["申請中", "指示済み", "承認"])
-    .limit(1);
-
-  if (existing !== null && existing.length > 0) {
+  if (await hasAppliedToQuest(params)) {
     return { ok: false, reason: "duplicate" };
   }
 
@@ -48,7 +88,16 @@ export async function createQuestApplication(params: {
     .select("application_id")
     .maybeSingle();
 
-  if (error || !data) {
+  if (error) {
+    if (error.code === UNIQUE_VIOLATION) {
+      return { ok: false, reason: "duplicate" };
+    }
+    if (error.code === CHECK_VIOLATION) {
+      return { ok: false, reason: "unavailable" };
+    }
+    return { ok: false, reason: "failed" };
+  }
+  if (!data) {
     return { ok: false, reason: "failed" };
   }
   return { ok: true, applicationId: data.application_id as string };
