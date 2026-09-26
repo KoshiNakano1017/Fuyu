@@ -34,11 +34,19 @@ export type StayRecord = {
   adultsCount: number;
   childrenCount: number;
   status: string;
+  /** 取り消した日時。`null`／未指定なら取り消されていない（v13 §5.2.2「削除方式」） */
+  cancelledAt?: string | null;
+  /** 取り消しの種別（`会員都合` / `ノーショー` / `運営都合`） */
+  cancelReasonType?: string | null;
+  /** 取り消しの自由記述理由（v13 §5.2.2「理由入力」＝必須） */
+  cancelReason?: string | null;
 };
 
 export type StayHistoryRow = StayRecord & {
   nights: number;
   isStaying: boolean;
+  /** 取り消された滞在。**行は消さず取消線で出す**（v13 §7 L2541 ／ §5.6.8） */
+  isCancelled: boolean;
   /** その滞在で使った部屋。**空なら「部屋未割当」**（空欄にしない／§5.6.8） */
   rooms: RoomAssignmentEntry[];
 };
@@ -84,6 +92,9 @@ export function buildStayHistory(params: {
       ...stay,
       nights: nightsBetween(stay.checkInDate, stay.checkOutDate),
       isStaying: stay.status === "staying",
+      // 取り消しは `status` で判定する。`cancelled_at` は `0014` で後から入った列であり、
+      // それ以前にキャンセルされた行では空のことがある（列が空でも取消の事実は消えない）。
+      isCancelled: stay.status === "cancelled",
       rooms: params.assignments
         .filter((assignment) => assignment.checkinId === stay.checkinId)
         .sort((left, right) => left.startedAt.localeCompare(right.startedAt)),

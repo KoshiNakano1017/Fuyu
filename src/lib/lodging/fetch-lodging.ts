@@ -220,6 +220,8 @@ export async function fetchMyStays(memberId: string): Promise<StayEntry[]> {
 
   const { data, error } = await supabase
     .from("check_ins")
+    // ★ キャンセルの日時と理由も読む。本人は「運営によりキャンセルされた」ことと
+    //   その日時・理由を自分の履歴で読めなければならない（v13 §5.2.2「本人への表示」）。
     .select(
       "checkin_id, member_id, room_type, check_in_date, check_out_date, adults_count, children_count, status, note, cancelled_at, cancel_reason_type, cancel_reason",
     )

@@ -49,6 +49,7 @@ import { todayInJapan } from "@/lib/japan-time";
 import {
   adjustStayTicketsAction,
   cancelOrderAction,
+  cancelStayAction,
   changeStayAction,
   editSlipAction,
   issueFirstVisitCashbackAction,
@@ -259,7 +260,11 @@ export default async function CustomerDetailPage({
         adjust={adjustStayTicketsAction}
       />
 
-      <StayHistorySection history={stayHistory} />
+      {/*
+        宿泊履歴（v13 §5.6.8）＋ 予約のキャンセル・ノーショー（WBS 3-3 ／ v13 §5.2.2）。
+        正本が定める**操作場所は顧客管理画面**である（§5.2.2「操作場所」／ §6 L2344）。
+      */}
+      <StayHistorySection history={stayHistory} cancelStay={cancelStayAction} />
 
       {/*
         滞在中の宿泊形態・部屋・日程・人数の変更（WBS 3-10 ／ v13 §5.6.9）。
