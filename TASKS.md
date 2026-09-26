@@ -16,6 +16,44 @@
 
 ## バックログ
 
+## [2026-09-26] 滞在中の宿泊形態・部屋・日程・人数の変更（WBS `3-10` ／ v13 §5.6.9） — DONE
+
+オーナー指示（2026-09-26）の順1。**`3-10` → `3-7` → `3-5c` → 仕上げ段階（実装70〜95%）38件**という
+実装順序も併せて記録した（決定ログ §25-1 ／ `WBS_Phase1.md` §19-2d）。
+
+**やったこと**
+
+| 層 | 成果物 |
+| --- | --- |
+| DB | `supabase/migrations/0041_check_in_changes.sql` — 変更履歴 `check_in_changes`（追記専用・理由必須・staff のみ）／`check_in_state_on(checkin_id, date)`／`v_room_availability` の差し替え／`rooms.room_type` 不変トリガー |
+| 判定 | `src/lib/lodging/stay-changes.ts`（純関数）— 変更可否・残枠の再判定・**夜ごとの形態の復元**・泊単位の宿泊費 |
+| 読み書き | `src/lib/lodging/stay-change-store.ts` — 変更できる滞在／他人の占有の展開／履歴 ／ 履歴→本体→部屋割当の順で書く |
+| 画面 | `src/components/customers/StayChangeSection.tsx` ＋ 顧客詳細（`/admin/customers/[memberId]`）に「滞在の変更」節。Server Action は `changeStayAction` |
+| 試験 | `tests/stay-change.test.ts`（36件）・`tests/db/stay-changes.test.ts`（18件） |
+| 文書 | `DB物理設計.md` §3-15 新設・§3-12 注記／`画面設計.md` C9／`API設計.md` §2-2／`WBS_Phase1.md`（`3-10` 行・§19-2d）／`CONSOLIDATED_DECISIONS.md` §25 |
+
+★ **履歴を正本にした**（§25-2）。`check_ins` の上書きだけでは「3泊目から移った」事実が消え、
+**滞在全体が新しい形態の単価で塗り替わる**（v13 §5.6.9 が明示的に禁じている振る舞い）。
+★ **残枠は「その夜に効いている形態・人数」で数える**（§25-3）。差し替え前のビューは現在の形態で全泊を数えており、
+「明日からコテージへ移る」変更を入れた瞬間に**今夜のキャンプサイトが空き枠として返っていた**（ダブルブッキング）。
+★ **`rooms.room_type` はトリガーで不変**（§25-4）。`service_role` も RLS を迂回するため、関門はトリガーでなければならない。
+
+**実測（ローカル PostgreSQL 16 に `0006`・`0014`・`0015`・`0041` を適用）**:
+キャンプサイト2名の滞在（+10〜+13）に「+12 からコテージ」の変更を入れると、
+占有は **+10・+11 = キャンプサイト2 ／ +12 = コテージ1棟**。`check_in_state_on()` は `campsite,campsite,cottage` を返す。
+理由が空白だけ・変更が1つも無い・変更前=変更後 の3種はいずれも `23514` で拒否。
+`rooms.room_type` の UPDATE は `42501`、`status` の変更は通る。
+
+**⚠️ 残作業（このタスクの外）**
+
+1. **dev Supabase へ `0041` が未適用**。`npx supabase db push` はオーナー作業（CLAUDE.md §6.3 ／ 本リポジトリは自動適用しない）。
+   `[2026-09-22 18:30] dev Supabase が main より11本分古い` と同じ列に並ぶ。**適用まで `tests/db/stay-changes.test.ts` は手元で赤**（CI は `supabase start` の新規スタックなので緑）
+2. **宿泊費の請求経路が Phase 1 に無い**ため、差額は画面表示までにとどめた（決定ログ §25-5）。
+   `3-4`・`7-2` の延長で宿泊費が伝票になった時点で、§5.6.5 の未処理差額へ載せる配線を足す
+3. モック `prototype_v15.html` が未追随（`3-10` の設計進捗が 80% で止まっているのはこれが理由 ／ WBS `18-1`）
+4. `8-6`（宿泊履歴）へ宿泊費（Uii 主・円 副）を出す結合。算定は本タスクの `nightlyLodgingCharge()` が使える
+
+
 ## [2026-09-26] 同伴者の宿泊者名簿UI（Issue #156 ／ WBS `3-2` チェックイン／チェックアウト操作（QR）の残り） — DONE
 
 v13 §5.2.7「同伴者も1名につき1名簿行」の UI。これで `3-2` の残作業が無くなった

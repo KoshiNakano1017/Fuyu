@@ -119,6 +119,7 @@ up: "[[浮遊街アプリ 総合要件定義・設計書_v13]]"
 | DELETE | `/api/checkins/{id}` | 予約キャンセル・ノーショー（論理削除、理由必須） | core_member, admin | `check_ins`, `room_assignments` |
 | POST | `/api/checkins/{id}/room-assignments` | 部屋割当 | core_member, admin | `room_assignments` |
 | PATCH | `/api/room-assignments/{id}/move` | 部屋移動（既存終了＋新規追加） | core_member, admin | `room_assignments` |
+| PATCH | `/api/checkins/{id}` | **滞在の変更**（宿泊形態・部屋・退去日・大人／子ども ／ v13 §5.6.9・WBS `3-10`。**理由必須**・変更後の残枠を再判定し満室なら 409）。**実装は Server Action**（`changeStayAction` ／ 顧客管理画面から呼ぶ）であり、公開 HTTP エンドポイントは置いていない | core_member, admin | `check_in_changes`（追記）、`check_ins`（現在値）、`room_assignments`（旧割当を終了し新規追加） |
 | GET | `/api/rooms?status=available` | 空き部屋一覧 | core_member, admin | `rooms` |
 | GET | `/api/admin/stay-calendar` | 宿泊予定カレンダー（**2026-08-20：ドラフト保留を解除**。§9 #30-⑤ 決着によりGoogleカレンダー同等の操作感で確定）。**2026-08-23：日別の食数サマリー（朝/昼/夜）を含める**（v13 §5.4.1b） | core_member, admin | `check_ins`×`room_assignments`×`rooms`×`meal_reservations` |
 
@@ -679,3 +680,4 @@ paths:
 | 2026-08-16（重要変更） | **Streamlit継続方針の確定反映**（2026-08-16オーナー最終判断）。ナレッジ登録・編集は当面line-rag-bot Streamlit で行い、REST API は実装しない決定を反映。§2-6の`POST /api/knowledge`・`PATCH /api/knowledge/{id}/publish`・`POST /api/escalations/{id}/resolve`を削除。`GET /api/escalations`のみ読み取り専用として残す。§5のオーナー確認事項 #4 を「解消済み」に変更。 |
 | 2026-08-16（再確定） | **`GET /api/escalations`も削除**。読み取り専用APIも含めてline-rag-bot連携APIは一切実装しない方針が確定（オーナー最終判断）。§2-6を全面書き換えし、本領域のエンドポイントをゼロ件に。§4 Webhook一覧の line-rag-bot 行を「API連携なし」に変更。 |
 | 2026-08-16（オーナー指示反映） | ①**呼称変更**：§2-6見出しの説明文をline-rag-bot単独表記から「浮遊街コンシェルジュ（line-rag-bot）」表記に統一。②**§2-7 会員一括インポートAPI（`preview`/`confirm`）を実装不要に変更**：画面設計.md C6と連動。③**§2-10 メディアライブラリAPIを新設**：`POST /api/media/signed-upload-url`等6エンドポイント。画面設計.md A10・DB物理設計.md §3-7と連動。 |
+| **2026-09-26** | **§2-2 に `PATCH /api/checkins/{id}`（滞在の変更）を追加**（v13 §5.6.9 ／ WBS `3-10`）。宿泊形態・部屋・退去日・人数の変更で、**理由必須**・変更後の残枠を再判定し満室なら拒否する。⚠️ **実装は Server Action（`changeStayAction`）であり、公開 HTTP エンドポイントは置いていない**（顧客管理画面からのみ呼ぶ）。対応DB は `check_in_changes`（追記）・`check_ins`（現在値）・`room_assignments`（旧割当を終了し新規追加）。 |
