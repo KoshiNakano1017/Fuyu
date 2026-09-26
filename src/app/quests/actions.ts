@@ -14,7 +14,11 @@ import {
   membershipApplyDenialMessage,
 } from "@/lib/membership/registration";
 import { canApplyToQuest } from "@/lib/quests/application-gate";
-import { createQuestApplication, type CreateApplicationResult } from "@/lib/quests/applications";
+import {
+  createQuestApplication,
+  hasAppliedToQuest,
+  type CreateApplicationResult,
+} from "@/lib/quests/applications";
 import { fetchQuestById, readQuestBoardViewer } from "@/lib/quests/fetch-board";
 
 /**
@@ -107,6 +111,14 @@ export async function applyToQuestAction(
   const quest = await fetchQuestById(questId);
   if (quest === null) {
     return { status: "error", message: "クエストが見つかりません。" };
+  }
+
+  // 二重申請の判定を、可否の判定より**先**に置く。逆順だと、`recruit_count` の既定値が 1 のため
+  // 申請者自身の行でそのクエストが満了になり、2度目の操作が「申請済み」ではなく一律の拒否文言で返る
+  // （完了条件7 後半「2度目は処理失敗の文言にならない」）。ここは認可ではなく、本人が自分の
+  // 申請行を引くだけなので判定点は増えていない（v13 §5.9.3）。
+  if (await hasAppliedToQuest({ questId, memberId: viewer.memberId })) {
+    return { status: "error", message: applyDenialMessage("duplicate") };
   }
 
   if (!canApplyToQuest(viewer, quest)) {

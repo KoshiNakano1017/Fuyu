@@ -24,6 +24,42 @@ const UNIQUE_VIOLATION = "23505";
 const CHECK_VIOLATION = "23514";
 
 /**
+ * その会員が、そのクエストへ既に受注申請しているか。
+ *
+ * ## 認可の判定ではない（判定点は増えていない）
+ *
+ * 可否を決めるのは `canApplyToQuest()` ただ1箇所のままである（v13 §5.9.3）。
+ * ここが引くのは**本人が自分の申請行の有無を確かめる**ことだけで、他人の行も件数も返さない
+ * （`0017` の `quest_applications_select_self` が行を本人に絞る）。
+ *
+ * ## 呼び出し側は、これを枠の判定より先に置く
+ *
+ * 逆順にすると、`recruit_count` の既定値が 1（`0007` L73-74）であるため
+ * **申請者自身の行でそのクエストが満了になり**、2度目の操作が「すでに申請済み」ではなく
+ * 一律の拒否文言（「このクエストは受注できません」）になる。これは完了条件7 後半
+ * 「2度目の操作は画面上『申請済み』として伝わり、処理失敗の文言にならない」を満たさない。
+ *
+ * 判定の規則は `uq_quest_app_per_member UNIQUE (quest_id, member_id)`（`0017` L78-80）と
+ * 同じで、**ステータスを問わず全行が対象**である。ここでステータスを絞ると、
+ * 事前照会が素通りした INSERT が一意制約に当たる。
+ */
+export async function hasAppliedToQuest(params: {
+  questId: string;
+  memberId: string;
+}): Promise<boolean> {
+  const supabase = await createServerSupabaseClient();
+
+  const { data } = await supabase
+    .from("quest_applications")
+    .select("application_id")
+    .eq("quest_id", params.questId)
+    .eq("member_id", params.memberId)
+    .limit(1);
+
+  return data !== null && data.length > 0;
+}
+
+/**
  * 受注申請を1件作る。
  *
  * ## 二重申請を弾く
@@ -42,14 +78,7 @@ export async function createQuestApplication(params: {
 }): Promise<CreateApplicationResult> {
   const supabase = await createServerSupabaseClient();
 
-  const { data: existing } = await supabase
-    .from("quest_applications")
-    .select("application_id")
-    .eq("quest_id", params.questId)
-    .eq("member_id", params.memberId)
-    .limit(1);
-
-  if (existing !== null && existing.length > 0) {
+  if (await hasAppliedToQuest(params)) {
     return { ok: false, reason: "duplicate" };
   }
 

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { createQuestApplication } from "@/lib/quests/applications";
+import { createQuestApplication, hasAppliedToQuest } from "@/lib/quests/applications";
 import { canApplyToQuest } from "@/lib/quests/application-gate";
 import { fetchQuestById, readQuestBoardViewer } from "@/lib/quests/fetch-board";
 
@@ -13,6 +13,12 @@ type RouteContext = {
  * 事前のゲート拒否と、DB 側の上限ガード（0041）に当たった場合の両方でこれを返す。
  */
 const REJECTED_MESSAGE = "このクエストは受注できません";
+
+/**
+ * 既に申請している場合の文言。本人が自分の状態を知るだけで、クエストの内情は漏れない。
+ * 事前照会（`hasAppliedToQuest()`）と、競合時の一意制約違反の両方でこれを返す。
+ */
+const ALREADY_APPLIED_MESSAGE = "すでに申請済みです";
 
 /**
  * `POST /api/quests/{questId}/applications` — 受注申請（API設計 §138）。
@@ -45,6 +51,14 @@ export async function POST(_request: Request, context: RouteContext): Promise<Ne
     return NextResponse.json({ error: "クエストが見つかりません" }, { status: 404 });
   }
 
+  // 二重申請の判定を、可否の判定より**先**に置く。逆順だと、募集人数の既定値が 1 のため
+  // 申請者自身の行でそのクエストが満了になり、2度目の操作が「すでに申請済みです」ではなく
+  // 一律の拒否文言（403）で返る（完了条件7 後半を満たさなくなる）。
+  // ここは認可ではなく本人が自分の申請行を引くだけなので、判定点は増えていない（v13 §5.9.3）。
+  if (await hasAppliedToQuest({ questId, memberId: viewer.memberId })) {
+    return NextResponse.json({ error: ALREADY_APPLIED_MESSAGE }, { status: 409 });
+  }
+
   if (!canApplyToQuest(viewer, quest)) {
     // 拒否の理由（施錠なのか締切済みなのか）は返さない。返すと、詳細を伏せている
     // 施錠クエストの状態を推測する手がかりになる（v13 §5.10.6 末尾）。
@@ -57,7 +71,7 @@ export async function POST(_request: Request, context: RouteContext): Promise<Ne
     if (result.reason === "duplicate") {
       // 二重申請は「もう申請済み」であることを伝えてよい。本人の自分の状態であり、
       // 施錠クエストの内情を漏らすことにはならない。
-      return NextResponse.json({ error: "すでに申請済みです" }, { status: 409 });
+      return NextResponse.json({ error: ALREADY_APPLIED_MESSAGE }, { status: 409 });
     }
     if (result.reason === "unavailable") {
       // 枠が無い場合。ゲート拒否と同じ文言・同じステータスで返す（理由を区別しない）。
