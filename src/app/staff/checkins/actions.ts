@@ -13,7 +13,7 @@ import {
 } from "@/lib/eumo/store";
 import type { SubmitState } from "@/lib/forms/submit-state";
 import { cancelStay } from "@/lib/lodging/cancellation";
-import { decideCheckIn, decideCheckOut } from "@/lib/lodging/checkin-ops";
+import { decideCheckIn, decideCheckOut, decideStayCancellation } from "@/lib/lodging/checkin-ops";
 import { fetchCheckInStatus, updateCheckInStatus } from "@/lib/lodging/fetch-checkin-board";
 
 /**
@@ -29,6 +29,8 @@ const MESSAGE: Record<string, string> = {
   already_staying: "この方は既に滞在中です。",
   already_checked_out: "この滞在は退館済みです。",
   cancelled: "この予約はキャンセル済みです。",
+  already_cancelled: "この予約は既にキャンセル済みです。",
+  already_arrived: "入館済みの滞在は取り消せません。途中退去はチェックアウトで記録してください。",
   not_staying: "滞在中の方だけが退館できます。",
   not_found: "対象の滞在が見つかりません。",
   conflict: "別の端末が先に操作しました。画面を再読み込みしてください。",
@@ -178,6 +180,8 @@ export async function cancelStayAction(
 ): Promise<SubmitState> {
   const viewer = await readViewer();
   if (!viewer.signedIn || (viewer.role !== "admin" && viewer.role !== "core_member")) {
+    // 状態を読む前に断る。街人・ゲストへ「予約が見つからない」ではなく
+    // 「権限が無い」を返すため（規則そのものは `decideStayCancellation()` と同じ）。
     return fail("not_staff");
   }
 
@@ -186,11 +190,13 @@ export async function cancelStayAction(
   if (current === null) {
     return fail("not_found");
   }
-  if (current.status === "staying" || current.status === "checked_out") {
-    return {
-      status: "error",
-      message: "入館済みの滞在は取り消せません。途中退去はチェックアウトで記録してください。",
-    };
+
+  // 顧客管理画面（§5.2.2 の定める操作場所）と**同一の判定**を通す。
+  // 街人・ゲストは `readViewer()` の段で既に断っているため、ここは二重防御である
+  // （画面を経由しない直接呼び出しに備える ／ v13 §5.9.3）。
+  const decision = decideStayCancellation({ actorRole: viewer.role, status: current.status });
+  if (!decision.allowed) {
+    return fail(decision.reason);
   }
 
   const result = await cancelStay({

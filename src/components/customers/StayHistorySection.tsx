@@ -1,11 +1,16 @@
 import type { StayHistory, StayHistoryRow } from "@/lib/customers/stay-history";
-import { formatCancelledAt } from "@/lib/lodging/checkin-ops";
+import { formatCancelledAt, isCancellableStayStatus } from "@/lib/lodging/checkin-ops";
 
 import { StayCancelForm, type StayCancelAction } from "./StayCancelForm";
 
-/** 取り消し（キャンセル・ノーショー）の対象になる状態＝**入館前の予約だけ**（v13 §5.2.2「対象」）。 */
+/**
+ * 取り消しフォームを出す行か。
+ *
+ * 判定は `isCancellableStayStatus()`（Server Action の `decideStayCancellation()` と同じ述語）へ
+ * 委ねる。ここに条件を書き写すと、**フォームは出るのに押すと拒否される**食い違いが生まれる。
+ */
 function canCancel(row: StayHistoryRow): boolean {
-  return row.status === "pre_registered" || row.status === "confirmed";
+  return isCancellableStayStatus(row.status);
 }
 
 /**

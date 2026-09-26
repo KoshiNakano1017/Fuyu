@@ -29,6 +29,7 @@ import {
 import { canIssueSettlementQr } from "@/lib/billing/settlement-qr";
 import { judgeFirstVisitCashback } from "@/lib/eumo/grants";
 import { cancelStay } from "@/lib/lodging/cancellation";
+import { decideStayCancellation } from "@/lib/lodging/checkin-ops";
 import { fetchCheckInStatus } from "@/lib/lodging/fetch-checkin-board";
 import {
   decideStayTicketAdjustment,
@@ -587,8 +588,11 @@ export async function cancelStayAction(
   if (current === null) {
     return fail("stay_not_found");
   }
-  if (current.status === "staying" || current.status === "checked_out") {
-    return fail("stay_already_arrived");
+  // 「誰が」「どの状態の予約を」取り消せるかは `decideStayCancellation()` が持つ。
+  // チェックイン板（`/staff/checkins`）の同じ操作と**同一の判定**を通す（条件を2箇所に書かない）。
+  const decision = decideStayCancellation({ actorRole: viewer.role, status: current.status });
+  if (!decision.allowed) {
+    return fail(decision.reason === "already_arrived" ? "stay_already_arrived" : decision.reason);
   }
 
   const result = await cancelStay({
