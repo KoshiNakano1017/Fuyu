@@ -6,17 +6,17 @@
   "phase": "review",
   "risk": "high",
   "attempts": {
-    "infra": 516,
+    "infra": 0,
     "verify": 0,
     "review": 0
   },
   "lastFingerprint": {
-    "infra": "2b93be1a72a0e9e8",
+    "infra": null,
     "verify": null,
     "review": null
   },
   "repeatedFingerprint": {
-    "infra": 179,
+    "infra": 0,
     "verify": 0,
     "review": 0
   },
