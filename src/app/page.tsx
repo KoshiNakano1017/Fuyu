@@ -1,7 +1,12 @@
 import Link from "next/link";
 
 import { readViewer } from "@/lib/auth/session";
-import { visibleAreasFor } from "@/lib/auth/navigation";
+import {
+  ADMIN_MENU_LABEL,
+  adminMenuAreasFor,
+  dailyAreasFor,
+  type Area,
+} from "@/lib/auth/navigation";
 import { canRegister } from "@/lib/shopping/status";
 
 import { ShoppingRegisterForm } from "./shopping/ShoppingRegisterForm";
@@ -61,7 +66,8 @@ export default async function HomePage() {
   }
 
   // `home` 自身はこの画面なので一覧から外す。自分へのリンクを並べても行き先が無い。
-  const areas = visibleAreasFor(viewer.role).filter((area) => area.key !== "home");
+  const daily = dailyAreasFor(viewer.role).filter((area) => area.key !== "home");
+  const managed = adminMenuAreasFor(viewer.role);
 
   return (
     <main className="mx-auto flex max-w-3xl flex-col gap-6 p-6">
@@ -74,18 +80,33 @@ export default async function HomePage() {
         </section>
       )}
 
-      <ul className="grid gap-3 sm:grid-cols-2">
-        {areas.map((area) => (
-          <li key={area.key}>
-            <Link
-              href={area.path}
-              className="block rounded border border-neutral-200 bg-white p-4 hover:border-neutral-400"
-            >
-              <span className="font-medium">{area.label}</span>
-            </Link>
-          </li>
-        ))}
-      </ul>
+      <AreaGrid areas={daily} />
+
+      {managed.length > 0 && (
+        <section className="flex flex-col gap-3">
+          {/* 運営専用はここでも束ねる（§5.9.5）。ナビと並びを揃えると探す場所が1つになる。 */}
+          <h2 className="text-sm font-medium text-neutral-700">{ADMIN_MENU_LABEL}</h2>
+          <AreaGrid areas={managed} />
+        </section>
+      )}
     </main>
+  );
+}
+
+/** 領域リンクの並び。縦に折り返すだけで、横スクロールを到達手段にしない（§5.9.5）。 */
+function AreaGrid({ areas }: { areas: readonly Area[] }) {
+  return (
+    <ul className="grid gap-3 sm:grid-cols-2">
+      {areas.map((area) => (
+        <li key={area.key}>
+          <Link
+            href={area.path}
+            className="block rounded border border-neutral-200 bg-white p-4 hover:border-neutral-400"
+          >
+            <span className="font-medium">{area.label}</span>
+          </Link>
+        </li>
+      ))}
+    </ul>
   );
 }

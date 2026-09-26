@@ -39,12 +39,26 @@ export type AreaKey =
   | "masterData"
   | "rolePreview";
 
+/**
+ * ナビの階層（v13 §5.9.5「グルーピング」）。
+ *
+ * - `daily` … 現場で毎日使うもの。常時表示の第1階層に平置きする
+ * - `admin` … 運営専用。「⚙️ 管理」メニューへ束ねる
+ *
+ * ⚠️ **`admin` は「管理者だけ」という意味ではない。** 階層（どこに置くか）と
+ *    可視性（誰に見せるか）は別の軸であり、後者は `visibility` が持つ。
+ *    店員用タブレットは `core_member` にも見えるが階層は `admin` である。
+ */
+export type NavGroup = "daily" | "admin";
+
 export type Area = {
   key: AreaKey;
   /** 利用者に見せる名称。内部識別子をそのまま出さない。 */
   label: string;
   /** 経路。ナビの href とサーバサイド認可の対象を一致させるために持つ。 */
   path: string;
+  /** 常時表示（第1階層）か、「⚙️ 管理」メニューの中か（§5.9.5）。 */
+  group: NavGroup;
   visibility: Record<Role, Visibility>;
 };
 
@@ -85,11 +99,14 @@ const ADMIN_ONLY: Record<Role, Visibility> = {
  *    アプリ内チャット UI は持たず、LINE（line-rag-bot）へ一本化したため**載せない**。
  */
 export const AREAS: readonly Area[] = [
-  { key: "home", label: "ホーム", path: "/", visibility: ALL },
+  // ── 第1階層（常時表示）。§5.9.5 の「現場で毎日使うもの」＝7項目でちょうど上限。
+  //    ここへ8つ目を足すときは `admin` 側へ移す項目を必ず1つ決める（`NAV_DAILY_LIMIT`）。
+  { key: "home", label: "ホーム", path: "/", group: "daily", visibility: ALL },
   {
     key: "quests",
     label: "クエスト",
     path: "/quests",
+    group: "daily",
     // ゲストは △（限定クエストのみ）。§6 権限マトリクスの「〇（限定あり）」と同義。
     visibility: { ...ALL, guest: "limited" },
   },
@@ -97,24 +114,85 @@ export const AREAS: readonly Area[] = [
     key: "shoppingList",
     label: "買い物リスト",
     path: "/shopping",
+    group: "daily",
     // ゲストは △（閲覧のみ・登録不可／v13 §5.12.1・§6 ／ 2026-09-22 オーナー確定）。
     // 経路自体は開ける。登録フォームと操作ボタンを描画しないのはページ側の責務。
     visibility: { ...ALL, guest: "limited" },
   },
-  { key: "cafeOrder", label: "カフェ注文", path: "/orders", visibility: ALL },
-  { key: "myPage", label: "マイページ", path: "/me", visibility: ALL },
-  { key: "upload", label: "アップロード", path: "/upload", visibility: ALL },
-  { key: "stayReservation", label: "宿泊予約", path: "/reservations", visibility: ALL },
+  { key: "cafeOrder", label: "カフェ注文", path: "/orders", group: "daily", visibility: ALL },
+  { key: "myPage", label: "マイページ", path: "/me", group: "daily", visibility: ALL },
+  { key: "upload", label: "アップロード", path: "/upload", group: "daily", visibility: ALL },
+  {
+    key: "stayReservation",
+    label: "宿泊予約",
+    path: "/reservations",
+    group: "daily",
+    visibility: ALL,
+  },
 
-  { key: "staffTablet", label: "店員用タブレット", path: "/staff/orders", visibility: STAFF_ONLY },
-  { key: "questApproval", label: "クエスト承認・査定", path: "/staff/quests", visibility: STAFF_ONLY },
-  { key: "knowledgeForm", label: "ナレッジ登録", path: "/staff/knowledge", visibility: STAFF_ONLY },
-  { key: "eumoGrants", label: "Eumo給付一覧", path: "/staff/eumo", visibility: STAFF_ONLY },
-  { key: "stayCalendar", label: "宿泊予定カレンダー", path: "/staff/calendar", visibility: STAFF_ONLY },
+  // ── 「⚙️ 管理」メニューの中（§5.9.5「グルーピング」）。
+  //    §5.9.5 が名前を挙げているのは Eumo給付一覧・マスタ管理・宿泊予定カレンダー・
+  //    今日のサマリー・顧客管理（後2つは管理ダッシュボードの中）だが、
+  //    店員用タブレット・クエスト承認・ナレッジ登録も**ここへ束ねる**。
+  //    理由: 第1階層は7項目で埋まっており、運営ロールにだけ項目を足すと
+  //    「平置きの上限」を破る。上限は §5.9.5 が無条件で定めた要件である。
+  {
+    key: "staffTablet",
+    label: "店員用タブレット",
+    path: "/staff/orders",
+    group: "admin",
+    visibility: STAFF_ONLY,
+  },
+  {
+    key: "questApproval",
+    label: "クエスト承認・査定",
+    path: "/staff/quests",
+    group: "admin",
+    visibility: STAFF_ONLY,
+  },
+  {
+    key: "knowledgeForm",
+    label: "ナレッジ登録",
+    path: "/staff/knowledge",
+    group: "admin",
+    visibility: STAFF_ONLY,
+  },
+  {
+    key: "eumoGrants",
+    label: "Eumo給付一覧",
+    path: "/staff/eumo",
+    group: "admin",
+    visibility: STAFF_ONLY,
+  },
+  {
+    key: "stayCalendar",
+    label: "宿泊予定カレンダー",
+    path: "/staff/calendar",
+    group: "admin",
+    visibility: STAFF_ONLY,
+  },
 
-  { key: "adminDashboard", label: "管理ダッシュボード", path: "/admin", visibility: ADMIN_ONLY },
-  { key: "masterData", label: "マスタ管理", path: "/admin/master", visibility: ADMIN_ONLY },
-  { key: "rolePreview", label: "ロール切替プレビュー", path: "/admin/preview", visibility: ADMIN_ONLY },
+  {
+    key: "adminDashboard",
+    label: "管理ダッシュボード",
+    path: "/admin",
+    group: "admin",
+    visibility: ADMIN_ONLY,
+  },
+  {
+    key: "masterData",
+    label: "マスタ管理",
+    path: "/admin/master",
+    group: "admin",
+    visibility: ADMIN_ONLY,
+  },
+  {
+    key: "rolePreview",
+    label: "ロール切替プレビュー",
+    path: "/admin/preview",
+    group: "admin",
+    visibility: ADMIN_ONLY,
+  },
 ] as const;
 
 /** そのロールに対する表示可否。 */
@@ -131,6 +209,41 @@ export function visibilityFor(area: Area, role: Role): Visibility {
  */
 export function visibleAreasFor(role: Role): Area[] {
   return AREAS.filter((area) => visibilityFor(area, role) !== "hidden");
+}
+
+/**
+ * 常時表示するナビ項目の上限（v13 §5.9.5「平置きの上限」）。
+ *
+ * 2026-08-25 のプロトタイプ確認で、12タブを横1列に並べたバーの ⑩⑪⑫ が
+ * 初期表示の画面外へ押し出され、**実装済みのマスタ管理へ管理者が到達できなかった**
+ * （§9 #54）。項目数そのものを抑えることが対処である。
+ */
+export const NAV_DAILY_LIMIT = 7;
+
+/** 「⚙️ 管理」メニューの見出し（§5.9.5）。歯車だけにせず語を添える。 */
+export const ADMIN_MENU_LABEL = "⚙️ 管理";
+
+/**
+ * 第1階層に平置きする領域（§5.9.5）。**`NAV_DAILY_LIMIT` を超えない。**
+ *
+ * 超えたら例外を投げる。ここを「多い分は切り捨てる」実装にすると、
+ * 8つ目を足した人には**画面から項目が1つ消えただけ**に見え、
+ * 気づかれないまま到達不能な画面が生まれる（#54 と同じ失敗）。
+ */
+export function dailyAreasFor(role: Role): Area[] {
+  const areas = visibleAreasFor(role).filter((area) => area.group === "daily");
+  if (areas.length > NAV_DAILY_LIMIT) {
+    throw new Error(
+      `常時表示のナビ項目が ${areas.length} 件あります（上限 ${NAV_DAILY_LIMIT} ／ v13 §5.9.5）。` +
+        "いずれかを group: \"admin\" へ移してください。",
+    );
+  }
+  return areas;
+}
+
+/** 「⚙️ 管理」メニューへ束ねる領域（§5.9.5）。空なら見出しごと描画しない。 */
+export function adminMenuAreasFor(role: Role): Area[] {
+  return visibleAreasFor(role).filter((area) => area.group === "admin");
 }
 
 /** 経路からその領域を引く。サーバサイド認可が「この URL は誰に許すか」を判断するのに使う。 */
